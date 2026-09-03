@@ -1,0 +1,66 @@
+                                                                                  
+                                                                                  
+    Consignment Reports                                Zaco Agents (Pty) Ltd (20026)
+                                                                                  
+    Report:   Daily Sales Detail                          Run Date: 2026/08/02 16:40:08
+                                                                                  
+    Market:                                                                       
+    Agent:                                                                        
+    Product:  ALL                                                                 
+    Date Range: 2026/07/27 - 2026/07/27                                           
+                                                                                  
+    TSHWANE MARKET      Farmers Trust (Pre)                                       
+    Delivery ID: 1181705Z Supplier Ref:  Qty Sent: 71 Qty Amended To: Qty Avail: 70
+    Consignment ID: 118170501Z Comment:                                           
+                                                                                  
+    Product:  NECTARINES OTHER CLASS 1 MEDIUM MULTI LAYER TRAYER 11kg             
+      Date Sold  Docket Number Qty Sold Market Avg     Price       Sales Value    
+                                                                                  
+    2026-07-27 PRE*B6G27S89670*01Z  1        R 0.00         R 50.00     R 50.00   
+                                    1                                   R 50.00   
+                                                                                  
+    TSHWANE MARKET      Farmers Trust (Pre)                                       
+    Delivery ID: 1181705Z Supplier Ref:  Qty Sent: 80 Qty Amended To: Qty Avail: 79
+                                                                                  
+    Consignment ID: 118170503Z Comment:                                           
+    Product:  CHERRIES OTHER CLASS 1 SMALL STANDARD TRAY 4.5kg                    
+                                                                                  
+      Date Sold  Docket Number Qty Sold Market Avg     Price       Sales Value    
+    2026-07-27 PRE*B6G27S89671*03Z  1        R 0.00         R 50.00     R 50.00   
+                                    1                                   R 50.00   
+                                                                                  
+    TSHWANE MARKET      Farmers Trust (Pre)                                       
+                                                                                  
+    Delivery ID: 1182465Z Supplier Ref:  Qty Sent: 91 Qty Amended To: Qty Avail: 91
+    Consignment ID: 118246501Z Comment:                                           
+    Product:  CHERRIES OTHER CLASS 1 LARGE STANDARD TRAY 4.5kg                    
+                                                                                  
+      Date Sold  Docket Number Qty Sold Market Avg     Price       Sales Value    
+    2026-07-27 PRE*B6G27S89949*01Z  10       R 0.00         R 200.00  R 2,000.00  
+    2026-07-27 PRE*06G27S89949*01Z -10       R 0.00         R 200.00  R -2,000.00 
+                                                                                  
+                                    0                                    R 0.00   
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                    Page 1/1                                      
+                                                                                  
+                                                                                  
+Powered by TCPDF (www.tcpdf.org)                                                  

@@ -1,0 +1,2928 @@
+<title>ZacoAgents — Statement to Excel</title>
+<style>
+  /* Light only, one theme. Neutrals carry the interface; colour is reserved for
+     things that genuinely need to be noticed -- primary actions, and the review
+     states (matched / needs attention / error). Everything else stays grey so
+     that when colour does appear, it means something. */
+  :root {
+    /* Cool neutral greys -- office software, not warm "document" cream. */
+    --ground: #F5F6F8;      /* page behind the cards        */
+    --surface: #FFFFFF;     /* cards, tables, bars          */
+    --surface-2: #EFF1F4;   /* headers, insets, wells       */
+    --ink: #16191F;         /* charcoal, deliberately not pure black */
+    --ink-soft: #4C5461;
+    --ink-faint: #858D9A;
+    --line: #E2E5EA;
+    --line-strong: #CBD1D9;
+
+    /* Single accent: a restrained corporate blue for primary actions only. */
+    --accent: #1F5FA8;
+    --accent-strong: #17497F;
+    --accent-tint: #E9F0F8;
+
+    /* Semantic status. Green survives here as "correct", not as branding. */
+    --ok: #1E7A4D;    --ok-tint: #E7F4EC;
+    --warn: #9A6410;  --warn-tint: #FBF1DE;
+    --crit: #B23B34;  --crit-tint: #FAE9E7;
+
+    /* Flat and tight. Depth comes from borders, not from glow. */
+    --shadow: 0 1px 2px rgba(16, 24, 40, .05);
+    --shadow-lg: 0 4px 12px -2px rgba(16, 24, 40, .08), 0 2px 4px -2px rgba(16, 24, 40, .05);
+    --radius: 8px;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  /* The `hidden` attribute is applied by the UA stylesheet as `display: none`,
+     which any author rule outranks. Several elements here are `display: flex`
+     (.app, .wb-pill, .user-chip), so without this they stay visible when
+     hidden -- which put the login card *below* the dashboard instead of
+     replacing it. */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  ::selection { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; border: 2px solid var(--ground); background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); background-clip: padding-box; }
+
+  .app { min-height: 100vh; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 0 22px; height: 56px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; font-size: 15.5px; }
+  .brand .glyph { width: 26px; height: 26px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 15px; }
+  .brand .sub { color: var(--ink-faint); font-weight: 500; font-size: 12px; letter-spacing: .02em; }
+  .topbar .spacer { flex: 1; }
+  .wb-pill { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 99px; font-size: 12.5px; }
+  .wb-pill .fi { width: 22px; height: 22px; border-radius: 5px; background: var(--ink-soft); color: #fff; display: grid; place-items: center; font-size: 9px; font-weight: 700; }
+  .wb-pill .v { font-weight: 600; }
+  .wb-pill .n2 { color: var(--ink-faint); }
+  .mode { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; font-size: 11.5px; font-weight: 650; }
+  .mode::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .mode.live { color: var(--ok); background: var(--ok-tint); }
+  .mode.demo { color: var(--warn); background: var(--warn-tint); }
+  .icon-btn { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft); cursor: pointer; display: grid; place-items: center; font-size: 15px; transition: background .15s, color .15s, transform .1s; }
+  .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+  .icon-btn:active { transform: scale(.92); }
+
+  .body { flex: 1; display: grid; grid-template-columns: 232px 1fr; }
+  .rail { border-right: 1px solid var(--line); padding: 26px 18px; background: var(--surface); }
+  .rail h2 { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px 6px; font-weight: 650; }
+  .rail .rail-sub { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+
+  .modules { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  .mod { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--ink-soft); font-family: var(--sans); font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s, color .15s, border-color .15s; }
+  .mod:hover { background: var(--surface-2); color: var(--ink); }
+  .mod .mi { width: 24px; height: 24px; border-radius: 6px; background: var(--surface-2); display: grid; place-items: center; font-size: 12px; color: var(--ink-faint); flex: none; transition: background .15s, color .15s; }
+  .mod .mt { flex: 1; }
+  .mod .mbadge { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-faint); }
+  .mod.active { background: var(--accent-tint); color: var(--accent-strong); border-color: transparent; }
+  .mod.active .mi { background: var(--accent); color: #fff; }
+
+  .placeholder { text-align: center; padding: 64px 30px; }
+  .placeholder .pi { width: 60px; height: 60px; margin: 0 auto 18px; border-radius: 14px; background: var(--surface-2); display: grid; place-items: center; font-size: 26px; color: var(--ink-faint); }
+  .placeholder h2 { margin: 0 0 8px; font-size: 19px; letter-spacing: -.01em; }
+  .placeholder p { margin: 0 auto; color: var(--ink-soft); max-width: 48ch; }
+  .placeholder .stub { display: inline-flex; align-items: center; gap: 7px; margin-top: 22px; padding: 7px 14px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; color: var(--ink-faint); font-weight: 600; }
+  .steps { list-style: none; margin: 0; padding: 0; position: relative; }
+  .steps::before { content: ""; position: absolute; left: 21px; top: 14px; bottom: 14px; width: 2px; background: var(--line); }
+  .step { display: flex; gap: 12px; align-items: flex-start; padding: 8px 6px; border-radius: 9px; position: relative; }
+  .step .dot { width: 30px; height: 30px; border-radius: 50%; flex: none; z-index: 1; display: grid; place-items: center; font-size: 13px; font-weight: 650; background: var(--surface); border: 2px solid var(--line-strong); color: var(--ink-faint); }
+  .step .lbl { padding-top: 4px; }
+  .step .lbl .t { font-weight: 600; font-size: 13.5px; }
+  .step .lbl .d { font-size: 11.5px; color: var(--ink-faint); }
+  .step.done .dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .step.current { background: var(--accent-tint); }
+  .step.current .dot { border-color: var(--accent); color: var(--accent); }
+  .step.todo .lbl .t { color: var(--ink-soft); }
+  .rail .loop-note { margin: 14px 8px 0; font-size: 11.5px; color: var(--ink-faint); display: flex; gap: 7px; align-items: flex-start; }
+
+  .main { padding: 28px 30px 60px; overflow-x: hidden; }
+  .screen { max-width: 1160px; margin: 0 auto; animation: rise .3s ease; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .screen, .toast, .spin { animation: none; } }
+  .head { margin-bottom: 22px; }
+  .head h1 { font-size: 22px; letter-spacing: -.02em; margin: 0 0 5px; text-wrap: balance; }
+  .head p { margin: 0; color: var(--ink-soft); max-width: 64ch; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+  .choice { text-align: left; padding: 22px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; transition: border-color .15s, background .15s, transform .15s, box-shadow .15s; font-family: var(--sans); color: var(--ink); }
+  .choice:hover { border-color: var(--accent); background: var(--accent-tint); }
+  .choice .ci { width: 42px; height: 42px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; font-size: 20px; color: var(--accent); margin-bottom: 12px; }
+  .choice h3 { margin: 0 0 4px; font-size: 15px; }
+  .choice p { margin: 0; font-size: 12.5px; color: var(--ink-soft); }
+  .field { max-width: 340px; }
+  .field label { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 650; margin-bottom: 6px; }
+  .field .req { color: var(--crit); }
+  select, .input { width: 100%; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font-family: var(--sans); font-size: 14px; }
+  select:focus, .input:focus, button:focus-visible, .drop:focus-visible, .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
+
+  .wb-bar { display: flex; align-items: center; gap: 16px; padding: 16px 20px; margin-bottom: 18px; }
+  .wb-bar .fi { width: 40px; height: 40px; border-radius: 8px; background: var(--ink-soft); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+  .wb-bar .fn { font-weight: 650; font-size: 15px; }
+  .wb-bar .fm { font-size: 12.5px; color: var(--ink-faint); }
+  .wb-bar .spacer { flex: 1; }
+
+  .drop { border: 2px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-2); padding: 34px 24px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop:hover { border-color: var(--accent); background: var(--accent-tint); }
+  .drop.over { border-color: var(--accent); background: var(--accent-tint); }
+  .drop .big { width: 44px; height: 44px; margin: 0 auto 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; font-size: 21px; color: var(--accent); }
+  .drop .t { font-weight: 600; }
+  .drop .s { font-size: 12.5px; color: var(--ink-faint); margin-top: 3px; }
+
+  .empty { text-align: center; padding: 46px 24px; color: var(--ink-soft); }
+  .empty .big { width: 46px; height: 46px; margin: 0 auto 12px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; font-size: 22px; color: var(--ink-faint); }
+
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 22px; }
+  .actions .spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 9px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: background .15s, border-color .15s, transform .08s, box-shadow .15s; }
+  .btn.sm { padding: 8px 13px; font-size: 13px; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-strong); }
+  .btn.primary:active { transform: translateY(1px); }
+  .btn.primary:disabled { background: var(--line-strong); color: var(--ink-faint); cursor: not-allowed; }
+  .btn.ghost { background: var(--surface); border-color: var(--line-strong); color: var(--ink); }
+  .btn.ghost:hover { background: var(--surface-2); border-color: var(--ink-faint); }
+  .btn.ghost:active { transform: translateY(1px); }
+
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  .stat .n { font-size: 23px; font-weight: 680; letter-spacing: -.02em; font-family: var(--mono); }
+  .stat .l { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+  .stat.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); background: var(--warn-tint); }
+  .stat.warn .n { color: var(--warn); }
+
+  .banner { display: flex; gap: 11px; align-items: flex-start; padding: 12px 15px; border-radius: 9px; background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line)); font-size: 13px; margin-bottom: 18px; }
+  .banner.bad { background: var(--crit-tint); border-color: color-mix(in srgb, var(--crit) 30%, var(--line)); }
+  .banner.bad .bi { color: var(--crit); }
+  .banner .bi { color: var(--accent); font-size: 15px; }
+  .banner b { font-weight: 650; }
+  .linklike { border: none; background: none; padding: 0; font: inherit; font-weight: 650; color: var(--crit); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .linklike:hover { color: var(--ink); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-faint); margin: 0 2px 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; }
+
+  .table-wrap { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 1560px; font-size: 12.5px; }
+  thead th { text-align: left; padding: 9px 11px; font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-faint); font-weight: 650; background: var(--surface-2); border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0; }
+  thead th.n, tbody td.n { text-align: right; }
+  th.f { color: color-mix(in srgb, var(--ink-faint) 80%, var(--accent)); }
+  th .fmark, .fmark { color: var(--accent); font-weight: 700; }
+  .group-row td { background: var(--surface-2); padding: 8px 11px; border-bottom: 1px solid var(--line); font-size: 12px; position: sticky; left: 0; }
+  .group-row .dn { font-weight: 700; letter-spacing: -.01em; }
+  .group-row .meta { color: var(--ink-soft); }
+  .date-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line-strong); font-size: 11.5px; font-weight: 600; margin-left: 8px; }
+  .date-badge .num { color: var(--accent); }
+  .tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; }
+  .tag.existing { background: var(--surface-2); color: var(--ink-faint); }
+  .tag.new { background: var(--accent); color: #fff; }
+  tbody td { padding: 9px 11px; border-bottom: 1px solid var(--line); white-space: nowrap; transition: box-shadow .1s; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.attn td { background: var(--warn-tint); }
+  tbody tr.existing td { color: var(--ink-faint); }
+  tbody tr:not(.group-row):hover td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--ink) 3%, transparent); }
+  td.f { color: var(--ink-faint); font-style: italic; }
+  td.flagged { box-shadow: inset 0 0 0 1px var(--warn); }
+  .prod-raw { color: var(--ink-faint); font-size: 10.5px; font-family: var(--mono); display: block; margin-top: 1px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .chip.ok { color: var(--ok); background: var(--ok-tint); }
+  .chip.warn { color: var(--warn); background: var(--warn-tint); }
+  .mini-select, .cell-input { padding: 5px 8px; border: 1px solid var(--warn); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 12px; font-family: var(--sans); max-width: 140px; }
+  .mini-select.set { border-color: var(--line-strong); }  /* auto-picked code reads as normal, not a warning */
+  .cell-input { font-family: var(--mono); text-align: right; width: 96px; }
+  .flag-note { display: block; margin-top: 2px; font-size: 10.5px; color: var(--warn); white-space: normal; max-width: 220px; }
+
+  .spin { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .busy { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--ink-soft); }
+  .busy .spin { border-color: var(--line-strong); border-top-color: var(--accent); width: 20px; height: 20px; }
+
+  /* ---------- auth ---------- */
+  .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--ground); }
+  .auth-card {
+    width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 32px 30px;
+  }
+  .auth-brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -.01em; margin-bottom: 4px; }
+  .auth-brand .glyph { width: 28px; height: 28px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 16px; }
+  .auth-card h1 { font-size: 19px; margin: 20px 0 4px; letter-spacing: -.015em; }
+  .auth-card .sub { color: var(--ink-soft); font-size: 13px; margin: 0 0 24px; line-height: 1.5; }
+  .auth-form { display: flex; flex-direction: column; gap: 14px; }
+  .auth-form label { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 650; margin-bottom: 6px; }
+  .auth-form input { width: 100%; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--ink); font-family: var(--sans); font-size: 14px; transition: border-color .15s, box-shadow .15s; }
+  .auth-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  .auth-form .btn { justify-content: center; width: 100%; margin-top: 4px; }
+  .auth-msg { display: flex; gap: 9px; align-items: flex-start; padding: 10px 13px; border-radius: 9px; font-size: 12.5px; line-height: 1.45; }
+  .auth-msg.bad { background: var(--crit-tint); color: var(--crit); border: 1px solid color-mix(in srgb, var(--crit) 28%, transparent); }
+  .auth-msg.info { background: var(--accent-tint); color: var(--accent-strong); border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent); }
+  .auth-foot { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
+
+  .user-chip { display: flex; align-items: center; gap: 9px; padding: 5px 6px 5px 10px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; }
+  .user-chip .who { font-weight: 600; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-chip .role { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: var(--accent-tint); color: var(--accent-strong); }
+  .user-chip button { border: none; background: none; color: var(--ink-faint); cursor: pointer; font-family: var(--sans); font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; }
+  .user-chip button:hover { background: var(--surface); color: var(--ink); }
+
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 11px 18px; border-radius: 9px; font-size: 13px; font-weight: 550; box-shadow: var(--shadow); z-index: 50; animation: rise .25s ease; max-width: 80vw; }
+  .toast.bad { background: var(--crit); color: #fff; }
+  /* -------- insights ------------------------------------------------- */
+  .ins-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); flex: none; }
+  .seg button { border: none; background: none; padding: 8px 14px; font-family: var(--sans); font-size: 12.5px; font-weight: 600; color: var(--ink-soft); cursor: pointer; transition: background .15s, color .15s; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--accent-tint); color: var(--accent-strong); }
+  .seg.sm button { padding: 6px 11px; font-size: 12px; }
+  /* -------- removable PDF chips -------------------------------------- */
+  .pdf-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .pchip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; max-width: 340px; }
+  .pchip .pci { color: var(--ink-faint); font-size: 12px; flex: none; }
+  .pchip .pcn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pchip .pcc { color: var(--ink-faint); font-size: 11.5px; flex: none; }
+  .pchip .pcx { flex: none; width: 20px; height: 20px; border-radius: 5px; border: none; background: var(--surface-2); color: var(--ink-soft); font-size: 15px; line-height: 1; cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s; }
+  .pchip .pcx:hover { background: var(--crit-tint); color: var(--crit); }
+
+  .ins-actions { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .btn.refresh { align-self: flex-end; }
+  .ins-controls { display: flex; gap: 12px; flex: none; flex-wrap: wrap; }
+  .ctl { display: flex; flex-direction: column; gap: 4px; }
+  .ctl > span { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 650; padding-left: 2px; }
+  .ctl select { appearance: none; -webkit-appearance: none; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-family: var(--sans); font-size: 13px; font-weight: 600; padding: 8px 30px 8px 12px; cursor: pointer; min-width: 150px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23858D9A' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; }
+  .ctl select:hover { border-color: var(--line-strong); }
+  .ctl select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+  .ctl select:disabled { color: var(--ink-faint); background-color: var(--surface-2); cursor: not-allowed; }
+
+  .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 18px; }
+  .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 14px 15px; }
+  .kpi .kv { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -.01em; }
+  .kpi .kl { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin-top: 3px; }
+  .kpi .kn { font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
+  /* What came back reads as a subtraction, not as more of the same. The clause
+     may wrap on a narrow card, but a figure never may: the thousands separator
+     is a space, so "R 90 100,00" breaking across lines reads as two amounts. */
+  .kpi .kback { color: var(--crit); }
+  .kpi .kn .nb { white-space: nowrap; }
+
+  .ins-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ins-card { padding: 18px 20px; }
+  .ins-card.wide { grid-column: 1 / -1; }
+  .ins-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ins-card-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .ins-sub { margin: 4px 0 14px; font-size: 12px; color: var(--ink-faint); }
+  .ins-empty { color: var(--ink-faint); font-size: 13px; padding: 10px 0; }
+
+  .bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .bar { display: grid; grid-template-columns: minmax(120px, 34%) 1fr auto; align-items: center; gap: 12px; }
+  .bl { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .bt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 550; }
+  .abc { flex: none; width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; color: #fff; }
+  .abc.a { background: var(--accent); } .abc.b { background: #6f8fae; } .abc.c { background: var(--line-strong); color: var(--ink-soft); }
+  .btrack { height: 9px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+  .bfill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-strong)); border-radius: 99px; }
+  .bv { font-size: 12.5px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .chart-wrap { width: 100%; overflow-x: auto; }
+  .trend { width: 100%; height: auto; display: block; }
+  .trend .area { fill: var(--accent-tint); }
+  .trend .stroke { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .trend circle { fill: var(--accent); }
+  .trend .tx { fill: var(--ink-faint); font-size: 10px; font-family: var(--sans); }
+
+  /* -------- reconciliation table ------------------------------------- */
+  table.recon { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.recon th { text-align: left; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); font-weight: 650; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.recon td { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  table.recon tbody tr:last-child td { border-bottom: none; }
+  table.recon .rt { text-align: right; }
+  table.recon .rp { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rstat { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 99px; white-space: nowrap; }
+  .rstat.ok { color: var(--ok); background: var(--ok-tint); }
+  .rstat.warn { color: var(--warn); background: var(--warn-tint); }
+  .rstat.bad { color: var(--crit); background: var(--crit-tint); }
+  .rstat.mut { color: var(--ink-faint); background: var(--surface-2); }
+
+  /* -------- new short code inline editor ------------------------------ */
+  .newcode { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .newcode-in { min-width: 150px; flex: 1; }
+  .newcode .btn.sm { padding: 6px 11px; font-size: 12px; white-space: nowrap; }
+
+  /* -------- analyst panel --------------------------------------------- */
+  .panel-cta { display: flex; align-items: center; gap: 16px; padding: 15px 18px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+  .panel-cta > div { display: flex; flex-direction: column; gap: 2px; }
+  .panel-cta b { font-size: 13.5px; }
+  .panel-cta span { font-size: 12px; color: var(--ink-faint); }
+  .panel-cta .btn { flex: none; white-space: nowrap; }
+  .panel-card { margin-bottom: 16px; padding: 17px 19px; }
+  .panel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .panel-meta { font-size: 11.5px; color: var(--ink-faint); }
+  .panel-rec { font-size: 13.5px; line-height: 1.65; }
+  .panel-rec p { margin: 0 0 10px; } .panel-rec ul { margin: 0 0 10px; padding-left: 20px; }
+  .panel-findings { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 13px; }
+  .panel-sub { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 650; margin-bottom: 8px; }
+  .finding { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; background: var(--surface); }
+  .finding summary { cursor: pointer; padding: 9px 13px; font-size: 13px; font-weight: 600; list-style: none; }
+  .finding summary::-webkit-details-marker { display: none; }
+  .finding summary::before { content: "▸"; color: var(--ink-faint); margin-right: 8px; display: inline-block; transition: transform .15s; }
+  .finding[open] summary::before { transform: rotate(90deg); }
+  .finding summary:hover { background: var(--surface-2); border-radius: 8px; }
+  .finding .fx { color: var(--crit); font-weight: 550; font-size: 11.5px; }
+  .finding-body { padding: 2px 15px 12px 30px; font-size: 13px; line-height: 1.6; color: var(--ink-soft); }
+  .finding-body p { margin: 0 0 8px; } .finding-body ul { margin: 0 0 8px; padding-left: 18px; }
+
+  /* -------- buy list --------------------------------------------------- */
+  .buy-group { margin-top: 22px; }
+  .buy-head { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 15px; }
+  .buy-note { font-size: 12.5px; color: var(--ink-faint); font-weight: 500; }
+  .lvl { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 4px 10px; border-radius: 99px; }
+  .lvl.critical { background: var(--crit-tint); color: var(--crit); }
+  .lvl.high { background: var(--ok-tint); color: var(--ok); }
+  .lvl.low { background: var(--surface-2); color: var(--ink-faint); }
+  .buy-card { display: flex; gap: 16px; align-items: flex-start; padding: 14px 16px; margin-bottom: 9px; border-left: 3px solid var(--line-strong); }
+  .buy-card.critical { border-left-color: var(--crit); }
+  .buy-card.high { border-left-color: var(--ok); }
+  .buy-card.low { border-left-color: var(--line-strong); opacity: .78; }
+  .buy-main { flex: 1; min-width: 0; }
+  .buy-name { font-weight: 650; font-size: 13.5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .buy-thin { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--warn); background: var(--warn-tint); padding: 2px 7px; border-radius: 5px; }
+  /* Where to consign it: on consignment the agent choice moves the money as
+     much as the buy does, so it sits with the product, not in the tag soup. */
+  .buy-send { display: flex; gap: 7px; align-items: baseline; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; }
+  .buy-send .sl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint); }
+  .buy-send b { font-weight: 650; }
+  .buy-send .sp { color: var(--ink-soft); }
+  /* The same level, small enough to sit inline beside a product anywhere. */
+  .sig { font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+         padding: 1px 6px; border-radius: 99px; flex: none; }
+  .sig.critical { background: var(--crit-tint); color: var(--crit); }
+  .sig.high { background: var(--ok-tint); color: var(--ok); }
+  .sig.low { background: var(--surface-2); color: var(--ink-faint); }
+  .lvl.tiny { font-size: 9.5px; padding: 1px 6px; }
+  /* Agent-watch flags. Same inline shape as .sig so they can sit beside any
+     figure on any page, rather than living on a page of their own. */
+  .wsig { font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+          padding: 1px 6px; border-radius: 99px; flex: none; cursor: help; }
+  .wsig.severe { background: var(--crit-tint); color: var(--crit); }
+  .wsig.watch { background: var(--warn-tint, var(--surface-2)); color: var(--warn, var(--ink-soft)); }
+  .watch-strip { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+                 padding: 11px 14px; margin-bottom: 14px; border-radius: 10px;
+                 border: 1px solid var(--line); background: var(--surface-2); font-size: 12.5px; }
+  .watch-strip .wl { color: var(--ink-soft); margin-right: 6px; }
+  .watch-strip b { font-weight: 650; }
+  .watch-strip .wnote { flex-basis: 100%; color: var(--ink-faint); font-size: 11.5px; }
+  .watch-list { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+  .watch-list li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0;
+                   border-top: 1px solid var(--line); }
+  .watch-list .wq { color: var(--ink-soft); }
+  .banner.moved { align-items: center; }
+  .buy-why { margin: 7px 0 9px; padding-left: 18px; font-size: 12.5px; color: var(--ink-soft); }
+  .buy-why li { margin-bottom: 2px; }
+  .buy-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .buy-tag { font-size: 11.5px; background: var(--surface-2); color: var(--ink-soft); padding: 3px 9px; border-radius: 99px; white-space: nowrap; }
+  .buy-spend { text-align: right; flex: none; min-width: 122px; }
+  .buy-spend b { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+  .buy-spend span { font-size: 11px; color: var(--ink-faint); }
+  .buy-spend.muted b { color: var(--ink-faint); font-weight: 600; }
+  .cost-in { width: 108px; text-align: right; }
+  table.recon td .btn.sm { padding: 5px 11px; font-size: 12px; }
+
+  /* -------- procurement assistant ------------------------------------ */
+  .ask-card { padding: 0; overflow: hidden; }
+  .ask-log { padding: 20px 22px; max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+  .ask-q { align-self: flex-end; max-width: 78%; background: var(--accent); color: #fff; padding: 9px 14px; border-radius: 13px 13px 3px 13px; font-size: 13.5px; font-weight: 550; }
+  .ask-a { align-self: flex-start; max-width: 88%; background: var(--surface-2); padding: 12px 15px; border-radius: 13px 13px 13px 3px; font-size: 13.5px; line-height: 1.6; }
+  .ask-a p { margin: 0 0 9px; } .ask-a p:last-child { margin-bottom: 0; }
+  .ask-a ul { margin: 0 0 9px; padding-left: 20px; } .ask-a ul:last-child { margin-bottom: 0; }
+  .ask-a li { margin-bottom: 4px; }
+  .ask-a .busy { padding: 0; justify-content: flex-start; color: var(--ink-faint); font-size: 13px; }
+  .ask-empty { text-align: center; padding: 26px 10px 14px; }
+  .ask-empty .ai { width: 46px; height: 46px; margin: 0 auto 14px; border-radius: 12px; background: var(--accent-tint); color: var(--accent); display: grid; place-items: center; font-size: 20px; }
+  .ask-empty p { margin: 0 0 14px; color: var(--ink-soft); font-size: 13px; }
+  .ask-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .ask-chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 7px 14px; font-family: var(--sans); font-size: 12.5px; color: var(--ink-soft); cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+  .ask-chip:hover { background: var(--accent-tint); color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+  .ask-bar { display: flex; gap: 9px; padding: 13px 16px; border-top: 1px solid var(--line); background: var(--surface); }
+  .ask-input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; font-family: var(--sans); font-size: 13.5px; color: var(--ink); background: var(--surface); }
+  .ask-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+  .ask-input:disabled { background: var(--surface-2); color: var(--ink-faint); }
+  .ask-foot { padding: 0 16px 13px; text-align: right; }
+  .ask-foot .linklike { color: var(--ink-faint); font-weight: 550; font-size: 12px; }
+  .ask-foot .linklike:hover { color: var(--crit); }
+
+  /* -------- delete-history control ----------------------------------- */
+  .ins-danger { margin-top: 18px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+  .ins-danger .dwarn { font-size: 13px; color: var(--ink-soft); flex: 1; min-width: 220px; }
+  .ins-danger .dact { display: flex; gap: 8px; flex: none; }
+  .btn.sm { padding: 7px 13px; font-size: 12.5px; }
+  .btn.danger { background: var(--crit); color: #fff; }
+  .btn.danger:hover { background: color-mix(in srgb, var(--crit) 88%, #000); }
+  .dtrigger { color: var(--ink-faint); }
+  .dtrigger:hover { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 40%, var(--line)); }
+
+  /* -------- Sales & Payments two-column workspace -------------------- */
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 18px; align-items: start; }
+  .ws-main { min-width: 0; }               /* let the table scroll instead of stretching the grid */
+  .pm-card { position: sticky; top: 8px; padding: 17px 17px 15px; }
+  .pm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .pm-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .pm-sub { margin: 3px 0 0; font-size: 12px; color: var(--ink-faint); }
+  .pm-meta { font-size: 11.5px; color: var(--ink-faint); margin: 12px 0 10px; }
+  .pm-drop { padding: 30px 16px; margin-top: 14px; }
+  .pm-note { font-size: 11.5px; color: var(--ink-faint); margin-top: 12px; line-height: 1.55; }
+  .pm-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
+  .pm-k { background: var(--surface-2); border-radius: 9px; padding: 8px 11px; }
+  .pm-k b { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+  .pm-k span { font-size: 11px; color: var(--ink-faint); }
+  .pm-k.ok b { color: var(--ok); } .pm-k.warn b { color: var(--warn); }
+  .btn.full { width: 100%; justify-content: center; margin-bottom: 12px; }
+  .pm-list { display: flex; flex-direction: column; gap: 1px; max-height: 480px; overflow-y: auto; margin: 0 -5px; }
+  .pm-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 9px; padding: 7px 6px; border-radius: 6px; }
+  .pm-row:hover { background: var(--surface-2); }
+  .pm-p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 12.5px; }
+  .pm-n { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+  @media (max-width: 1080px) { .workspace { grid-template-columns: 1fr; } .pm-card { position: static; } }
+
+  @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(3, 1fr); } .ins-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 820px) {
+    .body { grid-template-columns: 1fr; } .rail { display: none; }
+    .summary { grid-template-columns: repeat(2, 1fr); } .choices { grid-template-columns: 1fr; }
+    .main { padding: 20px 14px 50px; }
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<input type="file" id="wbInput" accept=".xlsx,.xlsm" hidden>
+<input type="file" id="pdfInput" accept="application/pdf,.pdf,text/csv,.csv" multiple hidden>
+<input type="file" id="paymentInput" accept="application/pdf,.pdf,text/csv,.csv" multiple hidden>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="glyph">◧</span><span>ZacoAgents</span><span class="sub">Statement&nbsp;→&nbsp;Excel</span></div>
+    <span class="spacer"></span>
+    <span class="mode demo" id="modeBadge" title="">Connecting…</span>
+    <div class="wb-pill" id="wbPill" hidden>
+      <span class="fi">XLS</span><span class="v" id="wbName">—</span><span class="n2" id="wbRows"></span>
+    </div>
+    <div class="user-chip" id="userChip" hidden>
+      <span class="who" id="userWho">—</span>
+      <span class="role" id="userRole" hidden>staff</span>
+      <button type="button" onclick="Auth.signOut()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <nav class="rail">
+      <h2>Modules</h2>
+      <ul class="modules">
+        <!-- Buying is the FIRST act of the cycle and the one decision made away
+             from this desk, so it opens the app rather than hiding behind a tab.
+             Sales and Insights are what feed it. -->
+        <li><button class="mod" data-module="procurement" onclick="setModule('procurement')">
+          <span class="mi">◆</span><span class="mt">Take on</span><span class="mbadge" id="buyBadge" hidden></span></button></li>
+        <li><button class="mod" data-module="sales" onclick="setModule('sales')">
+          <span class="mi">◧</span><span class="mt">Sales &amp; Payments</span></button></li>
+        <li><button class="mod" data-module="insights" onclick="setModule('insights')">
+          <span class="mi">◔</span><span class="mt">Insights</span></button></li>
+      </ul>
+
+      <div id="railWorkflow">
+        <h2 class="rail-sub">Workflow</h2>
+        <ol class="steps" id="steps">
+          <li class="step" data-step="1"><span class="dot">1</span><span class="lbl"><span class="t">Workbook</span><span class="d">New or existing</span></span></li>
+          <li class="step" data-step="2"><span class="dot">2</span><span class="lbl"><span class="t">Add &amp; review</span><span class="d">PDFs → rows</span></span></li>
+          <li class="step" data-step="3"><span class="dot">3</span><span class="lbl"><span class="t">Save</span><span class="d">Write back to file</span></span></li>
+        </ol>
+        <p class="loop-note"><span>↻</span><span>Add rounds of statements as often as you like — every round lands in the same workbook.</span></p>
+      </div>
+    </nav>
+    <main class="main" id="main"></main>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- config
+// The API is served from the same origin as this page (see app/main.py).
+const API = "";
+const AGENTS = ["Farmers Trust", "Cape Fruit Co-op", "Karsten Marketing", "Dutoit Agri"];
+
+const S = {
+  module: "procurement", // "procurement" | "sales" | "insights" — buy list opens
+  screen: "setup",
+  live: false,          // true once /api/health answers
+  authRequired: false,  // true when the server has Supabase auth configured
+  wb: null,             // { name }
+  wbFile: null,         // File/Blob of the workbook, sent back on save
+  wbHandle: null,       // FileSystemFileHandle when the browser supports it
+  agent: AGENTS[0],
+  committed: [],        // rows in the sheet (existing + appended-not-yet-saved)
+  pending: [],          // rows under review
+  newCodeFor: null,     // review-row index currently naming a brand-new short code
+  importWarnings: [],   // reasons to doubt this import is the whole picture
+  nettMap: {},          // statement no -> Nett, from adjustment reports this round
+  nettReports: 0,       // how many Nett Adjustment PDFs have been read this round
+  codes: [],            // known description codes
+  saved: true,
+  busy: false,
+  demoPtr: 0,
+  insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
+  recon: { data: null, loading: false, error: null, applied: false },
+  buys: { data: null, loading: false, error: null, tab: "take",
+          settle: null, settleLoading: false, suppliers: [], newSupplier: "", draft: {},
+          // Signals are read from any module, so the payload is fetched once in
+          // the background too. `tried` stops a render/fetch/render loop.
+          tried: false,
+          // Level per product before the last import, so a save can say what
+          // actually moved instead of leaving them to spot it.
+          was: null, changes: null },
+};
+
+// ------------------------------------------------------- demo sample data
+// Used only when the API is unreachable, so the UI is still explorable.
+const DEMO_EXISTING = [
+  { dn:14790, stm_no:385210, product:"APPL 18KG GALA T1 APPLE",   description:"Imp Apples", qty_received:120, opening_stock:120, cartons_sold:120, price:180, nett_total:19800, status:"12.06", date:"2026-06-05", existing:true, flags:[] },
+  { dn:14790, stm_no:385211, product:"PEAR 12KG PACKHAM T2 PEAR", description:"Imp Pears",  qty_received:90,  opening_stock:60,  cartons_sold:60,  price:150, nett_total:8100,  status:"14.06", date:"2026-06-05", existing:true, flags:[] },
+];
+const DEMO_BATCHES = [
+  [
+    { dn:14847, stm_no:386729, product:"CHER 5KG PUNNET T2 CHERRY",         description:"Imp Cherries 5kg", qty_received:78,  opening_stock:32,  cartons_sold:32,  price:343.75, nett_total:9998.74, status:"26.06", date_received:"2026-06-18", flags:[] },
+    { dn:14847, stm_no:386368, product:"NEOT 1L MA50 36 T2 NECTARINE OTHER", description:"IMP Nect",        qty_received:76,  opening_stock:76,  cartons_sold:6,   price:300.00, nett_total:1537.69, status:"24.06", date_received:"2026-06-20", flags:[] },
+    { dn:14847, stm_no:386759, product:"NEOT 1L MA50 36 T2 NECTARINE OTHER", description:"IMP Nect",        qty_received:76,  opening_stock:70,  cartons_sold:16,  price:387.50, nett_total:5297.47, status:"26.06", date_received:"2026-06-19", flags:[] },
+    { dn:14847, stm_no:387517, product:"NEOT 1L MA50 36 T2 NECTARINE OTHER", description:"IMP Nect",        qty_received:76,  opening_stock:54,  cartons_sold:54,  price:50.00,  nett_total:2238.01, status:"01.07", date_received:"2026-06-19", flags:[] },
+    { dn:14847, stm_no:388486, product:"GRAP 4.5KG RED GLOBE T2 GRAPE PINK", description:null,              qty_received:898, opening_stock:440, cartons_sold:240, price:40.00,  nett_total:7668.00, status:"08.07", date_received:"2026-06-21",
+      flags:[{ field:"description", severity:"error", message:"No short code on file for this product." }] },
+  ],
+  [
+    { dn:14902, stm_no:389010, product:"CHER 5KG PUNNET T2 CHERRY",     description:"Imp Cherries 5kg", qty_received:60,  opening_stock:60,  cartons_sold:48,  price:320, nett_total:14200, status:"10.07", date_received:"2026-06-28", flags:[] },
+    { dn:14902, stm_no:389011, product:"PLUM 5.25KG ANGELENO T2 PLUM",  description:"Imp Plums",        qty_received:200, opening_stock:200, cartons_sold:180, price:95,  nett_total:15900, status:"11.07", date_received:"2026-06-29", flags:[] },
+  ],
+];
+const DEMO_CODES = ["IMP Nect","Imp Cherries 5kg","Imp Pink Grapes","Imp Plums","Imp Apples","Imp Pears","Imp Peaches"];
+
+// ------------------------------------------------------------ formulas
+// Mirrors the template so the review screen shows the sheet as it will look.
+// The chain hangs on Frui Price/crt, exactly as the sheet does: the default is
+// 70% of what the carton returned, which lands the row on a 30% commission, and
+// in the workbook that one cell can be overwritten for a deal on other terms.
+// The rate appears here once so the review screen can never drift from the sheet.
+const COMMISSION = 0.30;
+const grossTotal = r => num(r.cartons_sold) * num(r.price);
+const babyStock  = r => num(r.opening_stock) - num(r.cartons_sold);
+const nettPPC    = r => r.cartons_sold ? num(r.nett_total) / r.cartons_sold : 0;
+const fruiPPC    = r => nettPPC(r) * (1 - COMMISSION);
+const fruiCurr   = r => fruiPPC(r) * num(r.cartons_sold);
+const zRPC       = r => nettPPC(r) - fruiPPC(r);
+const zTotal     = r => num(r.nett_total) - fruiCurr(r);
+const markup     = r => nettPPC(r) ? zRPC(r) / nettPPC(r) : 0;
+
+const num = v => (typeof v === "number" ? v : 0);
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmt = n => (typeof n === "number" ? n : 0).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+function dateLabel(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.getUTCDate() + "-" + MONTHS[d.getUTCMonth()];
+}
+/** Column D: the earliest date across the DN group -- the day the load was sent
+ *  where the export gives it, else when the market received it. The two differ
+ *  by a day: the book dates the load going out, the market dates booking it in.
+ *  Rows read back from a saved workbook carry only `date`, so fall back to that. */
+function groupDate(dn, pool) {
+  const rs = pool.filter(r => r.dn === dn);
+  for (const field of ["date_sent", "date_received", "date"]) {
+    const found = rs.map(r => r[field]).filter(Boolean).sort();
+    if (found.length) return dateLabel(found[0]);
+  }
+  return "—";
+}
+const errFlags = r => (r.flags || []).filter(f => f.severity !== "warning");
+const needsAttention = r => errFlags(r).length > 0 || !r.description;
+const flagFor = (r, field) => (r.flags || []).find(f => f.field === field);
+// A row already in the saved history: the backend marks it with a warning flag
+// on the statement number, so appending it again would duplicate it in Excel.
+// Keyed on the flag's code, not just its field -- a row that has sold but is not
+// in a payment run yet also flags the statement number, and reading that as a
+// duplicate would warn about every unpaid row.
+const isDuplicate = r => (r.flags || []).some(f => f.code === "duplicate");
+
+// -------------------------------------------------------------- columns
+const COLS = [
+  // Editable: no export carries Zaco's own DN, so where the market's Supplier
+  // Ref is not one the operator supplies it and every row of that delivery
+  // follows. See editField's delivery propagation.
+  { h:"DN", cls:"num", field:"dn", get:r=>r.dn ?? "—" },
+  { h:"Market Agent", get:r=>esc(r.market_agent || S.agent) },
+  { h:"Completed", get:r=>esc(r.completed || "Incomplete") },
+  { h:"Date", get:(r,pool)=>groupDate(r.dn, pool) },
+  { h:"STM No", cls:"num", field:"stm_no", get:r=>r.stm_no ?? "—" },
+  { h:"Description", desc:true },
+  { h:"Qty Received", cls:"n num", field:"qty_received", get:r=>r.qty_received ?? "—" },
+  { h:"Opening Stock", cls:"n num", field:"opening_stock", get:r=>r.opening_stock ?? "—" },
+  { h:"Frui Price/crt", cls:"n num", f:true, get:r=>fmt(fruiPPC(r)) },
+  { h:"Cartons Sold", cls:"n num", field:"cartons_sold", get:r=>r.cartons_sold ?? "—" },
+  { h:"Baby Stock", cls:"n num", f:true, get:r=>babyStock(r) },
+  { h:"Price", cls:"n num", field:"price", get:r=>fmt(r.price) },
+  { h:"Gross Total", cls:"n num", f:true, get:r=>fmt(grossTotal(r)) },
+  { h:"Nett Total", cls:"n num", field:"nett_total", get:r=>fmt(r.nett_total) },
+  { h:"Nett Price/crt", cls:"n num", f:true, get:r=>fmt(nettPPC(r)) },
+  { h:"Z R/crt", cls:"n num", f:true, get:r=>fmt(zRPC(r)) },
+  { h:"Z Total", cls:"n num", f:true, get:r=>fmt(zTotal(r)) },
+  { h:"% Markup", cls:"n num", f:true, get:r=>Math.round(markup(r)*100)+"%" },
+  { h:"Frui Curr Sales Value", cls:"n num", f:true, get:r=>fmt(fruiCurr(r)) },
+  { h:"Status", cls:"num", field:"status", get:r=>esc(r.status ?? "—") },
+  // Column U. Nothing derives it; it carries whatever note was already on a row
+  // read back out of the workbook.
+  { h:"NOTES", field:"notes", get:r=>esc(r.notes ?? "—") },
+];
+
+const main = document.getElementById("main");
+const stepsEl = document.getElementById("steps");
+const wbPill = document.getElementById("wbPill");
+const modeBadge = document.getElementById("modeBadge");
+
+// ---------------------------------------------------------------- auth
+// Talks to Supabase Auth (GoTrue) over its REST API directly. No SDK: the app
+// ships as a single file with no external scripts, and the four calls we need
+// are a few lines each.
+const Auth = {
+  cfg: { url: "", key: "" },   // from /api/health
+  session: null,               // { access_token, refresh_token, expires_at, user }
+  profile: null,               // { role, email } from the backend
+  STORAGE: "zacon.session",
+
+  load() {
+    try { this.session = JSON.parse(localStorage.getItem(this.STORAGE) || "null"); }
+    catch { this.session = null; }
+    return this.session;
+  },
+  store(session) {
+    this.session = session;
+    if (session) localStorage.setItem(this.STORAGE, JSON.stringify(session));
+    else localStorage.removeItem(this.STORAGE);
+  },
+
+  async gotrue(path, { method = "POST", body, token } = {}) {
+    const res = await fetch(`${this.cfg.url}/auth/v1/${path}`, {
+      method,
+      headers: {
+        apikey: this.cfg.key,
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error_description || data.msg || data.message || "Sign in failed");
+    }
+    return data;
+  },
+
+  async signIn(email, password) {
+    const d = await this.gotrue("token?grant_type=password", { body: { email, password } });
+    this.store({
+      access_token: d.access_token,
+      refresh_token: d.refresh_token,
+      expires_at: Math.floor(Date.now() / 1000) + (d.expires_in || 3600),
+      user: d.user,
+    });
+    return this.session;
+  },
+
+  /** Used by invite and password-reset links, which arrive already authenticated. */
+  async setPassword(password) {
+    const d = await this.gotrue("user", {
+      method: "PUT", body: { password }, token: this.session.access_token,
+    });
+    this.session.user = d;
+    this.store(this.session);
+  },
+
+  async refresh() {
+    if (!this.session?.refresh_token) return null;
+    try {
+      const d = await this.gotrue("token?grant_type=refresh_token", {
+        body: { refresh_token: this.session.refresh_token },
+      });
+      this.store({
+        access_token: d.access_token,
+        refresh_token: d.refresh_token,
+        expires_at: Math.floor(Date.now() / 1000) + (d.expires_in || 3600),
+        user: d.user,
+      });
+      return this.session;
+    } catch {
+      this.store(null);
+      return null;
+    }
+  },
+
+  /** Refresh a minute before expiry so a long upload never dies mid-request. */
+  async validToken() {
+    if (!this.session) return null;
+    if (this.session.expires_at - 60 <= Math.floor(Date.now() / 1000)) {
+      if (!await this.refresh()) return null;
+    }
+    return this.session.access_token;
+  },
+
+  async signOut() {
+    try {
+      if (this.session) {
+        await this.gotrue("logout", { token: this.session.access_token });
+      }
+    } catch { /* the local session is cleared regardless */ }
+    this.store(null);
+    this.profile = null;
+    location.hash = "";
+    location.reload();
+  },
+};
+
+// ------------------------------------------------------------- api layer
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (S.authRequired) {
+    const token = await Auth.validToken();
+    if (!token) { renderAuth(); throw new Error("Your session has expired. Please sign in again."); }
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const res = await fetch(API + path, { ...options, headers });
+
+  if (res.status === 401 && S.authRequired) {
+    // The token was rejected -- treat it as signed out rather than showing a
+    // confusing error over a half-working screen.
+    Auth.store(null);
+    renderAuth();
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res;
+}
+
+// -------------------------------------------------------- auth screens
+/** Renders over the whole page: nothing behind a login should be visible. */
+function renderAuth(mode = "signin", message = "") {
+  document.querySelector(".app").hidden = true;
+  let host = document.getElementById("authWrap");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "authWrap";
+    host.className = "auth-wrap";
+    document.body.appendChild(host);
+  }
+  host.hidden = false;
+
+  const invite = mode === "invite";
+  host.innerHTML = `
+    <div class="auth-card">
+      <div class="auth-brand"><span class="glyph">◧</span><span>ZacoAgents</span></div>
+      <h1>${invite ? "Choose a password" : "Sign in"}</h1>
+      <p class="sub">${invite
+        ? "Set a password for your account to finish setting it up."
+        : "This is a private system. Accounts are created by invitation."}</p>
+
+      ${message ? `<div class="auth-msg ${invite ? "info" : "bad"}">${esc(message)}</div>` : ""}
+
+      <form class="auth-form" id="authForm" autocomplete="on">
+        ${invite ? "" : `
+          <div>
+            <label for="authEmail">Email</label>
+            <input id="authEmail" type="email" autocomplete="username" required>
+          </div>`}
+        <div>
+          <label for="authPassword">${invite ? "New password" : "Password"}</label>
+          <input id="authPassword" type="password"
+                 autocomplete="${invite ? "new-password" : "current-password"}"
+                 ${invite ? 'minlength="8"' : ""} required>
+        </div>
+        <button class="btn primary" type="submit" id="authSubmit">
+          ${invite ? "Set password and continue" : "Sign in"}
+        </button>
+      </form>
+
+      <p class="auth-foot">${invite
+        ? "Use at least 8 characters."
+        : "No account? Ask an administrator to invite you — this system does not accept public sign-ups."}</p>
+    </div>`;
+
+  document.getElementById("authForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const btn = document.getElementById("authSubmit");
+    const password = document.getElementById("authPassword").value;
+    btn.disabled = true;
+    btn.textContent = invite ? "Saving…" : "Signing in…";
+    try {
+      if (invite) {
+        await Auth.setPassword(password);
+        history.replaceState(null, "", location.pathname);   // strip the token
+      } else {
+        await Auth.signIn(document.getElementById("authEmail").value.trim(), password);
+      }
+      await startApp();
+    } catch (err) {
+      renderAuth(mode, err.message || String(err));
+    }
+  });
+}
+
+/** Invite and recovery links land with tokens in the URL fragment. */
+function consumeAuthFragment() {
+  if (!location.hash.includes("access_token")) return null;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const access_token = p.get("access_token");
+  if (!access_token) return null;
+  Auth.store({
+    access_token,
+    refresh_token: p.get("refresh_token"),
+    expires_at: Math.floor(Date.now() / 1000) + Number(p.get("expires_in") || 3600),
+    user: null,
+  });
+  return p.get("type") || "invite";
+}
+
+function showUserChip() {
+  const chip = document.getElementById("userChip");
+  if (!S.authRequired || !Auth.session) { chip.hidden = true; return; }
+  chip.hidden = false;
+  document.getElementById("userWho").textContent =
+    Auth.profile?.email || Auth.session.user?.email || "Signed in";
+  const roleEl = document.getElementById("userRole");
+  if (Auth.profile?.role) { roleEl.hidden = false; roleEl.textContent = Auth.profile.role; }
+  else roleEl.hidden = true;
+}
+
+async function checkHealth() {
+  try {
+    const data = await (await fetch(API + "/api/health")).json();
+    S.live = true;
+    S.authRequired = !!data.auth_required;
+    Auth.cfg = { url: data.supabase_url || "", key: data.supabase_anon_key || "" };
+  } catch { S.live = false; S.authRequired = false; }
+  modeBadge.className = "mode " + (S.live ? "live" : "demo");
+  modeBadge.textContent = S.live ? "Connected" : "Demo data";
+  modeBadge.title = S.live
+    ? "Connected to the ZacoAgents API. Real PDFs and workbooks are processed."
+    : "The API is not reachable, so the app is showing built-in example data.";
+}
+
+async function loadCodes() {
+  if (!S.live) { S.codes = DEMO_CODES; return; }
+  try {
+    const data = await (await api("/api/lookup")).json();
+    S.codes = data.codes || [];
+  } catch { S.codes = []; }
+}
+
+// ------------------------------------------------------------ chrome
+function setStep(n) {
+  [...stepsEl.children].forEach(li => {
+    const s = +li.dataset.step;
+    li.className = "step " + (s < n ? "done" : s === n ? "current" : "todo");
+  });
+}
+function syncPill() {
+  // The workbook belongs to Account Sales, so it is not shown in other modules.
+  const show = !!S.wb && S.module === "sales";
+  wbPill.hidden = !show;
+  if (show) {
+    document.getElementById("wbName").textContent = S.wb.name;
+    document.getElementById("wbRows").textContent = "· " + S.committed.length + " rows";
+  }
+}
+/** Highlight the active module and show its sub-navigation. */
+function syncModuleNav() {
+  document.querySelectorAll(".mod").forEach(b =>
+    b.classList.toggle("active", b.dataset.module === S.module));
+  document.getElementById("railWorkflow").hidden = S.module !== "sales";
+}
+function setModule(m) {
+  if (S.module === m) return;
+  S.module = m;
+  // Insights reads the saved history; re-fetch on entry so it reflects any
+  // statements saved since it was last opened, rather than a stale snapshot.
+  if (m === "insights") S.insights.data = null;
+  render();
+  main.scrollTo(0, 0);
+}
+function go(screen) { S.screen = screen; render(); main.scrollTo(0, 0); }
+function render() {
+  syncModuleNav();
+  syncPill();
+  if (S.module === "insights") return renderInsights();
+  if (S.module === "procurement") return renderProcurement();
+  if (S.busy) return renderBusy();
+  if (S.screen === "setup") return renderSetup();
+  if (S.screen === "hub") return renderHub();
+  if (S.screen === "review") return renderReview();
+}
+
+// -------------------------------------------------------- procurement
+// Deliberately empty. The module exists so the shell can hold more than one
+// area of the business; nothing is implemented until the workflow is defined.
+// ---------------------------------------------------------- procurement
+// A ranked buy list, pushed rather than asked for. The levels come from
+// /api/procurement, which computes them from the saved sales history -- the
+// same history in always gives the same levels out, and every score can be
+// traced to the figures shown beside it.
+
+const LEVELS = {
+  critical: { label: "Critical", note: "take these on first" },
+  high:     { label: "High",     note: "worth taking on" },
+  low:      { label: "Low",      note: "don’t prioritise" },
+};
+
+/** Level per product label, for rendering a signal wherever a product appears.
+ *  Keys are the same labels the analytics use (the raw product name, else the
+ *  short code), so Insights, the review table and the buy list all agree. */
+function buyIndex() {
+  const recs = S.buys.data?.recommendations;
+  if (!recs) return null;
+  const ix = {};
+  for (const r of recs) ix[String(r.product).trim().toUpperCase()] = r;
+  return ix;
+}
+
+/** A product's buy signal as a small chip. Empty string when there is no
+ *  history for it, which is not the same as a Low rating and must not look
+ *  like one. */
+function buyChip(label) {
+  const ix = buyIndex();
+  if (!ix || !label) return "";
+  const r = ix[String(label).trim().toUpperCase()];
+  if (!r) return "";
+  const why = (r.reasons || [])[0] || "";
+  return `<span class="sig ${r.level}" title="${esc(LEVELS[r.level].label)} — ${esc(why)}">${esc(LEVELS[r.level].label)}</span>`;
+}
+
+// ---------------------------------------------------------- agent watch
+// How the agent has treated the money. Deliberately NOT a page of its own: the
+// question only means anything next to the figure that raised it, so the flags
+// render inline on Insights, on the payment panel and on the review rows.
+
+/** The agent-watch strip: what the agent kept, and what cannot be checked.
+ *
+ *  Shown even when nothing is flagged, because "the deduction has been normal on
+ *  every sale" is the answer to the question and worth saying plainly. The note
+ *  about the price is always there: a panel that only reports what it CAN check
+ *  reads as a clean bill of health on the one thing it is blind to. */
+function watchStrip(w) {
+  if (!w || !w.rate_known_from) return "";
+  const rate = w.going_rate == null ? null : (w.going_rate * 100).toFixed(1) + "%";
+  const flagged = (w.rate_concerns || []).length;
+  const severe = (w.rate_concerns || []).filter(c => c.severity === "severe").length;
+  const head = flagged
+    ? `<div><span class="wl">Worth asking about</span><b>${flagged} sale${flagged === 1 ? "" : "s"}</b>`
+      + (severe ? ` <span class="wsig severe">${severe} serious</span>` : "") + `</div>`
+    : `<div><span class="wl">The agent's cut</span><b>normal on all ${fmtInt(w.rate_known_from)} paid sales</b></div>`;
+  const list = (w.rate_concerns || []).slice(0, 5).map(c => `
+    <li><span class="wsig ${c.severity}">${c.severity === "severe" ? "Check" : "High cut"}</span>
+      <span><b>${c.stm_no ?? "—"}</b> ${esc(c.product || "")}
+      <span class="wq">kept R ${fmt(c.kept)} of R ${fmt(c.gross)} — ${(c.rate * 100).toFixed(0)}%
+      against your usual ${(c.baseline * 100).toFixed(0)}%</span></span></li>`).join("");
+  return `<div class="watch-strip">
+    ${head}
+    ${rate ? `<div><span class="wl">Usual deduction</span><b>${rate}</b></div>` : ""}
+    ${(w.totals && w.totals.cartons_left)
+      ? `<div><span class="wl">Sent but never sold</span><b>${fmtInt(w.totals.cartons_left)} cartons</b>`
+        + `<span class="wq"> of ${fmtInt(w.totals.cartons_sent)} sent`
+        + `${w.totals.share_unsold != null ? `, ${Math.round(w.totals.share_unsold * 100)}%` : ""}</span></div>`
+      : ""}
+    ${list ? `<ul class="watch-list">${list}</ul>` : ""}
+    <div class="wnote">${esc(w.price_unverifiable)}</div>
+  </div>`;
+}
+
+/** Fetch the analytics payload quietly so watch flags work off the Insights page.
+ *  Mirrors ensureBuySignals: never flips `loading`, so it cannot blank a screen
+ *  the operator is reading, and never retries after one failure. */
+async function ensureWatchSignals() {
+  const I = S.insights;
+  if (I.watchTried || I.data || I.loading || !S.live) return;
+  I.watchTried = true;
+  try {
+    I.data = await (await api("/api/analytics")).json();
+    render();
+  } catch { /* the flags are an enhancement; never block a page on them */ }
+}
+
+/** The integrity block from the last analytics load, keyed for lookup. */
+function watchIndex() {
+  const w = S.insights && S.insights.data && S.insights.data.integrity;
+  if (!w) return null;
+  if (!w._ix) {
+    const ix = { stm: {}, product: {} };
+    for (const c of w.rate_concerns || []) {
+      if (c.stm_no != null) ix.stm[String(c.stm_no)] = c;
+    }
+    // Keyed on the PRODUCT's own share of everything sent, not on a single bad
+    // consignment. Indexing unsold_concerns here meant the last consignment for a
+    // product won, so oranges showed "85% not sold" when the product's real
+    // figure was 7%. The worst consignment is kept alongside, for the tooltip.
+    for (const p of Object.values(w.by_product || {})) {
+      ix.product[String(p.product).trim().toUpperCase()] = p;
+    }
+    for (const u of w.unsold || []) {
+      const k = String(u.product || "").trim().toUpperCase();
+      if (k && ix.product[k] && !ix.product[k].worst) ix.product[k].worst = u;
+    }
+    w._ix = ix;
+  }
+  return w._ix;
+}
+
+/** A flag for one statement, to sit beside it anywhere it appears. */
+function watchChip(stm) {
+  const ix = watchIndex();
+  const c = ix && stm != null ? ix.stm[String(stm)] : null;
+  if (!c) return "";
+  const label = c.severity === "severe" ? "Check" : "High cut";
+  return `<span class="wsig ${c.severity}" title="${esc(c.why)} Gross R ${fmt(c.gross)}, `
+       + `Nett R ${fmt(c.nett)}, so R ${fmt(c.kept)} was kept.">${label}</span>`;
+}
+
+/** A flag for a product a notable share of which never sold.
+ *
+ *  The percentage is the product's own: cartons left over cartons sent, across
+ *  every consignment of it, each delivery counted once. */
+function unsoldChip(label) {
+  const ix = watchIndex();
+  const p = ix && label ? ix.product[String(label).trim().toUpperCase()] : null;
+  if (!p) return "";
+  const worst = p.worst
+    ? ` Worst single consignment: ${fmtInt(p.worst.cartons_left)} of `
+      + `${fmtInt(p.worst.cartons_sent)} cartons left.`
+    : "";
+  return `<span class="wsig watch" title="${Math.round(p.share_unsold * 100)}% of everything `
+       + `sent of this product never sold, across ${fmtInt(p.consignments)} `
+       + `consignment${p.consignments === 1 ? "" : "s"}.${worst} On consignment that loss is the `
+       + `supplier's, but the agent decides what moves off the floor.">`
+       + `${Math.round(p.share_unsold * 100)}% unsold</span>`;
+}
+
+/** Fetch the buy payload quietly so signals work outside the buy list.
+ *  Never flips `loading`, so it cannot blank a screen the user is reading. */
+async function ensureBuySignals() {
+  const B = S.buys;
+  if (B.tried || B.data || B.loading || !S.live) return;
+  B.tried = true;
+  try {
+    B.data = await (await api("/api/procurement")).json();
+    // A background fetch that succeeds must clear an earlier failure, or the
+    // buy list keeps showing "nothing to advise on" while holding real data.
+    B.error = null;
+    syncBuyBadge();
+    render();
+  } catch { /* signals are an enhancement; never block the page on them */ }
+}
+
+/** The rail badge counts what needs backing first, so the buy list advertises
+ *  itself from every module instead of waiting to be visited. */
+function syncBuyBadge() {
+  const el = document.getElementById("buyBadge");
+  if (!el) return;
+  const recs = S.buys.data?.recommendations || [];
+  const n = recs.filter(r => r.level === "critical").length;
+  el.hidden = !n;
+  el.textContent = n ? String(n) : "";
+  el.title = n ? `${n} line${n === 1 ? "" : "s"} to back first` : "";
+}
+
+async function loadBuys() {
+  const B = S.buys;
+  B.loading = true; B.error = null; render();
+  try {
+    B.data = S.live ? await (await api("/api/procurement")).json() : null;
+    B.tried = true;
+    syncBuyBadge();
+    if (!S.live) B.error = "This reads your saved sales history, so it needs the live app.";
+  } catch (e) {
+    B.error = e.message || String(e);
+  } finally { B.loading = false; render(); }
+}
+
+// --------------------------------------------------------- settlement
+// Zaco buys nothing, so there is no budget. What is recorded per consignment
+// is the commission percentage agreed with the supplier, and whether they have
+// been paid their share yet.
+
+async function loadSettlement() {
+  const B = S.buys;
+  if (!S.live) { B.settle = { lines: [], by_supplier: [], awaiting_terms: [] }; render(); return; }
+  B.settleLoading = true; render();
+  try { B.settle = await (await api("/api/consignments")).json(); }
+  catch (e) { B.settle = { lines: [], by_supplier: [], awaiting_terms: [], error: e.message }; }
+  finally { B.settleLoading = false; render(); }
+}
+
+async function loadSuppliers() {
+  if (!S.live) { S.buys.suppliers = []; return; }
+  try { S.buys.suppliers = (await (await api("/api/suppliers")).json()).suppliers || []; }
+  catch { S.buys.suppliers = []; }
+}
+
+function setBuyTab(t) {
+  S.buys.tab = t;
+  if (t === "settle" && S.buys.settle === null) { loadSuppliers().then(loadSettlement); }
+  else render();
+}
+
+function setDealDraft(key, field, v) {
+  const d = S.buys.draft[key] || (S.buys.draft[key] = {});
+  d[field] = v;
+  // Deliberately no re-render: this fires on every keystroke and would fight
+  // the caret.
+}
+
+async function saveDeal(ref, product) {
+  const key = ref + "|" + product;
+  const draft = S.buys.draft[key] || {};
+  const pct = parseFloat(draft.pct);
+  if (!(pct >= 0 && pct <= 100)) { toast("Enter your commission as a percentage, 0 to 100", true); return; }
+  try {
+    const body = new URLSearchParams({ supplier_ref: ref, product, commission_pct: pct });
+    if (draft.supplier_id) body.set("supplier_id", draft.supplier_id);
+    await api("/api/consignments", { method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
+    delete S.buys.draft[key];
+    toast("Saved " + pct + "% commission");
+    // Terms change both what is owed and how the line ranks.
+    S.buys.settle = null; S.buys.data = null; S.buys.tried = false;
+    await loadSettlement(); loadBuys();
+  } catch (e) { toast(e.message || String(e), true); }
+}
+
+async function markPaid(ref, product, amount) {
+  if (!confirm("Record that the supplier has been paid R " + fmt(amount) + " for this consignment?")) return;
+  try {
+    const body = new URLSearchParams({ supplier_ref: ref, product, settled_amount: amount });
+    await api("/api/consignments/settle", { method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
+    toast("Marked as paid");
+    S.buys.settle = null;
+    await loadSettlement();
+  } catch (e) { toast(e.message || String(e), true); }
+}
+
+async function addSupplier() {
+  const name = (S.buys.newSupplier || "").trim();
+  if (!name) { toast("Give the supplier a name", true); return; }
+  try {
+    await api("/api/suppliers", { method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ name }).toString() });
+    S.buys.newSupplier = "";
+    toast("Added " + name);
+    await loadSuppliers(); render();
+  } catch (e) { toast(e.message || String(e), true); }
+}
+
+function renderSettlement() {
+  const B = S.buys;
+  const c = B.settle;
+  if (B.settleLoading || !c) return `<div class="card"><div class="busy"><span class="spin"></span> Working out what is owed…</div></div>`;
+  if (c.error) return `<div class="banner bad"><span class="bi">!</span><span>${esc(c.error)}</span></div>`;
+
+  const supplierOpts = (B.suppliers || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  const q = (x) => JSON.stringify(x).replace(/"/g, "&quot;");
+
+  // What the market has paid for but nobody has claimed: the work queue.
+  const queue = (c.awaiting_terms || []).length ? `
+    <div class="card ins-card wide">
+      <div class="ins-card-head"><h2>Needs terms</h2></div>
+      <p class="ins-sub">The market has paid for these, but nothing can be settled until you say whose they are and what your cut is.
+         <b>R ${fmt(c.unattributed_nett)}</b> is sitting unallocated and is left out of every total above.</p>
+      <div class="table-wrap"><div class="table-scroll"><table class="recon">
+        <thead><tr><th>DN</th><th>Product</th><th class="rt">Sold</th><th class="rt">Nett in</th>
+          <th>Supplier</th><th class="rt">Your %</th><th></th></tr></thead>
+        <tbody>${c.awaiting_terms.map(e => {
+          const key = e.supplier_ref + "|" + e.product;
+          return `<tr>
+            <td class="num">${e.supplier_ref}</td>
+            <td class="rp" title="${esc(e.product)}">${esc(e.product)}</td>
+            <td class="rt num">${fmtInt(e.cartons_sold)}</td>
+            <td class="rt num">${e.nett == null ? "—" : "R " + fmt(e.nett)}</td>
+            <td><select class="mini-select" onchange="setDealDraft('${esc(key)}','supplier_id',this.value)">
+              <option value="">Whose is it?</option>${supplierOpts}</select></td>
+            <td class="rt"><input class="cell-input cost-in" inputmode="decimal" placeholder="${c.default_commission_pct}%"
+                 oninput="setDealDraft('${esc(key)}','pct',this.value)"></td>
+            <td><button class="btn primary sm" onclick="saveDeal(${e.supplier_ref}, ${q(e.product)})">Save</button></td>
+          </tr>`; }).join("")}</tbody>
+      </table></div></div>
+    </div>` : "";
+
+  const positions = (c.by_supplier || []).length ? `
+    <div class="card ins-card wide">
+      <div class="ins-card-head"><h2>By supplier</h2></div>
+      <p class="ins-sub">What each supplier is owed from produce that has already sold and been paid for.</p>
+      <div class="table-wrap"><div class="table-scroll"><table class="recon">
+        <thead><tr><th>Supplier</th><th class="rt">Consignments</th><th class="rt">Sold</th><th class="rt">Unsold</th>
+          <th class="rt">Nett in</th><th class="rt">Your commission</th><th class="rt">Owed</th><th class="rt">Paid</th></tr></thead>
+        <tbody>${c.by_supplier.map(g => `<tr>
+          <td><b>${esc(g.supplier)}</b></td>
+          <td class="rt num">${fmtInt(g.consignments)}</td>
+          <td class="rt num">${fmtInt(g.cartons_sold)}</td>
+          <td class="rt num">${g.unsold ? fmtInt(g.unsold) : "—"}</td>
+          <td class="rt num">R ${fmt(g.nett)}</td>
+          <td class="rt num">R ${fmt(g.commission)}</td>
+          <td class="rt num"><b>${g.owed ? "R " + fmt(g.owed) : "—"}</b></td>
+          <td class="rt num">${g.paid ? "R " + fmt(g.paid) : "—"}</td>
+        </tr>`).join("")}</tbody>
+      </table></div></div>
+    </div>` : "";
+
+  const lines = (c.lines || []).length ? `
+    <div class="card ins-card wide">
+      <div class="ins-card-head"><h2>Settlements</h2></div>
+      <p class="ins-sub">Each consignment the market has paid for, split between your commission and the supplier's share.</p>
+      <div class="table-wrap"><div class="table-scroll"><table class="recon">
+        <thead><tr><th>DN</th><th>Product</th><th>Supplier</th><th class="rt">Nett in</th>
+          <th class="rt">Your %</th><th class="rt">You keep</th><th class="rt">They get</th><th></th></tr></thead>
+        <tbody>${c.lines.map(l => `<tr class="${l.settled ? "existing" : ""}">
+          <td class="num">${l.supplier_ref}</td>
+          <td class="rp" title="${esc(l.product)}">${esc(l.product)}</td>
+          <td>${esc(l.supplier || "—")}</td>
+          <td class="rt num">R ${fmt(l.nett)}</td>
+          <td class="rt num">${l.commission_pct}%</td>
+          <td class="rt num">R ${fmt(l.commission)}</td>
+          <td class="rt num"><b>R ${fmt(l.owed_to_supplier)}</b></td>
+          <td>${l.settled
+            ? `<span class="tag existing">paid${l.settled_amount != null && Number(l.settled_amount) !== l.owed_to_supplier ? " R " + fmt(l.settled_amount) : ""}</span>`
+            : `<button class="btn ghost sm" onclick="markPaid(${l.supplier_ref}, ${q(l.product)}, ${l.owed_to_supplier})">Mark paid</button>`}</td>
+        </tr>`).join("")}</tbody>
+      </table></div></div>
+    </div>` : "";
+
+  const stock = (c.outstanding_stock || []).length ? `
+    <div class="card ins-card wide">
+      <div class="ins-card-head"><h2>Still in the market</h2></div>
+      <p class="ins-sub">Consignment stock sent but not yet sold. On consignment this is the supplier's risk rather than yours, but it is produce ageing on a floor right now and earning you nothing.</p>
+      <div class="table-wrap"><div class="table-scroll"><table class="recon">
+        <thead><tr><th>DN</th><th>Product</th><th>Supplier</th><th>Where</th>
+          <th class="rt">Sent</th><th class="rt">Sold</th><th class="rt">Left</th></tr></thead>
+        <tbody>${c.outstanding_stock.slice(0, 40).map(o => `<tr>
+          <td class="num">${o.supplier_ref}</td>
+          <td class="rp" title="${esc(o.product)}">${esc(o.product)}</td>
+          <td>${esc(o.supplier || "—")}</td>
+          <td>${esc(o.market_agent || o.market || "—")}</td>
+          <td class="rt num">${fmtInt(o.cartons_sent)}</td>
+          <td class="rt num">${fmtInt(o.cartons_sold)}</td>
+          <td class="rt num"><b>${fmtInt(o.cartons_left)}</b></td>
+        </tr>`).join("")}</tbody>
+      </table></div></div>
+    </div>` : "";
+
+  return `
+    <div class="ins-controls">
+      <label class="ctl"><span>Add a supplier</span>
+        <input class="ask-input" placeholder="Farm or grower name"
+               oninput="S.buys.newSupplier = this.value"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();addSupplier();}"></label>
+      <button class="btn ghost sm" onclick="addSupplier()">+ Add</button>
+    </div>
+    ${queue}${positions}${lines}${stock}
+    ${!queue && !positions && !lines ? `<div class="card placeholder"><div class="pi">◆</div>
+      <h2>Nothing to settle yet</h2><p>Save some sales, then record whose produce it was and what your cut is.</p></div>` : ""}`;
+}
+
+function renderProcurement() {
+  const B = S.buys;
+  if (B.data === null && !B.loading && B.error === null) loadBuys();
+
+  const head = `<div class="head"><h1>What to take on</h1>
+    <p>Ranked from what the produce actually did: how much of it sold, how fast, and at what price.</p></div>`;
+
+  if (B.loading) {
+    main.innerHTML = `<section class="screen">${head}<div class="card"><div class="busy"><span class="spin"></span> Working out what is worth taking on…</div></div></section>`;
+    return;
+  }
+  // Data wins over a stale error: having something to show and refusing to
+  // show it is the worse failure.
+  if (!B.data) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card placeholder"><div class="pi">◆</div><h2>Nothing to advise on yet</h2>
+      <p>${esc(B.error || "Save some sales first — the advice is built from them.")}</p></div></section>`;
+    return;
+  }
+
+  const d = B.data;
+  const recs = d.recommendations || [];
+  if (!recs.length) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card placeholder"><div class="pi">◆</div><h2>No history yet</h2>
+      <p>Save a round of sales and this fills in.</p></div></section>`;
+    return;
+  }
+
+  const earn = d.earnings || {};
+  const h = d.history || {};
+  const group = lvl => recs.filter(r => r.level === lvl);
+
+  main.innerHTML = `
+    <section class="screen ins">
+      <div class="head ins-head">
+        <div><h1>What to take on</h1>
+          <p>Which lines are worth accepting from your suppliers. Work down it against what they are actually
+             offering. Prices shown are what these lines <b>realised</b> on consignment, not a price you are promised.
+             From ${h.consignments} consignment${h.consignments === 1 ? "" : "s"} across ${h.months} month${h.months === 1 ? "" : "s"}${h.from ? ` (${esc(h.from)} to ${esc(h.to)})` : ""}.</p></div>
+        <div class="ins-actions">
+          <div class="seg"><button class="${B.tab === "take" ? "on" : ""}" onclick="setBuyTab('take')">What to take on</button><button class="${B.tab === "settle" ? "on" : ""}" onclick="setBuyTab('settle')">Settlements${d.termed && d.termed.of ? ` (${d.termed.products}/${d.termed.of})` : ""}</button></div>
+          <button class="btn ghost sm refresh" onclick="loadBuys()">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div class="banner"><span class="bi">◆</span><span>${esc(d.basis)}</span></div>
+
+      ${B.changes ? `<div class="banner moved"><span class="bi">↑</span><span>
+        <b>Since your last save, ${B.changes.length} line${B.changes.length === 1 ? "" : "s"} moved up:</b>
+        ${B.changes.slice(0, 8).map(c => `${esc(c.product)} <span class="lvl ${c.to} tiny">${LEVELS[c.to].label}</span>`).join(", ")}${B.changes.length > 8 ? ", and more" : ""}.
+      </span><button class="btn ghost sm" onclick="dismissBuyChanges()">Dismiss</button></div>` : ""}
+
+      ${B.tab === "settle" ? renderSettlement() : `
+      <div class="kpis">
+        ${kpiCard("You earned", "R " + fmt(earn.commission), esc(earn.source || ""))}
+        ${kpiCard("Owed to suppliers", "R " + fmt(earn.owed_to_suppliers), "their share, not yet paid out")}
+        ${kpiCard("Take on first", fmtInt(group("critical").length), "critical lines")}
+        ${kpiCard("Worth taking", fmtInt(group("high").length), "high priority")}
+      </div>
+
+      ${["critical", "high", "low"].map(lvl => {
+        const items = group(lvl);
+        if (!items.length) return "";
+        return `<div class="buy-group">
+          <h2 class="buy-head"><span class="lvl ${lvl}">${LEVELS[lvl].label}</span>
+            <span class="buy-note">${LEVELS[lvl].note}</span></h2>
+          ${items.map(buyCard).join("")}
+        </div>`;
+      }).join("")}`}
+    </section>`;
+}
+
+function buyCard(r) {
+  // Nothing is paid to acquire stock, so there is no spend to show. Where the
+  // terms are on record this is what the line actually EARNED; otherwise it is
+  // the share of effort worth putting behind it.
+  const spend = r.earning
+    ? `<div class="buy-spend"><b>R ${fmt(r.earning.per_carton)}</b><span>your commission a carton</span></div>`
+    : r.share
+      ? `<div class="buy-spend"><b>${(r.share * 100).toFixed(1)}%</b><span>of your effort</span></div>`
+      : `<div class="buy-spend muted"><b>—</b><span>don’t prioritise</span></div>`;
+  // On consignment the same carton earns differently depending on who sells it,
+  // so where to send it is part of the recommendation, not a footnote.
+  // Shown even with a single destination: "this goes to Subtropico" is still an
+  // instruction. `compared` guards against implying a choice was made where
+  // there was only ever one place for it to go.
+  const dst = r.destination;
+  const send = dst
+    ? `<div class="buy-send"><span class="sl">${dst.compared ? "Best via" : "Goes to"}</span>
+         <b>${esc(dst.agent || dst.market)}</b>
+         <span class="sp">${dst.agent && dst.market ? `at ${esc(dst.market)} · ` : ""}R ${fmt(dst.avg_price)}/crt realised${dst.compared ? ` · best of ${dst.options}` : ""}</span>
+       </div>`
+    : "";
+  return `<div class="card buy-card ${r.level}">
+    <div class="buy-main">
+      <div class="buy-name">${esc(r.product)}${r.thin_evidence ? `<span class="buy-thin">thin evidence</span>` : ""}</div>
+      ${send}
+      <ul class="buy-why">${(r.reasons || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      <div class="buy-tags">
+        ${dst && !dst.compared ? "" : `<span class="buy-tag">R ${fmt(r.avg_price)}/carton realised</span>`}
+        <span class="buy-tag">${r.sell_through != null ? Math.round(r.sell_through * 100) + "% sold" : "sell-through unknown"}</span>
+        <span class="buy-tag">${fmtInt(r.cartons)} cartons over ${r.consignments} consignment${r.consignments === 1 ? "" : "s"}</span>
+      </div>
+    </div>
+    ${spend}
+  </div>`;
+}
+
+function renderBusy() {
+  main.innerHTML = `<section class="screen"><div class="card"><div class="busy"><span class="spin"></span> ${esc(S.busyMsg || "Working…")}</div></div></section>`;
+}
+
+// ------------------------------------------------------- reconciliation
+// Drop a Payment Details report; it is matched against the accumulated Daily
+// Sales history (by Supplier Ref + Product across its date range) to reveal the
+// Nett and what is still outstanding. See /api/reconcile.
+
+const RECON_STATUS = {
+  matched:     { label: "Matched",      cls: "ok"  },
+  outstanding: { label: "Outstanding",  cls: "warn" },
+  unpaid:      { label: "Unpaid",       cls: "mut" },
+  no_sales:    { label: "No sales yet", cls: "mut" },
+  over:        { label: "Over-sold",    cls: "bad" },
+};
+const RECON_ORDER = ["matched", "outstanding", "over", "unpaid", "no_sales"];
+
+function browsePayments() { document.getElementById("paymentInput").click(); }
+
+async function onPaymentFiles(files) {
+  const R = S.recon;
+  if (!S.live) { R.error = "Reconciliation needs the live app and saved sales history — it can’t run on demo data."; render(); return; }
+  R.loading = true; R.error = null; R.applied = false; render();
+  try {
+    const fd = new FormData();
+    files.forEach(f => fd.append("files", f));
+    R.data = await (await api("/api/reconcile", { method: "POST", body: fd })).json();
+  } catch (e) {
+    R.error = e.message || String(e);
+  } finally {
+    R.loading = false; render();
+  }
+}
+
+/** Write the reconciled Netts into the open workbook by STM No (consignment).
+ *  Sends the file to the backend, which updates each matching row's Nett in
+ *  place -- so rows saved in an earlier round get their Nett too -- then saves
+ *  the updated file back. */
+async function applyReconcileNetts() {
+  const netts = (S.recon.data && S.recon.data.netts) || {};
+  if (!Object.keys(netts).length) { toast("No reconciled Netts to apply", true); return; }
+  if (!S.live) { toast("Applying Netts needs the live app", true); return; }
+  if (!S.wb || (!S.wbFile && !S.wbHandle)) {
+    toast("Open the workbook in Account Sales first, then apply", true);
+    return;
+  }
+  // Same reason as in saveWorkbook: ask for file access before the round trip,
+  // not after it, because the click is spent by then.
+  await ensureWritePermission();
+  try {
+    // Re-read from disk if we have a live handle, so we update the current file.
+    let file = S.wbFile;
+    if (S.wbHandle && S.wbHandle.getFile) { try { file = await S.wbHandle.getFile(); } catch {} }
+    if (!file) { toast("Couldn’t read the workbook — reopen it in Account Sales", true); return; }
+
+    const fd = new FormData();
+    fd.append("netts", JSON.stringify(netts));
+    fd.append("file", file, S.wb.name);
+    const res = await api("/api/workbook/netts", { method: "POST", body: fd });
+    const written = res.headers.get("X-Netts-Written") || "0";
+    const blob = await res.blob();
+
+    // Reflect in memory and write the updated file back.
+    for (const r of S.committed) { const v = netts[String(r.stm_no)]; if (v != null) r.nett_total = v; }
+    S.wbFile = blob;
+    await persistWorkbook(blob);
+    S.recon.applied = true;
+    toast(`Wrote ${written} Nett${written === "1" ? "" : "s"} into ${S.wb.name}`);
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+  render();
+}
+
+/** The Payment matching panel that sits beside the workbook on the hub. */
+function reconcilePanel() {
+  const R = S.recon;
+  return `<aside class="card pm-card">
+    <div class="pm-head">
+      <div><h2>Payment matching</h2>
+        <p class="pm-sub">Match a <b>Payment Details</b> report against your saved daily sales to fill the Nett.</p></div>
+      ${R.data ? `<button class="btn ghost sm" onclick="browsePayments()">Load another</button>` : ""}
+    </div>
+    ${reconcileBody(R)}
+  </aside>`;
+}
+
+function reconcileBody(R) {
+  if (R.loading) return `<div class="busy"><span class="spin"></span> Reconciling…</div>`;
+  if (R.error) return `<div class="banner bad"><span class="bi">!</span><span>${esc(R.error)}</span></div>
+    <button class="btn ghost sm" onclick="browsePayments()">Choose a PDF</button>`;
+  if (!R.data) return `<div class="drop pm-drop" tabindex="0" role="button" onclick="browsePayments()">
+      <div class="big">⇄</div><div class="t">Drop a Payment Details report</div>
+      <div class="s">PDF or CSV</div></div>
+    <p class="pm-note">Daily sales must be saved first — they accumulate in the history. Then each Supplier Ref + Product is matched by summing daily Sales Totals against the payment’s Gross.</p>`;
+
+  const d = R.data;
+  const rows = [...(d.reconciliation || [])].sort(
+    (a, b) => RECON_ORDER.indexOf(a.status) - RECON_ORDER.indexOf(b.status)
+      || (b.payment_nett || 0) - (a.payment_nett || 0));
+  const c = s => rows.filter(r => r.status === s).length;
+  const nettMatched = rows.filter(r => r.status === "matched").reduce((t, r) => t + (r.payment_nett || 0), 0);
+  const nettCount = Object.keys(d.netts || {}).length;
+  const range = d.date_range || {};
+
+  return `
+    ${(d.warnings || []).map(w => `<div class="banner bad"><span class="bi">!</span><span>${esc(w)}</span></div>`).join("")}
+    <div class="pm-meta">${d.payment_count || 0} payment line${d.payment_count === 1 ? "" : "s"}${range.from ? ` · ${niceDate(range.from)} – ${niceDate(range.to)}` : ""} · ${d.daily_rows || 0} saved daily row${d.daily_rows === 1 ? "" : "s"}</div>
+    <div class="pm-kpis">
+      <div class="pm-k ok"><b>${c("matched")}</b><span>Matched</span></div>
+      <div class="pm-k warn"><b>${c("outstanding")}</b><span>Outstanding</span></div>
+      <div class="pm-k"><b>${c("unpaid")}</b><span>Unpaid</span></div>
+      <div class="pm-k"><b>R ${fmt(nettMatched)}</b><span>Nett matched</span></div>
+    </div>
+    ${deductionNote(d.deductions)}
+    ${nettCount ? `<button class="btn primary sm full" onclick="applyReconcileNetts()">${S.recon.applied ? "✓ " : ""}Fill ${nettCount} Nett${nettCount === 1 ? "" : "s"} into ${esc(S.wb.name)}</button>` : ""}
+    <div class="pm-list">
+      ${rows.map(r => {
+        const st = RECON_STATUS[r.status] || { label: r.status, cls: "mut" };
+        return `<div class="pm-row">
+          <span class="pm-p" title="DN ${r.dn} · ${esc(r.product)}">${esc(r.product)}</span>
+          <span class="pm-n num">${r.status === "matched" ? "R " + fmt(r.payment_nett) : "R " + fmt(r.daily_total) + "/" + fmt(r.payment_gross)}</span>
+          <span class="rstat ${st.cls}">${st.label}</span>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+/** What this payment file's account sales kept, read off the file itself.
+ *
+ *  Lives here rather than on a page of its own because this is the moment the
+ *  operator is looking at the payment: the deduction is the one thing these
+ *  reports can prove, and it needs no sales side, so it works even for the rows
+ *  that did not reconcile. */
+function deductionNote(dd) {
+  if (!dd || !dd.of) return "";
+  const base = dd.going_rate == null ? null : (dd.going_rate * 100).toFixed(1) + "%";
+  const list = (dd.concerns || []).slice(0, 6).map(c => `
+    <div class="pm-row">
+      <span class="pm-p" title="DN ${c.dn ?? "—"} · ${esc(c.accsale || "")} · ${niceDate(c.date) || ""}">${c.stm_no ?? esc(c.accsale || "—")}</span>
+      <span class="pm-n num">R ${fmt(c.gross - c.nett)} of R ${fmt(c.gross)}</span>
+      <span class="wsig ${c.severity}" title="${(c.rate * 100).toFixed(0)}% kept${base ? `, against the ${base} this file's median` : ""}">${(c.rate * 100).toFixed(0)}%</span>
+    </div>`).join("");
+  if (!list) {
+    return `<div class="pm-meta">Deductions look normal on all ${fmtInt(dd.of)} account sales`
+         + `${base ? ` (median ${base})` : ""}.</div>`;
+  }
+  return `<div class="pm-meta">${(dd.concerns || []).length} of ${fmtInt(dd.of)} account sales `
+       + `deducted more than usual${base ? ` (median ${base})` : ""} — worth asking about:</div>
+    <div class="pm-list">${list}</div>`;
+}
+
+// ---------------------------------------------------------------- insights
+// Sales analytics over the recorded statement history. The numbers come from
+// the backend's /api/analytics (which reads the durable `statements` table);
+// when the API is unreachable it falls back to a demo payload built from the
+// same sample rows the rest of the app uses, so the dashboard is explorable.
+
+const fmtInt = n => (typeof n === "number" ? n : 0).toLocaleString("en-ZA", { maximumFractionDigits: 0 });
+
+async function loadInsights() {
+  const I = S.insights;
+  I.loading = true; I.error = null; render();
+  try {
+    const qs = new URLSearchParams();
+    if (I.month) qs.set("month", I.month);
+    if (I.week) qs.set("week", I.week);
+    const q = qs.toString();
+    I.data = S.live
+      ? await (await api(`/api/analytics${q ? "?" + q : ""}`)).json()
+      : demoAnalytics(I.month, I.week);
+  } catch (e) {
+    I.error = e.message || String(e);
+  } finally {
+    I.loading = false; render();
+  }
+}
+
+function setInsightMonth(m) {
+  const val = m || null;
+  if (S.insights.month === val) return;
+  S.insights.month = val;
+  S.insights.week = null;   // weeks are scoped to the month, so reset
+  S.insights.data = null;
+  S.insights.confirmDelete = false;
+  loadInsights();
+}
+function setInsightWeek(w) {
+  const val = w || null;
+  if (S.insights.week === val) return;
+  S.insights.week = val;
+  S.insights.data = null;
+  S.insights.confirmDelete = false;
+  loadInsights();
+}
+
+function askDeleteHistory() { S.insights.confirmDelete = true; render(); }
+function cancelDeleteHistory() { S.insights.confirmDelete = false; render(); }
+async function confirmDeleteHistory() {
+  const I = S.insights;
+  if (!S.live) { toast("Deleting history needs the live app", true); return; }
+  const body = new URLSearchParams();
+  if (I.month) body.set("month", I.month);
+  if (I.week) body.set("week", I.week);
+  try {
+    const res = await (await api("/api/history/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    })).json();
+    I.confirmDelete = false;
+    if (res.deleted === 0) {
+      // The request succeeded but row-level security removed nothing -- the
+      // rows aren't owned by this account (or the delete policy isn't in place).
+      toast("Nothing was deleted — your account doesn’t have permission to remove these rows. See the admin note.", true);
+    } else {
+      toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"} for ${scopeLabel(I)}`);
+      I.data = null;      // period is now empty; refetch
+      loadInsights();
+    }
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+}
+function setInsightMetric(m) {
+  if (S.insights.metric === m) return;
+  S.insights.metric = m;
+  render();                 // best-seller ordering is client-side, no refetch
+}
+
+function renderInsights() {
+  const I = S.insights;
+  // Kick off the first load lazily once the module is opened.
+  if (I.data === null && !I.loading && I.error === null) { loadInsights(); }
+  ensureBuySignals();   // so best sellers carry their buy signal
+
+  if (I.loading && I.data === null) {
+    main.innerHTML = `<section class="screen"><div class="head"><h1>Insights</h1>
+      <p>Sales analytics across your recorded statements.</p></div>
+      <div class="card"><div class="busy"><span class="spin"></span> Loading analytics…</div></div></section>`;
+    return;
+  }
+  if (I.error) {
+    main.innerHTML = `<section class="screen"><div class="head"><h1>Insights</h1></div>
+      <div class="banner bad"><span class="bi">!</span><span><b>Could not load analytics.</b> ${esc(I.error)}</span></div>
+      <button class="btn" onclick="loadInsights()">Try again</button></section>`;
+    return;
+  }
+
+  const d = I.data || { kpis: {}, best_sellers: [], by_market: [], by_agent: [], trend: [], available: {} };
+  const k = d.kpis || {};
+  const avail = d.available || { months: [], weeks: [], weeks_by_month: {} };
+  // "History" is judged from every recorded period, not the current scope, so a
+  // filter that lands on an empty slice still shows the pickers instead of the
+  // first-run placeholder.
+  const hasHistory = (avail.months || []).length > 0 || (k.statement_count || 0) > 0;
+
+  if (!hasHistory) {
+    main.innerHTML = `<section class="screen">
+      <div class="head ins-head">
+        <div><h1>Insights</h1>
+          <p>Sales analytics across your recorded statements.</p></div>
+        <button class="btn ghost sm refresh" onclick="loadInsights()" title="Refresh from the latest saved data">↻ Refresh</button>
+      </div>
+      <div class="card placeholder">
+        <div class="pi">◔</div>
+        <h2>No history yet</h2>
+        <p>Insights build up as you save statements. Process a round of PDFs in Account Sales and save the workbook — each saved statement is recorded here, and this dashboard fills in.</p>
+        ${S.live ? `<div style="margin-top:20px"><button class="btn ghost" onclick="loadInsights()">↻ Refresh</button></div>`
+          : `<div class="stub">Showing nothing because the API is offline — sign in to the live app to see your data.</div>`}
+      </div>
+    </section>`;
+    return;
+  }
+
+  const metric = I.metric;              // "value" | "cartons"
+  const metricLabel = metric === "value" ? "sales value" : "cartons";
+  const sellers = [...d.best_sellers].sort((a, b) => b[metric] - a[metric]).slice(0, 12);
+  const scopedEmpty = (k.statement_count || 0) === 0;
+  const trendTitle = { day: "Daily", week: "Weekly", month: "Monthly" }[d.period] || "";
+
+  main.innerHTML = `
+    <section class="screen ins">
+      <div class="head ins-head">
+        <div><h1>Insights</h1>
+          <p>Viewing <b>${esc(scopeLabel(I))}</b> · ${S.live ? "" : "<b>demo data</b> · "}gross value = cartons sold × price (Nett is entered by hand, so it is not used here).</p></div>
+        <div class="ins-actions">
+          ${insightControls(avail, I)}
+          <button class="btn ghost sm refresh" onclick="loadInsights()" title="Refresh from the latest saved data">↻ Refresh</button>
+        </div>
+      </div>
+
+      ${scopedEmpty ? `<div class="banner"><span class="bi">◔</span><span>No statements recorded in <b>${esc(scopeLabel(I))}</b>. Pick another month or week above.</span></div>` : ""}
+
+      ${(() => { const c = d.commission || {};
+        if (!c.known) return `<div class="banner"><span class="bi">◆</span><span>These are <b>market sales</b>, not your earnings. Most of this money is owed onward to your suppliers. Record the commission on a consignment under Take on → Settlements and what you actually earned appears here.</span></div>`;
+        return `<div class="profit-strip up">
+          <div><span class="pl">Your commission</span><b>R ${fmt(c.commission)}</b></div>
+          <div><span class="pl">Rate</span><b>${c.rate == null ? "—" : (c.rate * 100).toFixed(1) + "%"}</b></div>
+          <div><span class="pl">Nett received</span><b>R ${fmt(c.nett)}</b></div>
+          <div><span class="pl">Owed to suppliers</span><b>R ${fmt(c.owed_to_suppliers)}</b></div>
+          <div class="pcov">based on ${c.covered} of ${c.of} consignments with agreed terms</div>
+        </div>`; })()}
+
+      ${watchStrip(d.integrity)}
+
+      <div class="kpis">
+        ${(() => {
+          // Both headline figures are NET of what came back. On the net alone a
+          // month that sold 3 448 cartons and had 280 returned is indis-
+          // tinguishable from one that quietly sold 3 168, so where anything
+          // was returned the card says all three: sold, returned, and the net
+          // that is left. Where nothing was, it keeps its plain note rather
+          // than carrying an "and 0 returned" that means nothing.
+          const back = k.cartons_returned || 0;
+          const rate = ((k.return_rate || 0) * 100).toFixed(1);
+          const nb = t => `<span class="nb">${esc(t)}</span>`;
+          const moneyNote = back
+            ? `${nb("R " + fmt(k.gross_value))} sold <span class="kback">less ${nb("R " + fmt(k.returns_value))} returned</span>`
+            : undefined;
+          const cartonNote = back
+            ? `${nb(fmtInt(k.cartons_sold))} sold <span class="kback">less ${nb(fmtInt(back))} returned · ${nb(rate + "% back")}</span>`
+            : undefined;
+          return `
+        ${kpiCard(back ? "Sales value, net" : "Total sales value", "R " + fmt(k.total_value), "gross across all statements", moneyNote)}
+        ${kpiCard(back ? "Cartons sold, net" : "Cartons sold", fmtInt(k.total_cartons), "units moved", cartonNote)}`;
+        })()}
+        ${kpiCard("Statements", fmtInt(k.statement_count), "recorded")}
+        ${kpiCard("Products", fmtInt(k.product_count), "distinct products")}
+        ${kpiCard("Markets", fmtInt(k.market_count), "selling points")}
+        ${kpiCard("Agents", fmtInt(k.agent_count), "market agents")}
+      </div>
+
+      <div class="ins-grid">
+        <div class="card ins-card wide">
+          <div class="ins-card-head">
+            <h2>Best sellers</h2>
+            <div class="seg sm">
+              <button class="${metric === "value" ? "on" : ""}" onclick="setInsightMetric('value')">By value</button>
+              <button class="${metric === "cartons" ? "on" : ""}" onclick="setInsightMetric('cartons')">By cartons</button>
+            </div>
+          </div>
+          <p class="ins-sub">Top products by ${metricLabel}. The <b>A/B/C</b> tag is a Pareto band — A products drive the first 80% of value. The coloured tag is what the buy list says about backing it again.</p>
+          ${barList(sellers, metric, { abc: true, signals: true })}
+        </div>
+
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>${trendTitle} trend</h2></div>
+          <p class="ins-sub">Sales value over time.</p>
+          ${trendChart(d.trend)}
+        </div>
+
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>By market</h2></div>
+          <p class="ins-sub">Where the produce is selling, by ${metricLabel}.</p>
+          ${barList([...d.by_market].sort((a, b) => b[metric] - a[metric]).slice(0, 10), metric, {})}
+        </div>
+
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>By agent</h2></div>
+          <p class="ins-sub">Which market agent moved the produce, by ${metricLabel}.</p>
+          ${barList([...d.by_agent].sort((a, b) => b[metric] - a[metric]).slice(0, 10), metric, {})}
+        </div>
+      </div>
+
+      ${(I.month || I.week) && !scopedEmpty ? `<div class="ins-danger">
+        ${I.confirmDelete ? `
+          <span class="dwarn"><b>Delete all ${fmtInt(k.statement_count)} statement${k.statement_count === 1 ? "" : "s"} for ${esc(scopeLabel(I))}?</b> This can’t be undone, and reconciliation for this period will no longer be possible.</span>
+          <span class="dact">
+            <button class="btn ghost sm" onclick="cancelDeleteHistory()">Cancel</button>
+            <button class="btn danger sm" onclick="confirmDeleteHistory()">Delete permanently</button>
+          </span>`
+        : `<button class="btn ghost sm dtrigger" onclick="askDeleteHistory()">🗑 Delete ${esc(scopeLabel(I))} history…</button>`}
+      </div>` : ""}
+    </section>`;
+}
+
+function dateRange(k) {
+  if (!k.first_date) return "No dated statements";
+  const a = k.first_date, b = k.last_date;
+  return a === b ? niceDate(a) : `${niceDate(a)} – ${niceDate(b)}`;
+}
+function niceDate(iso) {
+  const [y, m, dd] = String(iso).split("-").map(Number);
+  return `${dd} ${MONTHS[(m || 1) - 1]} ${y}`;
+}
+
+/** The Month + Week pickers. Weeks narrow to the chosen month; with no month
+ *  chosen the week list spans everything (its label carries the dates). */
+function insightControls(avail, I) {
+  const months = avail.months || [];
+  const monthOpts = `<option value="">All time</option>` + months
+    .map(m => `<option value="${m}"${I.month === m ? " selected" : ""}>${esc(monthLabel(m))}</option>`).join("");
+  const weekList = I.month ? (avail.weeks_by_month?.[I.month] || []) : (avail.weeks || []);
+  const weekOpts = `<option value="">${I.month ? "Whole month" : "All weeks"}</option>` + weekList
+    .map(w => `<option value="${w}"${I.week === w ? " selected" : ""}>${esc(weekLabel(w))}</option>`).join("");
+  return `<div class="ins-controls">
+    <label class="ctl"><span>Month</span>
+      <select onchange="setInsightMonth(this.value)">${monthOpts}</select></label>
+    <label class="ctl"><span>Week</span>
+      <select${weekList.length ? "" : " disabled"} onchange="setInsightWeek(this.value)">${weekOpts}</select></label>
+  </div>`;
+}
+
+function scopeLabel(I) {
+  if (I.week) return weekLabel(I.week);
+  if (I.month) return monthLabel(I.month);
+  return "All time";
+}
+function monthLabel(m) {
+  const [y, mo] = String(m).split("-").map(Number);
+  return new Date(y, (mo || 1) - 1, 1).toLocaleString("en-ZA", { month: "long", year: "numeric" });
+}
+/** ISO week ("2026-W31") -> "Week 31 · 27 Jul – 2 Aug". */
+function weekLabel(wk) {
+  const [y, wp] = String(wk).split("-W");
+  const w = Number(wp);
+  const mon = isoWeekMonday(Number(y), w);
+  const sun = new Date(mon); sun.setUTCDate(mon.getUTCDate() + 6);
+  const d = dt => `${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]}`;
+  return `Week ${w} · ${d(mon)} – ${d(sun)}`;
+}
+function isoWeekMonday(y, w) {
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const dow = jan4.getUTCDay() || 7;
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - dow + 1 + (w - 1) * 7);
+  return monday;
+}
+
+function kpiCard(label, value, note, noteHtml) {
+  const n = noteHtml === undefined ? esc(note) : noteHtml;
+  return `<div class="kpi"><div class="kv">${esc(value)}</div><div class="kl">${esc(label)}</div><div class="kn">${n}</div></div>`;
+}
+
+/** Horizontal bars. `metric` selects value/cartons; value bars show R, else units. */
+function barList(items, metric, opts) {
+  if (!items || !items.length) return `<p class="ins-empty">Nothing to show yet.</p>`;
+  const max = Math.max(...items.map(i => i[metric]), 0) || 1;
+  const abcClass = { A: "a", B: "b", C: "c" };
+  return `<ul class="bars">${items.map(i => {
+    const pct = Math.max(2, Math.round((i[metric] / max) * 100));
+    const shown = metric === "value" ? "R " + fmt(i.value) : fmtInt(i.cartons);
+    const tag = opts.abc && i.abc ? `<span class="abc ${abcClass[i.abc] || ""}">${i.abc}</span>` : "";
+    // A best seller and a good buy are not the same claim: turnover says what
+    // moved, the signal says whether backing it again is worth the money. Shown
+    // together so the difference is visible rather than assumed.
+    const sig = opts.signals ? buyChip(i.label) : "";
+    // A top seller most of which never sold is the shape worth noticing, so the
+    // flag sits on the same line as the turnover that hides it.
+    const unsold = opts.signals ? unsoldChip(i.label) : "";
+    return `<li class="bar">
+      <div class="bl" title="${esc(i.label)}">${tag}<span class="bt">${esc(i.label)}</span>${sig}${unsold}</div>
+      <div class="btrack"><span class="bfill" style="width:${pct}%"></span></div>
+      <div class="bv">${esc(shown)}</div>
+    </li>`;
+  }).join("")}</ul>`;
+}
+
+/** Compact SVG area+line chart of the trend's value series. */
+function trendChart(points) {
+  if (!points || !points.length) return `<p class="ins-empty">Not enough dated statements to chart a trend.</p>`;
+  if (points.length === 1) {
+    const p = points[0];
+    return `<p class="ins-empty">One period so far — <b>${esc(shortPeriod(p.period))}</b>: R ${fmt(p.value)}.</p>`;
+  }
+  const W = 520, H = 160, PAD = 28;
+  const max = Math.max(...points.map(p => p.value), 0) || 1;
+  const n = points.length;
+  const x = i => PAD + (i * (W - PAD * 2)) / (n - 1);
+  const y = v => H - PAD - (v / max) * (H - PAD * 2);
+  const line = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const area = `${PAD},${H - PAD} ${line} ${(W - PAD)},${H - PAD}`;
+  const dots = points.map((p, i) =>
+    `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3"><title>${esc(shortPeriod(p.period))}: R ${fmt(p.value)}</title></circle>`).join("");
+  // Label only the first, middle and last period to avoid crowding.
+  const idxs = [...new Set([0, Math.floor((n - 1) / 2), n - 1])];
+  const labels = idxs.map(i =>
+    `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="tx">${esc(shortPeriod(points[i].period))}</text>`).join("");
+  return `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" class="trend" preserveAspectRatio="xMidYMid meet" role="img">
+    <polygon points="${area}" class="area"/>
+    <polyline points="${line}" class="stroke"/>
+    ${dots}
+    <text x="${PAD}" y="14" class="tx">R ${fmt(max)}</text>
+    ${labels}
+  </svg></div>`;
+}
+function shortPeriod(p) {
+  // "2026-07-27" -> "27 Jul" ; "2026-W31" -> "W31" ; "2026-07" -> "Jul"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+    const [, m, d] = p.split("-").map(Number);
+    return `${d} ${MONTHS[m - 1]}`;
+  }
+  if (/W\d+$/.test(p)) return p.split("-")[1];
+  const [, m] = String(p).split("-");
+  return m ? MONTHS[Number(m) - 1] : p;
+}
+
+/** Demo analytics when the API is offline: mirrors the backend's shape (incl.
+ *  month/week filtering and available periods) over the same sample rows, so
+ *  the dashboard is explorable without a backend. */
+function demoAnalytics(month, week) {
+  const all = [
+    ...DEMO_EXISTING.map(r => ({ ...r, market: "TSHWANE MARKET", market_agent: "Farmers Trust", group_date: r.date })),
+    ...DEMO_BATCHES.flat().map(r => ({ ...r, market: "JOBURG MKT", market_agent: "Subtropico", group_date: r.date_received })),
+  ];
+  const val = r => num(r.cartons_sold) * num(r.price);
+  const car = r => num(r.cartons_sold);
+  const ret = r => num(r.cartons_returned);
+  const retVal = r => num(r.returns_total);
+  // The product by its real name. The short code belongs to the Excel column,
+  // not to the analytics -- it is assigned by hand, so grouping on it split one
+  // fruit into two lines the moment a row had no code yet. Mirrors
+  // `analytics.product_label`.
+  const label = r => r.product || r.description || "Unknown";
+
+  // Available periods (from all rows, so the pickers stay populated).
+  const months = new Set(), weeks = new Set(), wbm = {};
+  for (const r of all) {
+    const mk = periodKey(r.group_date, "month"), wk = periodKey(r.group_date, "week");
+    if (!mk) continue;
+    months.add(mk); weeks.add(wk);
+    (wbm[mk] = wbm[mk] || new Set()).add(wk);
+  }
+  const available = {
+    months: [...months].sort(),
+    weeks: [...weeks].sort(),
+    weeks_by_month: Object.fromEntries(Object.entries(wbm).map(([m, s]) => [m, [...s].sort()])),
+  };
+
+  // Scope to the chosen month/week (week wins), then pick trend granularity.
+  const rows = all.filter(r => {
+    if (!month && !week) return true;
+    const mk = periodKey(r.group_date, "month"), wk = periodKey(r.group_date, "week");
+    if (week) return wk === week;
+    return mk === month;
+  });
+  const period = week ? "day" : month ? "week" : "month";
+
+  const roll = key => {
+    const m = new Map();
+    for (const r of rows) {
+      const k = key(r) || "Unknown";
+      const o = m.get(k) || { label: k, value: 0, cartons: 0, lines: 0 };
+      o.value += val(r); o.cartons += car(r); o.lines++; m.set(k, o);
+    }
+    return [...m.values()].map(o => ({ ...o, value: round2(o.value), cartons: round2(o.cartons) }))
+      .sort((a, b) => b.value - a.value);
+  };
+  const sellers = roll(label);
+  const total = sellers.reduce((s, i) => s + i.value, 0) || 1;
+  let before = 0;
+  for (const i of sellers) {
+    i.share = round4(i.value / total);
+    before += i.value;
+    i.cumulative_share = round4(before / total);
+  }
+  let cum = 0;
+  for (const i of sellers) { i.abc = cum < 0.8 ? "A" : cum < 0.95 ? "B" : "C"; cum = i.cumulative_share; }
+  const periods = new Map();
+  for (const r of rows) {
+    const pk = periodKey(r.group_date, period);
+    if (!pk) continue;
+    const o = periods.get(pk) || { period: pk, value: 0, cartons: 0 };
+    o.value += val(r); o.cartons += car(r); periods.set(pk, o);
+  }
+  const trend = [...periods.values()].map(o => ({ ...o, value: round2(o.value), cartons: round2(o.cartons) }))
+    .sort((a, b) => a.period < b.period ? -1 : 1);
+  const dates = rows.map(r => r.group_date).filter(Boolean).sort();
+  return {
+    kpis: {
+      total_value: round2(rows.reduce((s, r) => s + val(r), 0)),
+      total_cartons: round2(rows.reduce((s, r) => s + car(r), 0)),
+      gross_value: round2(rows.reduce((s, r) => s + val(r) + retVal(r), 0)),
+      cartons_sold: round2(rows.reduce((s, r) => s + car(r) + ret(r), 0)),
+      cartons_returned: round2(rows.reduce((s, r) => s + ret(r), 0)),
+      returns_value: round2(rows.reduce((s, r) => s + retVal(r), 0)),
+      return_rate: (() => {
+        const sold = rows.reduce((s, r) => s + car(r) + ret(r), 0);
+        return sold ? round4(rows.reduce((s, r) => s + ret(r), 0) / sold) : 0;
+      })(),
+      statement_count: rows.length,
+      product_count: new Set(rows.map(label)).size,
+      market_count: new Set(rows.map(r => r.market)).size,
+      agent_count: new Set(rows.map(r => r.market_agent)).size,
+      first_date: dates[0] || null,
+      last_date: dates[dates.length - 1] || null,
+    },
+    best_sellers: sellers,
+    by_market: roll(r => r.market),
+    by_agent: roll(r => r.market_agent),
+    trend, period, available, filter: { month: month || null, week: week || null },
+  };
+}
+const round2 = n => Math.round(n * 100) / 100;
+const round4 = n => Math.round(n * 10000) / 10000;
+function periodKey(iso, period) {
+  if (!iso) return null;
+  const [y, m, dd] = String(iso).split("-").map(Number);
+  if (period === "day") return `${y}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  if (period === "month") return `${y}-${String(m).padStart(2, "0")}`;
+  const dt = new Date(Date.UTC(y, m - 1, dd));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil((((dt - yearStart) / 86400000) + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
+}
+async function withBusy(msg, fn) {
+  S.busy = true; S.busyMsg = msg; render();
+  try { return await fn(); }
+  catch (e) { toast(e.message || String(e), true); throw e; }
+  finally { S.busy = false; render(); }
+}
+
+// -------------------------------------------------------------- setup
+function renderSetup() {
+  setStep(1);
+  main.innerHTML = `
+    <section class="screen">
+      <div class="head"><h1>Choose a workbook</h1>
+        <p>Create a new workbook from the standard template, or open an existing one to append new statements to what it already contains.</p></div>
+      ${S.live ? "" : `<div class="banner bad"><span class="bi">!</span><span><b>The ZacoAgents API is not reachable.</b> The app is showing built-in example data so you can explore the workflow. Start the backend with <span class="num">uvicorn app.main:app</span> and reload to work with real files.</span></div>`}
+      <div class="choices">
+        <button class="choice" onclick="startNew()">
+          <div class="ci">＋</div><h3>New workbook</h3>
+          <p>A fresh sheet built from the standard template, with headers and formula columns already in place.</p>
+        </button>
+        <button class="choice" onclick="chooseExisting()">
+          <div class="ci">↥</div><h3>Open existing workbook</h3>
+          <p>Select a workbook from your computer. New rows are appended beneath its current contents.</p>
+        </button>
+      </div>
+    </section>`;
+}
+// Market Agent is read from each statement now, so there's no session selector.
+// S.agent stays as a fallback only for rows that don't carry their own agent.
+function agentVal() { return S.agent; }
+
+function startNew() {
+  S.agent = agentVal();
+  S.wb = { name: "Untitled.xlsx" };
+  S.wbFile = null; S.wbHandle = null;
+  S.committed = []; S.pending = []; S.demoPtr = 0; S.saved = false;
+  go("hub");
+}
+
+async function chooseExisting() {
+  S.agent = agentVal();
+  // Prefer the File System Access API so Save can write back to the same file.
+  if (window.showOpenFilePicker) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: "Excel workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx", ".xlsm"] } }],
+        multiple: false,
+      });
+      return openWorkbook(await handle.getFile(), handle);
+    } catch (e) {
+      if (e && e.name === "AbortError") return;   // user cancelled
+      // Anything else (unsupported context, permission) falls through to the input.
+    }
+  }
+  document.getElementById("wbInput").click();
+}
+
+async function openWorkbook(file, handle = null) {
+  S.wb = { name: file.name };
+  S.wbFile = file;
+  S.wbHandle = handle;   // present = Save can write straight back to this file
+  S.pending = []; S.demoPtr = 0; S.saved = true;
+
+  if (!S.live) {
+    S.committed = DEMO_EXISTING.map(r => ({ ...r }));
+    go("hub");
+    return;
+  }
+  await withBusy(`Reading ${file.name}…`, async () => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const info = await (await api("/api/workbook/open", { method: "POST", body: fd })).json();
+    S.committed = (info.rows || []).map(r => ({ ...r, existing: true }));
+    S.screen = "hub";
+  });
+}
+
+// ---------------------------------------------------------------- hub
+function renderHub() {
+  setStep(2);
+  const rows = S.committed;
+  const hasRows = rows.length > 0;
+  const dnCount = new Set(rows.map(r => r.dn)).size;
+  main.innerHTML = `
+    <section class="screen">
+      <div class="workspace">
+        <div class="ws-main">
+          <div class="card wb-bar">
+            <span class="fi">XLS</span>
+            <div><div class="fn">${esc(S.wb.name)}</div>
+              <div class="fm num">${rows.length} rows · ${dnCount} DN group${dnCount === 1 ? "" : "s"} · ${esc(S.agent)}${S.saved ? "" : " · <span style='color:var(--warn)'>unsaved changes</span>"}</div></div>
+            <span class="spacer"></span>
+            <button class="btn ghost sm" onclick="go('setup')">Switch workbook</button>
+            <button class="btn primary sm" onclick="startAdd()">＋ Add statements</button>
+          </div>
+
+          ${hasRows ? tableBlock(rows, { editable: false }) : `
+            <div class="card empty">
+              <div class="big">↑</div>
+              <div style="font-weight:600;color:var(--ink)">This workbook is empty</div>
+              <div style="font-size:13px;margin-top:3px">Add a set of daily-sales PDFs to populate the sheet.</div>
+              <div style="margin-top:18px"><button class="btn primary" onclick="startAdd()">＋ Add statements</button></div>
+            </div>`}
+
+          <div class="actions">
+            <div class="hint">${hasRows ? "Add further statements at any time, then save the workbook." : ""}</div>
+            <span class="spacer"></span>
+            <button class="btn primary" onclick="saveWorkbook()" ${hasRows && !S.saved ? "" : "disabled"}>↓ Save workbook</button>
+          </div>
+        </div>
+
+        ${reconcilePanel()}
+      </div>
+    </section>`;
+}
+
+// ------------------------------------------------------- add and review
+/** "Add statements" lands on a drop-first screen: operators mostly drag the
+ *  PDFs straight in (often from an email), so no file dialog is forced on
+ *  them. Browsing is still there for the ones who want it. */
+function startAdd() {
+  if (S.screen !== "review") { S.screen = "review"; render(); main.scrollTo(0, 0); }
+}
+function browsePdfs() { document.getElementById("pdfInput").click(); }
+
+/** {account sale: DN} from every row the open workbook already holds.
+ *
+ *  Both the rows read out of the file and any added this session count: a
+ *  delivery entered ten minutes ago should answer for its siblings too. Later
+ *  rows win, since those are the more recent statement of the same fact. */
+function bookDns() {
+  const out = {};
+  for (const r of [...(S.committed || []), ...(S.pending || [])]) {
+    if (r.stm_no != null && r.dn != null) out[String(r.stm_no)] = r.dn;
+  }
+  return out;
+}
+
+async function onPdfFiles(files) {
+  if (!S.live) {
+    const batch = DEMO_BATCHES[S.demoPtr % DEMO_BATCHES.length].map(r => ({ ...r, flags: (r.flags||[]).map(f=>({...f})) }));
+    S.demoPtr++;
+    S.pending = S.screen === "review" ? S.pending.concat(batch) : batch;
+    if (S.screen !== "review") go("review"); else renderReview();
+    return;
+  }
+  await withBusy(`Reading ${files.length} statement${files.length === 1 ? "" : "s"}…`, async () => {
+    const fd = new FormData();
+    files.forEach(f => fd.append("files", f));
+    // Column A is Zaco's own DN and the market's export does not carry it. The
+    // workbook does, and both sides name the same account sale, so send what the
+    // open workbook knows and the DN is recovered instead of asked for again.
+    const knownDns = bookDns();
+    if (Object.keys(knownDns).length) fd.append("known_dns", JSON.stringify(knownDns));
+    const data = await (await api("/api/extract", { method: "POST", body: fd })).json();
+    const rows = data.rows || [];
+    S.pending = S.screen === "review" ? S.pending.concat(rows) : rows;
+    S.screen = "review";
+    // Fold in any Nett figures from adjustment reports and apply them across
+    // everything under review, so the sales PDFs and the Nett report can be
+    // dropped together or separately.
+    (data.warnings || []).forEach(w => { if (!S.importWarnings.includes(w)) S.importWarnings.push(w); });
+    if (data.netts) Object.assign(S.nettMap, data.netts);
+    if (data.nett_match) S.nettReports += data.nett_match.reports;
+    applyNetts();
+  });
+}
+
+/** Split one figure across the rows it covers, in the ratio of their gross, so
+ *  the shares add back up to it exactly. This is how the operator's own book
+ *  splits a statement between the products on it. */
+function splitByGross(total, rows) {
+  const grosses = rows.map(r => num(r.cartons_sold) * num(r.price));
+  const sum = grosses.reduce((a, b) => a + b, 0);
+  const r2 = n => Math.round(n * 100) / 100;
+  // Nothing sold under it yet, so there is no ratio: an equal share is the only
+  // honest option.
+  let shares = (rows.length === 1 || !sum)
+    ? rows.map(() => r2(total / rows.length))
+    : grosses.map(g => r2(total * (g / sum)));
+  const residual = r2(total - shares.reduce((a, b) => a + b, 0));
+  if (residual) {
+    let biggest = 0;
+    grosses.forEach((g, i) => { if (Math.abs(g) > Math.abs(grosses[biggest])) biggest = i; });
+    shares[biggest] = r2(shares[biggest] + residual);
+  }
+  return shares;
+}
+
+/** Fill Nett onto every pending row whose statement appears in the round's
+ *  adjustment reports, clearing the "enter Nett by hand" warning.
+ *
+ *  The report gives one figure per statement and a statement now covers several
+ *  rows, one per product, so it is split between them. Writing the statement's
+ *  whole Nett onto each row would multiply the money by the number of products. */
+function applyNetts() {
+  const map = S.nettMap || {};
+  const groups = {};
+  for (const r of S.pending) {
+    const key = r.stm_no != null ? String(r.stm_no) : null;
+    if (key && map[key] != null) (groups[key] ||= []).push(r);
+  }
+  for (const [key, rows] of Object.entries(groups)) {
+    const shares = splitByGross(map[key], rows);
+    rows.forEach((r, i) => {
+      r.nett_total = shares[i];
+      r.flags = (r.flags || []).filter(f => f.field !== "nett_total");
+    });
+  }
+}
+
+/** Live summary of Nett matching over the rows currently under review. */
+function nettSummary() {
+  if (!S.nettReports) return null;
+  const map = S.nettMap || {};
+  const pendingStms = new Set(
+    S.pending.map(r => (r.stm_no != null ? String(r.stm_no) : null)).filter(Boolean));
+  const matched = S.pending.filter(r => r.stm_no != null && map[String(r.stm_no)] != null).length;
+  const unused = Object.keys(map).filter(k => !pendingStms.has(k)).length;
+  return {
+    reports: S.nettReports,
+    statements: Object.keys(map).length,
+    matched,
+    unmatched: S.pending.length - matched,
+    unused,
+  };
+}
+
+/** The uploaded file a row came from, stripped of the "· consignment N" /
+ *  "· statement N of M" / "· product N of M" / "(statement N of M)" suffixes the
+ *  extractor adds. Anchors on the keyword so it doesn't depend on the exact
+ *  separator char.
+ *
+ *  Stripped in a loop because they stack: one consignment settled under two
+ *  account sales is "june.csv · consignment 1 · statement 1 of 2". Peeling one
+ *  suffix only would leave every row with a name of its own, so a file of 70
+ *  rows would show 70 chips and none of them would remove anything. */
+const FILE_SUFFIXES = [
+  /\s*[·•∙|-]?\s*consignment\s+\d+\s*$/i,
+  /\s*[·•∙|-]?\s*statement\s+\d+\s+of\s+\d+\s*$/i,
+  /\s*[·•∙|-]?\s*product\s+\d+\s+of\s+\d+\s*$/i,
+  /\s*\(statement\s+\d+\s+of\s+\d+\)\s*$/i,
+];
+
+function baseFile(r) {
+  let name = String(r.source_file || "Statements");
+  for (let peeled = true; peeled; ) {
+    peeled = false;
+    for (const suffix of FILE_SUFFIXES) {
+      const shorter = name.replace(suffix, "");
+      if (shorter !== name) { name = shorter; peeled = true; }
+    }
+  }
+  return name.trim();
+}
+
+/** Removable chips, one per uploaded PDF in the current round. */
+function pdfChips(pool) {
+  const groups = {};
+  for (const r of pool) { const n = baseFile(r); groups[n] = (groups[n] || 0) + 1; }
+  const names = Object.keys(groups);
+  if (!names.length) return "";
+  return `<div class="pdf-chips">${names.map(n => `
+    <span class="pchip" data-name="${esc(n)}">
+      <span class="pci">▤</span>
+      <span class="pcn" title="${esc(n)}">${esc(n)}</span>
+      <span class="pcc">${groups[n]} row${groups[n] === 1 ? "" : "s"}</span>
+      <button class="pcx" title="Remove this PDF" onclick="removePdf(this.closest('.pchip').dataset.name)">×</button>
+    </span>`).join("")}</div>`;
+}
+
+/** Drop every row that came from one PDF -- for when the wrong file was added. */
+function removePdf(name) {
+  const before = S.pending.length;
+  S.pending = S.pending.filter(r => baseFile(r) !== name);
+  const removed = before - S.pending.length;
+  toast(`Removed ${name} · ${removed} row${removed === 1 ? "" : "s"}`);
+  applyNetts();
+  render();
+}
+
+function renderReview() {
+  setStep(2);
+  const pool = S.pending;
+  ensureWatchSignals();   // so a row's statement carries its agent-watch flag
+
+  // Drop-first empty state: "Add statements" lands here before any file is
+  // chosen, because most statements arrive by drag rather than file dialog.
+  if (!pool.length) {
+    main.innerHTML = `
+      <section class="screen">
+        <div class="head"><h1>Add statements</h1>
+          <p>Drop the account-sales PDFs anywhere on this page. Each statement is read and shown for review before anything is written to <b>${esc(S.wb.name)}</b>.</p></div>
+        ${S.nettReports ? `<div class="banner"><span class="bi">◧</span><span><b>Nett report read — ${Object.keys(S.nettMap).length} statement${Object.keys(S.nettMap).length === 1 ? "" : "s"}.</b> Now drop the matching sales PDFs; their Nett will fill in automatically.</span></div>` : ""}
+        <div class="drop" tabindex="0" role="button" onclick="browsePdfs()" style="padding:56px 24px">
+          <div class="big">↑</div>
+          <div class="t">Drop sales reports here</div>
+          <div class="s">PDF or CSV — CSV is better if TechnoFresh offers it</div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" onclick="cancelAdd()">← Back to workbook</button>
+        </div>
+      </section>`;
+    return;
+  }
+
+  const attn = pool.filter(needsAttention).length;
+  const dupes = pool.filter(isDuplicate).length;
+  const ns = nettSummary();
+  const dns = [...new Set(pool.map(r => r.dn))];
+  main.innerHTML = `
+    <section class="screen">
+      <div class="head"><h1>Review ${pool.length} new row${pool.length === 1 ? "" : "s"}</h1>
+        <p>Values are read from each statement by matching its labels. Any field that could not be placed with confidence is flagged for review, so nothing incorrect is written to <b>${esc(S.wb.name)}</b>.</p></div>
+
+      <div class="drop" tabindex="0" role="button" onclick="browsePdfs()">
+        <div class="big">↑</div><div class="t">${pool.length} statement row${pool.length === 1 ? "" : "s"} read</div>
+        <div class="s">Drop more reports to include them in this round before appending</div>
+      </div>
+
+      ${pdfChips(pool)}
+
+      <div class="summary" style="margin-top:20px">
+        <div class="stat"><div class="n">${pool.length}</div><div class="l">New rows</div></div>
+        <div class="stat ${attn ? "warn" : ""}"><div class="n">${attn}</div><div class="l">Need attention</div></div>
+        <div class="stat"><div class="n">${dns.length}</div><div class="l">DN group${dns.length === 1 ? "" : "s"}</div></div>
+        <div class="stat"><div class="n">${dns.map(d => groupDate(d, pool)).join(", ") || "—"}</div><div class="l">Batch date${dns.length === 1 ? "" : "s"}</div></div>
+      </div>
+
+      ${S.importWarnings.map(w => `<div class="banner bad"><span class="bi">!</span><span><b>This export may not be the whole picture.</b> ${esc(w)}</span></div>`).join("")}
+
+      ${ns ? `<div class="banner ${ns.matched ? "" : "bad"}"><span class="bi">${ns.matched ? "✓" : "!"}</span>
+        <span><b>Nett filled on ${ns.matched} of ${pool.length} row${pool.length === 1 ? "" : "s"}</b> from ${ns.reports} adjustment report${ns.reports === 1 ? "" : "s"} (${ns.statements} statement${ns.statements === 1 ? "" : "s"}).${ns.unmatched ? ` ${ns.unmatched} row${ns.unmatched === 1 ? "" : "s"} had no matching statement — those Netts stay to be entered by hand.` : ""}${ns.unused ? ` ${ns.unused} adjustment entr${ns.unused === 1 ? "y" : "ies"} didn't match any row here.` : ""}</span></div>` : ""}
+
+      ${dupes ? `<div class="banner bad"><span class="bi">!</span>
+        <span><b>${dupes} row${dupes === 1 ? " is" : "s are"} already in your saved history.</b>
+        Appending ${dupes === 1 ? "it" : "them"} again will duplicate ${dupes === 1 ? "it" : "them"} in <b>${esc(S.wb.name)}</b>.
+        <button class="linklike" onclick="removeDuplicates()">Remove already-saved row${dupes === 1 ? "" : "s"}</button>, or keep ${dupes === 1 ? "it" : "them"} if you're re-processing a correction.</span></div>` : ""}
+
+      <div class="banner"><span class="bi">◧</span>
+        <span><b>Date rule.</b> Column <b>Date</b> takes the earliest <span class="num">DATE RECEIVED</span> across each DN group, so every row under a DN shares one batch date even when statements arrive on different days.</span></div>
+
+      ${tableBlock(pool, { editable: true })}
+
+      <div class="actions">
+        <button class="btn ghost" onclick="cancelAdd()">Cancel</button>
+        <span class="spacer"></span>
+        ${attn ? `<div class="hint" style="color:var(--warn)">Resolve ${attn} flagged row${attn === 1 ? "" : "s"} to continue</div>` : ""}
+        <button class="btn primary" onclick="appendRows()" ${attn ? "disabled" : ""}>Append ${pool.length} row${pool.length === 1 ? "" : "s"} to workbook →</button>
+      </div>
+    </section>`;
+
+  // Typing a new code should start immediately, without hunting for the box.
+  document.getElementById("newCode" + S.newCodeFor)?.focus();
+}
+
+function cancelAdd() { S.pending = []; S.nettMap = {}; S.nettReports = 0; S.newCodeFor = null; S.importWarnings = []; go("hub"); }
+
+/** Drop rows already present in the saved history, so the same PDF is not
+ *  appended to the workbook twice. */
+function removeDuplicates() {
+  const before = S.pending.length;
+  S.pending = S.pending.filter(r => !isDuplicate(r));
+  const removed = before - S.pending.length;
+  toast(`Removed ${removed} already-saved row${removed === 1 ? "" : "s"}`);
+  if (!S.pending.length) return go("hub");
+  render();
+}
+
+function appendRows() {
+  const n = S.pending.length;
+  S.committed = S.committed.concat(S.pending.map(r => ({ ...r, isNew: true })));
+  S.pending = []; S.nettMap = {}; S.nettReports = 0; S.newCodeFor = null; S.importWarnings = []; S.saved = false;
+  toast(`${n} row${n === 1 ? "" : "s"} appended to ${S.wb.name} · unsaved`);
+  go("hub");
+}
+
+const NEW_CODE = "__new__";   // sentinel option value in the code dropdown
+
+/** Switch a row's code cell into "type a brand-new code" mode. */
+function startNewCode(idx) { S.newCodeFor = idx; renderReview(); }
+function cancelNewCode() { S.newCodeFor = null; renderReview(); }
+
+/** Save a short code the operator just invented, then use it. */
+async function saveNewCode(idx, raw) {
+  const code = (raw || "").trim();
+  if (!code) { toast("Type a short code first", true); return; }
+  S.newCodeFor = null;
+  await resolveCode(idx, code);
+}
+
+/** Resolve a flagged description by picking a code; remembered for next time.
+ *  Applies to every pending row with the same product, since a batch usually
+ *  carries several consignments of it and they all take the same code. */
+async function resolveCode(idx, code) {
+  if (!code) return;
+  if (code === NEW_CODE) return startNewCode(idx);
+
+  const row = S.pending[idx];
+  const sameProduct = S.pending.filter(r => r.product && r.product === row.product);
+  const targets = sameProduct.length ? sameProduct : [row];
+  for (const r of targets) {
+    r.description = code;
+    r.flags = (r.flags || []).filter(f => f.field !== "description");
+  }
+  if (!S.codes.includes(code)) S.codes.push(code);
+
+  if (S.live && row.product) {
+    try {
+      await api("/api/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product: row.product, code }),
+      });
+    } catch (e) {
+      toast("Used here, but could not save it for next time: " + e.message, true);
+      renderReview();
+      return;
+    }
+  }
+  const also = targets.length > 1 ? ` · applied to ${targets.length} rows` : "";
+  toast(`Saved “${code}” for this product${also}`);
+  renderReview();
+}
+
+/** Correct a flagged numeric/text field inline. */
+function editField(idx, field, raw) {
+  const row = S.pending[idx];
+  const value = raw.trim();
+  if (value === "") return;
+  if (field === "status") {
+    row[field] = value;
+  } else {
+    // Anything that is not a number leaves the field unknown rather than
+    // becoming 0: stripping the non-digits out of "n/a" leaves an empty string,
+    // and Number("") is 0 -- which is how two rows ended up claiming to be
+    // statement number 0. A zero statement or DN is not a correction, so the
+    // flag stays on and the cell stays open for a real answer.
+    const parsed = Number(value.replace(/[^\d.-]/g, ""));
+    const unusable = !Number.isFinite(parsed)
+      || ((field === "stm_no" || field === "dn") && parsed === 0);
+    if (unusable) { renderReview(); return; }
+    row[field] = parsed;
+    // The DN belongs to the whole delivery, not to one account sale. Correcting
+    // it on one row and leaving its siblings on the market's Supplier Ref is how
+    // a delivery ends up split across two DNs in the sheet, so it carries over
+    // to every row of the same delivery. The backend remembers it on save.
+    if (field === "dn" && row.delivery_id != null) {
+      for (const other of S.pending) {
+        if (other !== row && other.delivery_id === row.delivery_id) {
+          other.dn = parsed;
+          other.flags = (other.flags || []).filter(f => f.code !== "dn_unproven");
+        }
+      }
+    }
+  }
+  row.flags = (row.flags || []).filter(f => f.field !== field);
+  renderReview();
+}
+
+// -------------------------------------------------------------- saving
+const XLSX_TYPES = [{
+  description: "Excel workbook",
+  accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] },
+}];
+
+/** Get write permission for the open workbook WHILE THE CLICK IS STILL FRESH.
+ *
+ *  requestPermission() needs transient user activation, and a save spends the
+ *  click uploading the whole workbook and waiting for it to come back. By the
+ *  time the write ran, the activation was gone and the request threw
+ *  NotAllowedError -- which the old code reported as "probably open in Excel",
+ *  sending the operator to close a file that was not open. So it is asked for
+ *  up front, before any network work. Returns true when writing can go ahead. */
+async function ensureWritePermission() {
+  const h = S.wbHandle;
+  if (!h || !h.queryPermission) return true;   // download fallback handles it
+  try {
+    let p = await h.queryPermission({ mode: "readwrite" });
+    if (p !== "granted") p = await h.requestPermission({ mode: "readwrite" });
+    return p === "granted";
+  } catch {
+    return false;    // asked outside a gesture, or refused; the caller reports it
+  }
+}
+
+// What the File System Access API actually throws, and what each one means for
+// the person looking at the screen. Guessing "it's open in Excel" for all of
+// them cost a real save.
+const WRITE_FAILURES = {
+  NotAllowedError: "denied",
+  NoModificationAllowedError: "locked",
+  NotFoundError: "gone",
+  InvalidStateError: "changed",
+  AbortError: "cancelled",
+};
+
+/** Write straight into the file S.wbHandle points at.
+ *  Returns { done } on success, { done:false, reason } otherwise. */
+async function writeInPlace(blob) {
+  if (!S.wbHandle || !S.wbHandle.createWritable) return { done: false, reason: "nohandle" };
+  try {
+    if (S.wbHandle.queryPermission) {
+      const p = await S.wbHandle.queryPermission({ mode: "readwrite" });
+      if (p !== "granted") return { done: false, reason: "denied" };
+    }
+    const w = await S.wbHandle.createWritable();
+    await w.write(blob);
+    await w.close();
+    return { done: true };
+  } catch (e) {
+    return { done: false, reason: WRITE_FAILURES[e && e.name] || "failed", error: e };
+  }
+}
+
+/** Persist the blob: in place when possible, else ask where once (and keep the
+ *  answer for every save after), else fall back to a download. Returns false
+ *  when nothing was written and the changes must stay marked unsaved. */
+async function persistWorkbook(blob) {
+  const attempt = await writeInPlace(blob);
+  if (attempt.done) {
+    toast(`Saved to ${S.wb.name}`);
+    return true;
+  }
+  // Why the direct write failed, in the operator's terms. Carried through to the
+  // end rather than toasted now, because a second toast replaces the first and
+  // the last one would otherwise claim the browser cannot save to files at all.
+  const why = {
+    locked: `${S.wb.name} is locked by another program, usually Excel.`,
+    denied: `The browser wasn’t allowed to write to ${S.wb.name}.`,
+    gone: `${S.wb.name} isn’t where it was: moved, renamed or deleted.`,
+    changed: `${S.wb.name} changed on disk since you opened it, so writing over it `
+           + `would throw that change away.`,
+    failed: `Couldn’t write to ${S.wb.name}`
+          + (attempt.error && attempt.error.message ? `: ${attempt.error.message}` : "") + ".",
+    nohandle: "",   // a new workbook, or one opened without the file picker
+  }[attempt.reason] || "";
+
+  // Ask where to put it instead. This needs a fresh click too, so it can fail on
+  // its own; the download below is the floor that always works, and is why a
+  // round can never be lost here. The rows exist only in this blob.
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: S.wb.name === "Untitled.xlsx" ? "ZacoAgents.xlsx" : S.wb.name,
+        types: XLSX_TYPES,
+      });
+      S.wbHandle = handle;
+      S.wb.name = handle.name;
+      if ((await writeInPlace(blob)).done) {
+        toast(why ? `${why} Saved to ${handle.name} instead.` : `Saved to ${handle.name}`);
+        return true;
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        toast(`${why} Save cancelled, so your changes are still here, unsaved.`.trim(), true);
+        return false;
+      }
+      // Fall through to the download on anything else.
+    }
+  }
+  downloadBlob(blob, S.wb.name);
+  toast(why
+    ? `${why} Downloaded ${S.wb.name} to your Downloads folder instead, so nothing is lost.`
+    : `This browser can’t save directly to a file, so ${S.wb.name} was downloaded instead.`, !!why);
+  return true;
+}
+
+async function saveWorkbook() {
+  const fresh = S.committed.filter(r => !r.existing);
+  if (!fresh.length) { toast("Nothing new to save"); return; }
+
+  // Before anything slow. The upload below spends the click that the browser
+  // requires in order to ask about file access, so asking afterwards fails.
+  await ensureWritePermission();
+
+  if (!S.live) {
+    S.committed = S.committed.map(r => ({ ...r, existing: true, isNew: false }));
+    S.saved = true;
+    setStep(3); toast(`Saved ${S.committed.length} rows to ${S.wb.name}`);
+    renderHub();
+    return;
+  }
+
+  await withBusy(`Saving ${S.wb.name}…`, async () => {
+    // Re-read the workbook from disk right before uploading. The File taken at
+    // open time is a snapshot; if the file changed since (saved in Excel, a
+    // previous in-place write), Chrome refuses to read the stale snapshot with
+    // "state had changed since it was read from disk". A fresh read also means
+    // rows added in Excel meanwhile are preserved by the append.
+    if (S.wbHandle && S.wbHandle.getFile) {
+      try { S.wbFile = await S.wbHandle.getFile(); }
+      catch { /* keep the cached copy; the write step will surface any problem */ }
+    }
+    const fd = new FormData();
+    fd.append("rows", JSON.stringify(fresh));
+    fd.append("market_agent", S.agent);
+    if (S.wbFile) fd.append("file", S.wbFile, S.wb.name);
+    let blob, historyWarning = null;
+    try {
+      const res = await api("/api/workbook/append", { method: "POST", body: fd });
+      // Recording history for Insights is best-effort on the server; if it
+      // failed, the workbook still comes back and we flag it non-blockingly.
+      historyWarning = res.headers.get("X-History-Warning");
+      blob = await res.blob();
+    } catch (e) {
+      // Reading the workbook for upload can fail if the file is locked or
+      // still changing on disk -- surface that as something actionable
+      // instead of Chrome's "state had changed since it was read from disk".
+      if (e && (e.name === "InvalidStateError" || e.name === "NotReadableError"
+                || /state had changed|not be read/i.test(e.message || ""))) {
+        throw new Error(`Couldn’t read ${S.wb.name} from disk — close it in Excel, then press Save again.`);
+      }
+      throw e;
+    }
+
+    if (!(await persistWorkbook(blob))) {
+      // User cancelled the save dialog: keep everything marked unsaved.
+      S.screen = "hub";
+      return;
+    }
+
+    // Those rows now live in the file: keep them, but never re-append them.
+    S.wbFile = blob;
+    S.committed = S.committed.map(r => ({ ...r, existing: true, isNew: false }));
+    S.saved = true;
+    S.screen = "hub";
+    if (historyWarning) toast(historyWarning, true);
+  });
+  if (S.saved) { setStep(3); noteBuyChanges(); }
+}
+
+/** New sales change what is worth buying, so the app says what moved rather
+ *  than waiting to be asked. Diffed against the levels held before the save;
+ *  only promotions are reported, since a line falling back is not something to
+ *  act on this morning. */
+async function noteBuyChanges() {
+  const B = S.buys;
+  if (!S.live) return;
+  const before = {};
+  for (const r of (B.data?.recommendations || [])) before[r.product] = r.level;
+
+  B.data = null; B.tried = false; B.costs = null;   // history moved underneath them
+  try { B.data = await (await api("/api/procurement")).json(); }
+  catch { return; }                                 // never let this break a save
+  syncBuyBadge();
+
+  const RANK = { low: 0, high: 1, critical: 2 };
+  const moved = [];
+  for (const r of (B.data.recommendations || [])) {
+    const was = before[r.product];
+    if (was === undefined) {
+      // Brand new to the list. Only worth mentioning if it arrived worth buying.
+      if (r.level !== "low") moved.push({ product: r.product, to: r.level, fresh: true });
+    } else if (RANK[r.level] > RANK[was]) {
+      moved.push({ product: r.product, to: r.level, from: was });
+    }
+  }
+  B.changes = moved.length ? moved : null;
+  if (moved.length) {
+    toast(`${moved.length} line${moved.length === 1 ? "" : "s"} moved up your list`);
+  }
+  render();
+}
+
+function dismissBuyChanges() { S.buys.changes = null; render(); }
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// --------------------------------------------------------------- table
+function tableBlock(rows, { editable }) {
+  const pool = rows;
+  const sorted = [...rows].map((r, i) => ({ r, i }))
+    .sort((a, b) => (a.r.dn ?? 0) - (b.r.dn ?? 0) || (a.r.stm_no ?? 0) - (b.r.stm_no ?? 0));
+
+  let html = "", lastDn = Symbol("none");
+  for (const { r, i } of sorted) {
+    if (r.dn !== lastDn) {
+      lastDn = r.dn;
+      html += `<tr class="group-row"><td colspan="${COLS.length}">
+        <span class="dn num">DN ${r.dn ?? "—"}</span>
+        <span class="meta"> · ${esc(r.market_agent || S.agent)}</span>
+        <span class="date-badge">Date <span class="num">${groupDate(r.dn, pool)}</span></span>
+        ${r.existing ? '<span class="tag existing">in workbook</span>' : (editable ? "" : '<span class="tag new">added</span>')}
+      </td></tr>`;
+    }
+    html += `<tr class="${!editable ? "" : (needsAttention(r) ? "attn" : "")} ${r.existing ? "existing" : ""}">`
+      + COLS.map(c => cellHtml(c, r, i, pool, editable)).join("") + "</tr>";
+  }
+
+  const legend = `<div class="legend">
+    <span><span class="sw" style="background:var(--surface-2);border:1px solid var(--line-strong)"></span> extracted / manual</span>
+    <span><span class="fmark" style="font-style:italic">ƒ</span> template formula (auto-calculated)</span>
+    ${editable ? '<span><span class="sw" style="background:var(--warn-tint);border:1px solid var(--warn)"></span> needs attention</span>' : ""}
+  </div>`;
+
+  return legend + `<div class="table-wrap"><div class="table-scroll"><table>
+    <thead><tr>${COLS.map(c => `<th class="${c.cls || ""} ${c.f ? "f" : ""}">${c.h}${c.f ? ' <span class="fmark">ƒ</span>' : ""}</th>`).join("")}</tr></thead>
+    <tbody>${html}</tbody></table></div></div>`;
+}
+
+function cellHtml(c, r, i, pool, editable) {
+  if (c.desc) {
+    const raw = r.product ? `<span class="prod-raw" title="${esc(r.product)}">${esc(r.product)}</span>` : "";
+    if (editable) {
+      // Naming a brand-new code for this row: the picker becomes a text box.
+      // New products arrive constantly, so this has to be quick, not a detour.
+      if (S.newCodeFor === i) {
+        return `<td class="flagged">
+          <span class="newcode">
+            <input class="cell-input newcode-in" id="newCode${i}" placeholder="New short code…"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewCode(${i}, this.value);}
+                              else if(event.key==='Escape'){cancelNewCode();}">
+            <button class="btn primary sm" onclick="saveNewCode(${i}, document.getElementById('newCode${i}').value)">Save</button>
+            <button class="btn ghost sm" onclick="cancelNewCode()">Cancel</button>
+          </span>
+          ${raw}<span class="flag-note">Give it a short code, e.g. “Imp Granadillas”. It's remembered for next time.</span></td>`;
+      }
+      // Otherwise a dropdown, pre-selected to the auto-picked code so it self-
+      // selects but stays changeable. The current code is included even if it
+      // isn't in the known list yet. Only flag when nothing was picked.
+      const options = [...new Set([...(r.description ? [r.description] : []), ...S.codes])];
+      const opts = `<option value="">Pick code…</option>`
+        + options.map(k => `<option${k === r.description ? " selected" : ""}>${esc(k)}</option>`).join("")
+        + `<option value="${NEW_CODE}">＋ New code…</option>`;
+      const note = r.description
+        ? ""
+        : `<span class="flag-note">No short code on file. Pick one, or add a new code.</span>`;
+      return `<td class="${r.description ? "" : "flagged"}">
+        <select class="mini-select${r.description ? " set" : ""}" onchange="resolveCode(${i}, this.value)">${opts}</select>
+        ${raw}${note}</td>`;
+    }
+    return `<td><b>${esc(r.description || "—")}</b>${buyChip(r.product || r.description)}${raw}</td>`;
+  }
+
+  const flag = c.field ? flagFor(r, c.field) : null;
+  if (flag && editable) {
+    // Error flags block the append until resolved; warning flags are advisory
+    // (the value below already stands -- e.g. a nett left at 0) but stay
+    // editable so the share can be typed in right here.
+    const current = r[c.field];
+    return `<td class="${c.cls || ""} flagged">
+      <input class="cell-input" value="${current == null ? "" : esc(current)}" placeholder="—"
+             onchange="editField(${i}, '${c.field}', this.value)">
+      <span class="flag-note">${esc(flag.message)}</span></td>`;
+  }
+  // The statement number is where an agent-watch flag belongs on this screen:
+  // it is the cell the concern is about, and it puts the question in front of
+  // the operator while they are still looking at the round.
+  if (c.field === "stm_no") {
+    return `<td class="${c.cls || ""}">${c.get(r, pool)}${watchChip(r.stm_no)}</td>`;
+  }
+  return `<td class="${c.cls || ""} ${c.f ? "f" : ""}">${c.get(r, pool)}</td>`;
+}
+
+// ------------------------------------------------------- toast + theme
+let toastT;
+function toast(msg, bad) {
+  document.querySelector(".toast")?.remove();
+  const t = document.createElement("div");
+  t.className = "toast" + (bad ? " bad" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.remove(), bad ? 5200 : 2600);
+}
+// -------------------------------------------------------- file inputs
+const wbInput = document.getElementById("wbInput");
+wbInput.addEventListener("change", e => {
+  const f = e.target.files[0];
+  wbInput.value = "";
+  if (f) openWorkbook(f);
+});
+const pdfInput = document.getElementById("pdfInput");
+pdfInput.addEventListener("change", e => {
+  const files = [...e.target.files];
+  pdfInput.value = "";
+  if (files.length) onPdfFiles(files);
+});
+const paymentInput = document.getElementById("paymentInput");
+paymentInput.addEventListener("change", e => {
+  const files = [...e.target.files];
+  paymentInput.value = "";
+  if (files.length) onPaymentFiles(files);
+});
+
+// ------------------------------------------------------- drag and drop
+// Dropping works anywhere on the page: statement PDFs land in the current
+// round, a workbook dropped on the setup screen opens it. Dropped workbooks
+// keep a file handle where the browser supports it, so Save still writes
+// straight back to the original file.
+// PDF or CSV: the CSV exports of the same reports are preferred where
+// available, since their values are read rather than recovered from layout.
+const isPdf = f => /\.(pdf|csv)$/i.test(f.name) || f.type === "application/pdf" || f.type === "text/csv";
+const isWorkbook = f => /\.(xlsx|xlsm)$/i.test(f.name);
+
+let dragDepth = 0;
+function dropHighlight(on) {
+  document.querySelectorAll(".drop").forEach(el => el.classList.toggle("over", on));
+}
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("dragenter", e => {
+  if ([...(e.dataTransfer?.types || [])].includes("Files")) {
+    dragDepth++;
+    dropHighlight(true);
+  }
+});
+document.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) { dragDepth = 0; dropHighlight(false); }
+});
+document.addEventListener("drop", async e => {
+  e.preventDefault();
+  dragDepth = 0;
+  dropHighlight(false);
+
+  const authShowing = !document.getElementById("authWrap")?.hidden;
+  if (authShowing && S.authRequired) return;   // nothing to drop onto before sign-in
+
+  // dataTransfer.items is cleared after the first await, so anything we need
+  // from it -- the files and any file handles -- must be captured up front.
+  const items = [...(e.dataTransfer?.items || [])];
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) return;
+  const handlePromises = items.map(i =>
+    i.kind === "file" && i.getAsFileSystemHandle
+      ? i.getAsFileSystemHandle().catch(() => null)
+      : Promise.resolve(null)
+  );
+  const itemNames = items.map(i => (i.kind === "file" ? i.getAsFile()?.name : null));
+
+  const pdfs = files.filter(isPdf);
+  const books = files.filter(isWorkbook);
+
+  if (books.length && S.screen === "setup") {
+    // Reattach the dropped workbook's file handle when the browser offers
+    // one, so Save writes straight back to the same file.
+    const idx = itemNames.indexOf(books[0].name);
+    const handle = idx >= 0 ? await handlePromises[idx] : null;
+    await openWorkbook(books[0], handle && handle.kind === "file" ? handle : null);
+    return;
+  }
+
+  if (pdfs.length) {
+    if (S.module !== "sales" || !S.wb) {
+      toast("Open a workbook first, then drop the statement PDFs in");
+      return;
+    }
+    onPdfFiles(pdfs);
+    return;
+  }
+
+  toast(books.length
+    ? "To switch workbook, go to “Switch workbook” first, then drop it there"
+    : "Drop statement PDFs, or an .xlsx workbook on the opening screen");
+});
+
+// ------------------------------------------------------------- start
+/** Runs once a session exists (or auth is off): loads data and shows the app. */
+async function startApp() {
+  const wrap = document.getElementById("authWrap");
+  if (wrap) wrap.hidden = true;
+  document.querySelector(".app").hidden = false;
+
+  if (S.authRequired) {
+    try {
+      const me = await (await api("/api/me")).json();
+      Auth.profile = me;
+    } catch {
+      // Not fatal: the app still works, we just cannot show the role badge.
+      Auth.profile = null;
+    }
+  }
+  showUserChip();
+  await loadCodes();
+  render();
+}
+
+(async function init() {
+  await checkHealth();
+
+  if (!S.authRequired) {
+    // Demo mode, or a local run with auth switched off.
+    await startApp();
+    return;
+  }
+
+  Auth.load();
+
+  // An invite or password-reset link arrives with tokens in the fragment.
+  const linkType = consumeAuthFragment();
+  if (linkType) {
+    renderAuth("invite", linkType === "recovery"
+      ? "Choose a new password to finish resetting your account."
+      : "Welcome — set a password to activate your account.");
+    return;
+  }
+
+  if (await Auth.validToken()) await startApp();
+  else renderAuth("signin");
+})();
+</script>

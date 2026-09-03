@@ -1,0 +1,32 @@
+    Report                                              Zaco Agents (Pty) Ltd (20026)
+    Report:   Payment Details                               Run Date: 2026/08/05 19:02:00
+    Market:   ALL
+    Agent:    ALL
+    Date Range: 2026/08/01 - 2026/08/05
+
+    TSHWANE MARKET                         Farmers Trust (Pre)
+                                             Nett    Total   Deduction Gross Pay.
+     FMS ID   Supplier Ref AccSale Number Date
+                                            Payments Deductions Vat  Payments Ref
+     203456   20026*15061 PRE*BT*392825 2026-08-05 R 688.67 R 131.59 R 19.74 R 840.00 EFT
+
+     Line No              Commodity                Delivered Sold     Sales Total
+          NECTARINES OTHER CLASS 1 MEDIUM MULTI LAYER TRAYER
+    203456                                           71       6        R 760.00
+          NECTARINES OTHER CLASS 1 MEDIUM MULTI LAYER TRAYER
+    203456                                           51       1        R 80.00
+                                                                       R 840.00
+
+     203464   20026*14585 PRE*BT*392828 2026-08-05 R 2,304.40 R 361.35 R 54.25 R 2,720.00 EFT
+
+     Line No              Commodity                Delivered Sold     Sales Total
+          NECTARINES OTHER CLASS 1 LARGE MULTI LAYER TRAYER 5.00 kg
+    203464                                           43      10        R 2,720.00
+                                                                       R 2,720.00
+
+     203465   20026*14585 PRE*BT*392831 2026-08-05 R 228.85 R 148.82 R 22.33 R 400.00 EFT
+
+     Line No              Commodity                Delivered Sold     Sales Total
+          GRAPES WHITE SEEDLESS CLASS 2 NO SIZE PUNNET 5.00 kg
+    203465                                           69       8        R 400.00
+                                                                       R 400.00

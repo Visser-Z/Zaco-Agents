@@ -1,0 +1,59 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "zacon-api",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8000",
+        "--app-dir",
+        "backend"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "es-demo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8010",
+        "--reload",
+        "--app-dir",
+        "C:/Users/vanzy/Desktop/ES projects Demo/backend",
+        "--reload-dir",
+        "C:/Users/vanzy/Desktop/ES projects Demo/backend"
+      ],
+      "port": 8010
+    },
+    {
+      "name": "es-demo-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8011",
+        "--directory",
+        "C:/Users/vanzy/Desktop/ES projects Demo"
+      ],
+      "port": 8011
+    },
+    {
+      "name": "workshop-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "C:/Users/vanzy/Desktop/gears-workshop-demo",
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    }
+  ]
+}

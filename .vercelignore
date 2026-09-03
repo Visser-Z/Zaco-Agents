@@ -1,0 +1,36 @@
+# Keep secrets and dev-only files out of the deployment bundle.
+# The Vercel CLI uploads the working directory, so .gitignore alone is not
+# enough -- the real .env would otherwise be shipped into the function.
+.env
+.env.*
+!.env.example
+
+# Virtualenvs and caches: Vercel installs from requirements.txt itself.
+.venv/
+**/.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Tests and their fixtures are not needed at runtime.
+backend/tests/
+backend/pytest.ini
+
+# Client data must never leave the machine.
+*.pdf
+*.xlsx
+*.xlsm
+# ...except the blank template a new workbook is built from.
+!backend/data/template.xlsx
+
+# The desktop shell (Electron) and its build output — huge .exe artifacts and
+# node_modules that must never enter the serverless bundle (100 MB cap).
+desktop/
+**/*.exe
+
+# Docs and infrastructure config that the function does not use.
+DEPLOY.md
+supabase/
+.claude/

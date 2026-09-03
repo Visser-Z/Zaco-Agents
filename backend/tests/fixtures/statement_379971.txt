@@ -1,0 +1,128 @@
+                                                                                  
+                                                                                  
+                                                                                  
+    VAT Reg. No. 4250103472                                     AFREKENINGSTAAT   
+    P.O. BOX/POSBUS 1539                                                          
+                                                                ACCOUNT SALES     
+    PRETORIA 0001                                                                 
+                                                               BELASTINGFAKTUUR   
+    TEL: (012) 323 2000                                           TAX INVOICE     
+    FAX: 088 012 326 4839                                                         
+                                                                                  
+                                   Reg. No. 88/06202/23                           
+                                                                                  
+                                                                                  
+                                                                                  
+    AGENT VAT REGISTRATION NUMBER: 4250103472                                     
+                                                                                  
+                              TAX INVOICE                                         
+                                BT379971     ACCOUNT SALES NO : 379971            
+                                                                                  
+    PRODUCER : 038979 k2024700521 trading as Zaco DATE : 13/05/2026 Page: 1       
+             EGYPT                                                                
+                                             DELIVERY NOTE NO : 207330            
+                                                  WAYBILL NO :                    
+             0148                                     REFNO :    14013            
+    Vat Reg No :                               DATE RECEIVED : 07/05/2026         
+                                         PREVIOUS ACCOUNT SALES NO : 379297       
+    MARKET GRN : 20733001 QUANTITY RECEIVED : 111 QUANTITY B/F : 111              
+    PRODUCT : PLAN 2A MA53   PLUM ANGELINO  SMAN : ELFRANCO HOOGENHOUT            
+                                                                                  
+    DATE      PRICES        AVER.PRICE MARKET AVG  QUANTITY      VALUE            
+    ----        ------      ---------- ----------  --------   --------            
+    08/05/2026 50.00 - 50.00    50.00     50.00          111     5550.00          
+                            ----------             --------   --------            
+                                50.00                   111    5550.00            
+    QUANTITY OUTSTANDING : 0       AGENT COMM % : 7.50                            
+    ----------------------------------------------------------------------------- 
+    MARKET GRN : 20733002 QUANTITY RECEIVED : 11 QUANTITY B/F : 11                
+    PRODUCT : PLAN 2A PE80   PLUM ANGELINO  SMAN : ELFRANCO HOOGENHOUT            
+    DATE      PRICES        AVER.PRICE MARKET AVG  QUANTITY      VALUE            
+    ----        ------      ---------- ----------  --------   --------            
+    08/05/2026 100.00 - 100.00  100.00    100.00          11     1100.00          
+                            ----------             --------   --------            
+                                100.00                  11     1100.00            
+                                                                                  
+    QUANTITY OUTSTANDING : 0       AGENT COMM % : 7.50                            
+    ----------------------------------------------------------------------------- 
+    MARKET GRN : 20733004 QUANTITY RECEIVED : 62 QUANTITY B/F : 5                 
+    PRODUCT : GRSF 2 PE80    GRAPE SUGRA35  SMAN : ELFRANCO HOOGENHOUT            
+    DATE      PRICES        AVER.PRICE MARKET AVG  QUANTITY      VALUE            
+    ----        ------      ---------- ----------  --------   --------            
+    09/05/2026 30.00 - 30.00    30.00     30.00            5      150.00          
+                            ----------             --------   --------            
+                                30.00                    5      150.00            
+    QUANTITY OUTSTANDING : 0       AGENT COMM % : 7.50                            
+    ----------------------------------------------------------------------------- 
+    MARKET GRN : 20733005 QUANTITY RECEIVED : 41 QUANTITY B/F : 41                
+    PRODUCT : GRCS 2 PE80    GRAPE CRIMSON SEEDLESS SMAN : ELFRANCO HOOGENHOUT    
+    DATE      PRICES        AVER.PRICE MARKET AVG  QUANTITY      VALUE            
+    ----        ------      ---------- ----------  --------   --------            
+                                                                                  
+                                                                                  
+                                      Page 1/2                                    
+                                                                                  
+                                                                                  
+                                                                                  
+    08/05/2026 160.00 - 180.00  171.67    171.67          12     2060.00          
+    09/05/2026 60.00 - 200.00   60.00     60.00           11      660.00          
+    11/05/2026 50.00 - 80.00    64.12     64.12           17     1090.00          
+    12/05/2026 50.00 - 50.00    50.00     50.00            1      50.00           
+                            ----------             --------   --------            
+                                94.15                   41     3860.00            
+    QUANTITY OUTSTANDING : 0       AGENT COMM % : 7.50                            
+    ----------------------------------------------------------------------------- 
+    MARKET GRN : 20733006 QUANTITY RECEIVED : 3 QUANTITY B/F : 1                  
+    PRODUCT : GRSF 2 PB8    GRAPE SUGRA35  SMAN : ELFRANCO HOOGENHOUT             
+                                                                                  
+    DATE      PRICES        AVER.PRICE MARKET AVG  QUANTITY      VALUE            
+    ----        ------      ---------- ----------  --------   --------            
+    08/05/2026 180.00 - 180.00  180.00    180.00           1      180.00          
+                            ----------             --------   --------            
+                                180.00                   1      180.00            
+    QUANTITY OUTSTANDING : 0       AGENT COMM % : 7.50                            
+    ----------------------------------------------------------------------------- 
+    MARKET GRN : 20733007 QUANTITY RECEIVED : 69 QUANTITY B/F : 16                
+    PRODUCT : GRRG 2 PD50    GRAPE RED GLOBE  SMAN : ELFRANCO HOOGENHOUT          
+    DATE      PRICES        AVER.PRICE MARKET AVG  QUANTITY      VALUE            
+    ----        ------      ---------- ----------  --------   --------            
+    08/05/2026 180.00 - 180.00  180.00    180.00           8     1440.00          
+    09/05/2026 36.00 - 180.00   75.00     75.00            8      600.00          
+                            ----------             --------   --------            
+                                127.50                  16     2040.00            
+    QUANTITY OUTSTANDING : 0       AGENT COMM % : 7.50                            
+    ----------------------------------------------------------------------------- 
+    VAT (OUTPUT) COLLECTED                                       0.00             
+    ----------------------------------------------------------------------------- 
+                 ** PART PAYMENT **     ** TOTAL SOLD ** 185                      
+    COSTS                                               CURRENT SALES             
+    -----                                                ------------             
+    DEDUCTION          AMOUNT VAT (INPUT) TOTAL                                   
+    ---------         -------- --------- --------                                 
+    MARKET FEES        644.00     96.62   740.62 GROSS AMOUNT 12880.00            
+    PLUMS LEVY         146.08     21.91   167.99 LESS COST    2019.56             
+    AGENT COMMISSION   966.00    144.95   1110.95                                 
+                    ---------- ---------- -------- SUB TOTAL 10860.44             
+                       1756.08   263.48   2019.56                                 
+    BANK CHARGES        11.57      1.74    13.31 BANK CHARGES   13.31             
+                    ---------- ---------- --------                                
+                       1767.65   265.22   2032.87          -----------            
+                    ---------- ---------- -------- NETT AMOUNT 10847.13           
+                                                           -----------            
+    TOTAL DELIVERED : 352                                                         
+    TOTAL SOLD    :  309                                                          
+    TOTAL ONHAND  :   43                                                          
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                                                                  
+                                      Page 2/2                                    
+                                                                                  

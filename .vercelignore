@@ -22,8 +22,6 @@ backend/pytest.ini
 *.pdf
 *.xlsx
 *.xlsm
-# ...except the blank template a new workbook is built from.
-!backend/data/template.xlsx
 
 # The desktop shell (Electron) and its build output — huge .exe artifacts and
 # node_modules that must never enter the serverless bundle (100 MB cap).

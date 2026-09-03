@@ -152,19 +152,6 @@ class ExtractResponse(BaseModel):
     netts: dict[str, float] = Field(default_factory=dict)
 
 
-class WorkbookInfo(BaseModel):
-    filename: str
-    row_count: int
-    rows: list[StatementRow]
-
-
-class AppendRequest(BaseModel):
-    """Rows to append. The workbook itself is uploaded alongside as a file part."""
-
-    rows: list[StatementRow]
-    market_agent: str
-
-
 class LookupEntry(BaseModel):
     product: str
     code: str

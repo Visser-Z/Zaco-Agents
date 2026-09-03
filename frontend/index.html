@@ -1,4 +1,4 @@
-<title>ZacoAgents — Statement to Excel</title>
+<title>ZacoAgents</title>
 <style>
   /* Light only, one theme. Neutrals carry the interface; colour is reserved for
      things that genuinely need to be noticed -- primary actions, and the review
@@ -66,7 +66,12 @@
   .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
   .icon-btn:active { transform: scale(.92); }
 
-  .body { flex: 1; display: grid; grid-template-columns: 232px 1fr; }
+  .body { flex: 1; display: grid; grid-template-columns: 1fr; }
+  .tabs { display: flex; gap: 2px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 56px; z-index: 19; }
+  .tab { appearance: none; border: 0; background: none; font-family: var(--sans); font-size: 13.5px; font-weight: 600; color: var(--ink-soft); padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
   .rail { border-right: 1px solid var(--line); padding: 26px 18px; background: var(--surface); }
   .rail h2 { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px 6px; font-weight: 650; }
   .rail .rail-sub { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
@@ -459,18 +464,14 @@
   }
 </style>
 
-<input type="file" id="wbInput" accept=".xlsx,.xlsm" hidden>
 <input type="file" id="pdfInput" accept="application/pdf,.pdf,text/csv,.csv" multiple hidden>
 <input type="file" id="paymentInput" accept="application/pdf,.pdf,text/csv,.csv" multiple hidden>
 
 <div class="app">
   <header class="topbar">
-    <div class="brand"><span class="glyph">◧</span><span>ZacoAgents</span><span class="sub">Statement&nbsp;→&nbsp;Excel</span></div>
+    <div class="brand"><span class="glyph">◧</span><span>ZacoAgents</span></div>
     <span class="spacer"></span>
     <span class="mode demo" id="modeBadge" title="">Connecting…</span>
-    <div class="wb-pill" id="wbPill" hidden>
-      <span class="fi">XLS</span><span class="v" id="wbName">—</span><span class="n2" id="wbRows"></span>
-    </div>
     <div class="user-chip" id="userChip" hidden>
       <span class="who" id="userWho">—</span>
       <span class="role" id="userRole" hidden>staff</span>
@@ -478,31 +479,12 @@
     </div>
   </header>
 
-  <div class="body">
-    <nav class="rail">
-      <h2>Modules</h2>
-      <ul class="modules">
-        <!-- Buying is the FIRST act of the cycle and the one decision made away
-             from this desk, so it opens the app rather than hiding behind a tab.
-             Sales and Insights are what feed it. -->
-        <li><button class="mod" data-module="procurement" onclick="setModule('procurement')">
-          <span class="mi">◆</span><span class="mt">Take on</span><span class="mbadge" id="buyBadge" hidden></span></button></li>
-        <li><button class="mod" data-module="sales" onclick="setModule('sales')">
-          <span class="mi">◧</span><span class="mt">Sales &amp; Payments</span></button></li>
-        <li><button class="mod" data-module="insights" onclick="setModule('insights')">
-          <span class="mi">◔</span><span class="mt">Insights</span></button></li>
-      </ul>
+  <nav class="tabs">
+    <button class="tab" data-module="sales" onclick="setModule('sales')">Sales &amp; Payments</button>
+    <button class="tab" data-module="insights" onclick="setModule('insights')">Insights</button>
+  </nav>
 
-      <div id="railWorkflow">
-        <h2 class="rail-sub">Workflow</h2>
-        <ol class="steps" id="steps">
-          <li class="step" data-step="1"><span class="dot">1</span><span class="lbl"><span class="t">Workbook</span><span class="d">New or existing</span></span></li>
-          <li class="step" data-step="2"><span class="dot">2</span><span class="lbl"><span class="t">Add &amp; review</span><span class="d">PDFs → rows</span></span></li>
-          <li class="step" data-step="3"><span class="dot">3</span><span class="lbl"><span class="t">Save</span><span class="d">Write back to file</span></span></li>
-        </ol>
-        <p class="loop-note"><span>↻</span><span>Add rounds of statements as often as you like — every round lands in the same workbook.</span></p>
-      </div>
-    </nav>
+  <div class="body">
     <main class="main" id="main"></main>
   </div>
 </div>
@@ -516,13 +498,10 @@ const API = "";
 const AGENTS = ["Farmers Trust", "Cape Fruit Co-op", "Karsten Marketing", "Dutoit Agri"];
 
 const S = {
-  module: "procurement", // "procurement" | "sales" | "insights" — buy list opens
-  screen: "setup",
+  module: "sales",      // "sales" | "insights"
+  screen: "hub",
   live: false,          // true once /api/health answers
   authRequired: false,  // true when the server has Supabase auth configured
-  wb: null,             // { name }
-  wbFile: null,         // File/Blob of the workbook, sent back on save
-  wbHandle: null,       // FileSystemFileHandle when the browser supports it
   agent: AGENTS[0],
   committed: [],        // rows in the sheet (existing + appended-not-yet-saved)
   pending: [],          // rows under review
@@ -649,7 +628,6 @@ const COLS = [
 
 const main = document.getElementById("main");
 const stepsEl = document.getElementById("steps");
-const wbPill = document.getElementById("wbPill");
 const modeBadge = document.getElementById("modeBadge");
 
 // ---------------------------------------------------------------- auth
@@ -891,26 +869,10 @@ async function loadCodes() {
 }
 
 // ------------------------------------------------------------ chrome
-function setStep(n) {
-  [...stepsEl.children].forEach(li => {
-    const s = +li.dataset.step;
-    li.className = "step " + (s < n ? "done" : s === n ? "current" : "todo");
-  });
-}
-function syncPill() {
-  // The workbook belongs to Account Sales, so it is not shown in other modules.
-  const show = !!S.wb && S.module === "sales";
-  wbPill.hidden = !show;
-  if (show) {
-    document.getElementById("wbName").textContent = S.wb.name;
-    document.getElementById("wbRows").textContent = "· " + S.committed.length + " rows";
-  }
-}
-/** Highlight the active module and show its sub-navigation. */
+/** Highlight the active tab. */
 function syncModuleNav() {
-  document.querySelectorAll(".mod").forEach(b =>
+  document.querySelectorAll(".tab").forEach(b =>
     b.classList.toggle("active", b.dataset.module === S.module));
-  document.getElementById("railWorkflow").hidden = S.module !== "sales";
 }
 function setModule(m) {
   if (S.module === m) return;
@@ -924,11 +886,8 @@ function setModule(m) {
 function go(screen) { S.screen = screen; render(); main.scrollTo(0, 0); }
 function render() {
   syncModuleNav();
-  syncPill();
   if (S.module === "insights") return renderInsights();
-  if (S.module === "procurement") return renderProcurement();
   if (S.busy) return renderBusy();
-  if (S.screen === "setup") return renderSetup();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
 }
@@ -1445,53 +1404,12 @@ async function onPaymentFiles(files) {
   }
 }
 
-/** Write the reconciled Netts into the open workbook by STM No (consignment).
- *  Sends the file to the backend, which updates each matching row's Nett in
- *  place -- so rows saved in an earlier round get their Nett too -- then saves
- *  the updated file back. */
-async function applyReconcileNetts() {
-  const netts = (S.recon.data && S.recon.data.netts) || {};
-  if (!Object.keys(netts).length) { toast("No reconciled Netts to apply", true); return; }
-  if (!S.live) { toast("Applying Netts needs the live app", true); return; }
-  if (!S.wb || (!S.wbFile && !S.wbHandle)) {
-    toast("Open the workbook in Account Sales first, then apply", true);
-    return;
-  }
-  // Same reason as in saveWorkbook: ask for file access before the round trip,
-  // not after it, because the click is spent by then.
-  await ensureWritePermission();
-  try {
-    // Re-read from disk if we have a live handle, so we update the current file.
-    let file = S.wbFile;
-    if (S.wbHandle && S.wbHandle.getFile) { try { file = await S.wbHandle.getFile(); } catch {} }
-    if (!file) { toast("Couldn’t read the workbook — reopen it in Account Sales", true); return; }
-
-    const fd = new FormData();
-    fd.append("netts", JSON.stringify(netts));
-    fd.append("file", file, S.wb.name);
-    const res = await api("/api/workbook/netts", { method: "POST", body: fd });
-    const written = res.headers.get("X-Netts-Written") || "0";
-    const blob = await res.blob();
-
-    // Reflect in memory and write the updated file back.
-    for (const r of S.committed) { const v = netts[String(r.stm_no)]; if (v != null) r.nett_total = v; }
-    S.wbFile = blob;
-    await persistWorkbook(blob);
-    S.recon.applied = true;
-    toast(`Wrote ${written} Nett${written === "1" ? "" : "s"} into ${S.wb.name}`);
-  } catch (e) {
-    toast(e.message || String(e), true);
-  }
-  render();
-}
-
-/** The Payment matching panel that sits beside the workbook on the hub. */
+/** The Payment matching panel. */
 function reconcilePanel() {
   const R = S.recon;
   return `<aside class="card pm-card">
     <div class="pm-head">
-      <div><h2>Payment matching</h2>
-        <p class="pm-sub">Match a <b>Payment Details</b> report against your saved daily sales to fill the Nett.</p></div>
+      <div><h2>Payment matching</h2></div>
       ${R.data ? `<button class="btn ghost sm" onclick="browsePayments()">Load another</button>` : ""}
     </div>
     ${reconcileBody(R)}
@@ -1526,7 +1444,7 @@ function reconcileBody(R) {
       <div class="pm-k"><b>R ${fmt(nettMatched)}</b><span>Nett matched</span></div>
     </div>
     ${deductionNote(d.deductions)}
-    ${nettCount ? `<button class="btn primary sm full" onclick="applyReconcileNetts()">${S.recon.applied ? "✓ " : ""}Fill ${nettCount} Nett${nettCount === 1 ? "" : "s"} into ${esc(S.wb.name)}</button>` : ""}
+    ${nettCount ? `<p class="pm-note">${nettCount} Nett${nettCount === 1 ? " is" : "s are"} reconciled and shown here.</p>` : ""}
     <div class="pm-list">
       ${rows.map(r => {
         const st = RECON_STATUS[r.status] || { label: r.status, cls: "mut" };
@@ -1706,7 +1624,7 @@ function renderInsights() {
       ${scopedEmpty ? `<div class="banner"><span class="bi">◔</span><span>No statements recorded in <b>${esc(scopeLabel(I))}</b>. Pick another month or week above.</span></div>` : ""}
 
       ${(() => { const c = d.commission || {};
-        if (!c.known) return `<div class="banner"><span class="bi">◆</span><span>These are <b>market sales</b>, not your earnings. Most of this money is owed onward to your suppliers. Record the commission on a consignment under Take on → Settlements and what you actually earned appears here.</span></div>`;
+        if (!c.known) return "";
         return `<div class="profit-strip up">
           <div><span class="pl">Your commission</span><b>R ${fmt(c.commission)}</b></div>
           <div><span class="pl">Rate</span><b>${c.rate == null ? "—" : (c.rate * 100).toFixed(1) + "%"}</b></div>
@@ -1753,25 +1671,21 @@ function renderInsights() {
               <button class="${metric === "cartons" ? "on" : ""}" onclick="setInsightMetric('cartons')">By cartons</button>
             </div>
           </div>
-          <p class="ins-sub">Top products by ${metricLabel}. The <b>A/B/C</b> tag is a Pareto band — A products drive the first 80% of value. The coloured tag is what the buy list says about backing it again.</p>
           ${barList(sellers, metric, { abc: true, signals: true })}
         </div>
 
         <div class="card ins-card">
           <div class="ins-card-head"><h2>${trendTitle} trend</h2></div>
-          <p class="ins-sub">Sales value over time.</p>
           ${trendChart(d.trend)}
         </div>
 
         <div class="card ins-card">
           <div class="ins-card-head"><h2>By market</h2></div>
-          <p class="ins-sub">Where the produce is selling, by ${metricLabel}.</p>
           ${barList([...d.by_market].sort((a, b) => b[metric] - a[metric]).slice(0, 10), metric, {})}
         </div>
 
         <div class="card ins-card">
           <div class="ins-card-head"><h2>By agent</h2></div>
-          <p class="ins-sub">Which market agent moved the produce, by ${metricLabel}.</p>
           ${barList([...d.by_agent].sort((a, b) => b[metric] - a[metric]).slice(0, 10), metric, {})}
         </div>
       </div>
@@ -1885,7 +1799,7 @@ function trendChart(points) {
   const line = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   const area = `${PAD},${H - PAD} ${line} ${(W - PAD)},${H - PAD}`;
   const dots = points.map((p, i) =>
-    `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3"><title>${esc(shortPeriod(p.period))}: R ${fmt(p.value)}</title></circle>`).join("");
+    `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3"><title>ZacoAgents</title></circle>`).join("");
   // Label only the first, middle and last period to avoid crowding.
   const idxs = [...new Set([0, Math.floor((n - 1) / 2), n - 1])];
   const labels = idxs.map(i =>
@@ -2027,79 +1941,13 @@ async function withBusy(msg, fn) {
 }
 
 // -------------------------------------------------------------- setup
-function renderSetup() {
-  setStep(1);
-  main.innerHTML = `
-    <section class="screen">
-      <div class="head"><h1>Choose a workbook</h1>
-        <p>Create a new workbook from the standard template, or open an existing one to append new statements to what it already contains.</p></div>
-      ${S.live ? "" : `<div class="banner bad"><span class="bi">!</span><span><b>The ZacoAgents API is not reachable.</b> The app is showing built-in example data so you can explore the workflow. Start the backend with <span class="num">uvicorn app.main:app</span> and reload to work with real files.</span></div>`}
-      <div class="choices">
-        <button class="choice" onclick="startNew()">
-          <div class="ci">＋</div><h3>New workbook</h3>
-          <p>A fresh sheet built from the standard template, with headers and formula columns already in place.</p>
-        </button>
-        <button class="choice" onclick="chooseExisting()">
-          <div class="ci">↥</div><h3>Open existing workbook</h3>
-          <p>Select a workbook from your computer. New rows are appended beneath its current contents.</p>
-        </button>
-      </div>
-    </section>`;
-}
 // Market Agent is read from each statement now, so there's no session selector.
 // S.agent stays as a fallback only for rows that don't carry their own agent.
 function agentVal() { return S.agent; }
 
-function startNew() {
-  S.agent = agentVal();
-  S.wb = { name: "Untitled.xlsx" };
-  S.wbFile = null; S.wbHandle = null;
-  S.committed = []; S.pending = []; S.demoPtr = 0; S.saved = false;
-  go("hub");
-}
-
-async function chooseExisting() {
-  S.agent = agentVal();
-  // Prefer the File System Access API so Save can write back to the same file.
-  if (window.showOpenFilePicker) {
-    try {
-      const [handle] = await window.showOpenFilePicker({
-        types: [{ description: "Excel workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx", ".xlsm"] } }],
-        multiple: false,
-      });
-      return openWorkbook(await handle.getFile(), handle);
-    } catch (e) {
-      if (e && e.name === "AbortError") return;   // user cancelled
-      // Anything else (unsupported context, permission) falls through to the input.
-    }
-  }
-  document.getElementById("wbInput").click();
-}
-
-async function openWorkbook(file, handle = null) {
-  S.wb = { name: file.name };
-  S.wbFile = file;
-  S.wbHandle = handle;   // present = Save can write straight back to this file
-  S.pending = []; S.demoPtr = 0; S.saved = true;
-
-  if (!S.live) {
-    S.committed = DEMO_EXISTING.map(r => ({ ...r }));
-    go("hub");
-    return;
-  }
-  await withBusy(`Reading ${file.name}…`, async () => {
-    const fd = new FormData();
-    fd.append("file", file);
-    const info = await (await api("/api/workbook/open", { method: "POST", body: fd })).json();
-    S.committed = (info.rows || []).map(r => ({ ...r, existing: true }));
-    S.screen = "hub";
-  });
-}
-
 // ---------------------------------------------------------------- hub
 function renderHub() {
-  setStep(2);
-  const rows = S.committed;
+    const rows = S.committed;
   const hasRows = rows.length > 0;
   const dnCount = new Set(rows.map(r => r.dn)).size;
   main.innerHTML = `
@@ -2107,26 +1955,23 @@ function renderHub() {
       <div class="workspace">
         <div class="ws-main">
           <div class="card wb-bar">
-            <span class="fi">XLS</span>
-            <div><div class="fn">${esc(S.wb.name)}</div>
-              <div class="fm num">${rows.length} rows · ${dnCount} DN group${dnCount === 1 ? "" : "s"} · ${esc(S.agent)}${S.saved ? "" : " · <span style='color:var(--warn)'>unsaved changes</span>"}</div></div>
+            <div><div class="fn">Sales</div>
+              <div class="fm num">${rows.length} rows · ${dnCount} DN group${dnCount === 1 ? "" : "s"} · ${esc(S.agent)}${S.saved ? "" : " · <span style='color:var(--warn)'>unsaved</span>"}</div></div>
             <span class="spacer"></span>
-            <button class="btn ghost sm" onclick="go('setup')">Switch workbook</button>
-            <button class="btn primary sm" onclick="startAdd()">＋ Add statements</button>
+            <button class="btn primary sm" onclick="startAdd()">＋ Add reports</button>
           </div>
 
           ${hasRows ? tableBlock(rows, { editable: false }) : `
             <div class="card empty">
               <div class="big">↑</div>
-              <div style="font-weight:600;color:var(--ink)">This workbook is empty</div>
-              <div style="font-size:13px;margin-top:3px">Add a set of daily-sales PDFs to populate the sheet.</div>
-              <div style="margin-top:18px"><button class="btn primary" onclick="startAdd()">＋ Add statements</button></div>
+              <div style="font-weight:600;color:var(--ink)">No sales recorded yet</div>
+              <div style="font-size:13px;margin-top:3px">Load a daily sales report to get started.</div>
+              <div style="margin-top:18px"><button class="btn primary" onclick="startAdd()">＋ Add reports</button></div>
             </div>`}
 
           <div class="actions">
-            <div class="hint">${hasRows ? "Add further statements at any time, then save the workbook." : ""}</div>
             <span class="spacer"></span>
-            <button class="btn primary" onclick="saveWorkbook()" ${hasRows && !S.saved ? "" : "disabled"}>↓ Save workbook</button>
+            <button class="btn primary" onclick="saveRows()" ${hasRows && !S.saved ? "" : "disabled"}>Save</button>
           </div>
         </div>
 
@@ -2301,8 +2146,7 @@ function removePdf(name) {
 }
 
 function renderReview() {
-  setStep(2);
-  const pool = S.pending;
+    const pool = S.pending;
   ensureWatchSignals();   // so a row's statement carries its agent-watch flag
 
   // Drop-first empty state: "Add statements" lands here before any file is
@@ -2311,8 +2155,8 @@ function renderReview() {
     main.innerHTML = `
       <section class="screen">
         <div class="head"><h1>Add statements</h1>
-          <p>Drop the account-sales PDFs anywhere on this page. Each statement is read and shown for review before anything is written to <b>${esc(S.wb.name)}</b>.</p></div>
-        ${S.nettReports ? `<div class="banner"><span class="bi">◧</span><span><b>Nett report read — ${Object.keys(S.nettMap).length} statement${Object.keys(S.nettMap).length === 1 ? "" : "s"}.</b> Now drop the matching sales PDFs; their Nett will fill in automatically.</span></div>` : ""}
+          <p>Drop the daily sales report anywhere on this page. Each statement is read and shown for review before anything is recorded.</p></div>
+        ${S.nettReports ? `<div class="banner"><span class="bi">◧</span><span><b>Nett report read: ${Object.keys(S.nettMap).length} statement${Object.keys(S.nettMap).length === 1 ? "" : "s"}.</b></span></div>` : ""}
         <div class="drop" tabindex="0" role="button" onclick="browsePdfs()" style="padding:56px 24px">
           <div class="big">↑</div>
           <div class="t">Drop sales reports here</div>
@@ -2332,7 +2176,7 @@ function renderReview() {
   main.innerHTML = `
     <section class="screen">
       <div class="head"><h1>Review ${pool.length} new row${pool.length === 1 ? "" : "s"}</h1>
-        <p>Values are read from each statement by matching its labels. Any field that could not be placed with confidence is flagged for review, so nothing incorrect is written to <b>${esc(S.wb.name)}</b>.</p></div>
+        <p>Values are read from each statement by matching its labels. Any field that could not be placed with confidence is flagged for review, so nothing incorrect is recorded.</p></div>
 
       <div class="drop" tabindex="0" role="button" onclick="browsePdfs()">
         <div class="big">↑</div><div class="t">${pool.length} statement row${pool.length === 1 ? "" : "s"} read</div>
@@ -2355,11 +2199,8 @@ function renderReview() {
 
       ${dupes ? `<div class="banner bad"><span class="bi">!</span>
         <span><b>${dupes} row${dupes === 1 ? " is" : "s are"} already in your saved history.</b>
-        Appending ${dupes === 1 ? "it" : "them"} again will duplicate ${dupes === 1 ? "it" : "them"} in <b>${esc(S.wb.name)}</b>.
+        Appending ${dupes === 1 ? "it" : "them"} again will duplicate ${dupes === 1 ? "it" : "them"}.
         <button class="linklike" onclick="removeDuplicates()">Remove already-saved row${dupes === 1 ? "" : "s"}</button>, or keep ${dupes === 1 ? "it" : "them"} if you're re-processing a correction.</span></div>` : ""}
-
-      <div class="banner"><span class="bi">◧</span>
-        <span><b>Date rule.</b> Column <b>Date</b> takes the earliest <span class="num">DATE RECEIVED</span> across each DN group, so every row under a DN shares one batch date even when statements arrive on different days.</span></div>
 
       ${tableBlock(pool, { editable: true })}
 
@@ -2367,7 +2208,7 @@ function renderReview() {
         <button class="btn ghost" onclick="cancelAdd()">Cancel</button>
         <span class="spacer"></span>
         ${attn ? `<div class="hint" style="color:var(--warn)">Resolve ${attn} flagged row${attn === 1 ? "" : "s"} to continue</div>` : ""}
-        <button class="btn primary" onclick="appendRows()" ${attn ? "disabled" : ""}>Append ${pool.length} row${pool.length === 1 ? "" : "s"} to workbook →</button>
+        <button class="btn primary" onclick="appendRows()" ${attn ? "disabled" : ""}>Add ${pool.length} row${pool.length === 1 ? "" : "s"}</button>
       </div>
     </section>`;
 
@@ -2392,7 +2233,7 @@ function appendRows() {
   const n = S.pending.length;
   S.committed = S.committed.concat(S.pending.map(r => ({ ...r, isNew: true })));
   S.pending = []; S.nettMap = {}; S.nettReports = 0; S.newCodeFor = null; S.importWarnings = []; S.saved = false;
-  toast(`${n} row${n === 1 ? "" : "s"} appended to ${S.wb.name} · unsaved`);
+  toast(`${n} row${n === 1 ? "" : "s"} added · unsaved`);
   go("hub");
 }
 
@@ -2480,175 +2321,32 @@ function editField(idx, field, raw) {
 }
 
 // -------------------------------------------------------------- saving
-const XLSX_TYPES = [{
-  description: "Excel workbook",
-  accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] },
-}];
 
-/** Get write permission for the open workbook WHILE THE CLICK IS STILL FRESH.
- *
- *  requestPermission() needs transient user activation, and a save spends the
- *  click uploading the whole workbook and waiting for it to come back. By the
- *  time the write ran, the activation was gone and the request threw
- *  NotAllowedError -- which the old code reported as "probably open in Excel",
- *  sending the operator to close a file that was not open. So it is asked for
- *  up front, before any network work. Returns true when writing can go ahead. */
-async function ensureWritePermission() {
-  const h = S.wbHandle;
-  if (!h || !h.queryPermission) return true;   // download fallback handles it
-  try {
-    let p = await h.queryPermission({ mode: "readwrite" });
-    if (p !== "granted") p = await h.requestPermission({ mode: "readwrite" });
-    return p === "granted";
-  } catch {
-    return false;    // asked outside a gesture, or refused; the caller reports it
-  }
-}
-
-// What the File System Access API actually throws, and what each one means for
-// the person looking at the screen. Guessing "it's open in Excel" for all of
-// them cost a real save.
-const WRITE_FAILURES = {
-  NotAllowedError: "denied",
-  NoModificationAllowedError: "locked",
-  NotFoundError: "gone",
-  InvalidStateError: "changed",
-  AbortError: "cancelled",
-};
-
-/** Write straight into the file S.wbHandle points at.
- *  Returns { done } on success, { done:false, reason } otherwise. */
-async function writeInPlace(blob) {
-  if (!S.wbHandle || !S.wbHandle.createWritable) return { done: false, reason: "nohandle" };
-  try {
-    if (S.wbHandle.queryPermission) {
-      const p = await S.wbHandle.queryPermission({ mode: "readwrite" });
-      if (p !== "granted") return { done: false, reason: "denied" };
-    }
-    const w = await S.wbHandle.createWritable();
-    await w.write(blob);
-    await w.close();
-    return { done: true };
-  } catch (e) {
-    return { done: false, reason: WRITE_FAILURES[e && e.name] || "failed", error: e };
-  }
-}
-
-/** Persist the blob: in place when possible, else ask where once (and keep the
- *  answer for every save after), else fall back to a download. Returns false
- *  when nothing was written and the changes must stay marked unsaved. */
-async function persistWorkbook(blob) {
-  const attempt = await writeInPlace(blob);
-  if (attempt.done) {
-    toast(`Saved to ${S.wb.name}`);
-    return true;
-  }
-  // Why the direct write failed, in the operator's terms. Carried through to the
-  // end rather than toasted now, because a second toast replaces the first and
-  // the last one would otherwise claim the browser cannot save to files at all.
-  const why = {
-    locked: `${S.wb.name} is locked by another program, usually Excel.`,
-    denied: `The browser wasn’t allowed to write to ${S.wb.name}.`,
-    gone: `${S.wb.name} isn’t where it was: moved, renamed or deleted.`,
-    changed: `${S.wb.name} changed on disk since you opened it, so writing over it `
-           + `would throw that change away.`,
-    failed: `Couldn’t write to ${S.wb.name}`
-          + (attempt.error && attempt.error.message ? `: ${attempt.error.message}` : "") + ".",
-    nohandle: "",   // a new workbook, or one opened without the file picker
-  }[attempt.reason] || "";
-
-  // Ask where to put it instead. This needs a fresh click too, so it can fail on
-  // its own; the download below is the floor that always works, and is why a
-  // round can never be lost here. The rows exist only in this blob.
-  if (window.showSaveFilePicker) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: S.wb.name === "Untitled.xlsx" ? "ZacoAgents.xlsx" : S.wb.name,
-        types: XLSX_TYPES,
-      });
-      S.wbHandle = handle;
-      S.wb.name = handle.name;
-      if ((await writeInPlace(blob)).done) {
-        toast(why ? `${why} Saved to ${handle.name} instead.` : `Saved to ${handle.name}`);
-        return true;
-      }
-    } catch (e) {
-      if (e && e.name === "AbortError") {
-        toast(`${why} Save cancelled, so your changes are still here, unsaved.`.trim(), true);
-        return false;
-      }
-      // Fall through to the download on anything else.
-    }
-  }
-  downloadBlob(blob, S.wb.name);
-  toast(why
-    ? `${why} Downloaded ${S.wb.name} to your Downloads folder instead, so nothing is lost.`
-    : `This browser can’t save directly to a file, so ${S.wb.name} was downloaded instead.`, !!why);
-  return true;
-}
-
-async function saveWorkbook() {
+/** Record the reviewed rows. There is no file: the app's own store is the book
+ *  now, and every view reads back from it. */
+async function saveRows() {
   const fresh = S.committed.filter(r => !r.existing);
   if (!fresh.length) { toast("Nothing new to save"); return; }
-
-  // Before anything slow. The upload below spends the click that the browser
-  // requires in order to ask about file access, so asking afterwards fails.
-  await ensureWritePermission();
 
   if (!S.live) {
     S.committed = S.committed.map(r => ({ ...r, existing: true, isNew: false }));
     S.saved = true;
-    setStep(3); toast(`Saved ${S.committed.length} rows to ${S.wb.name}`);
+    toast(`Saved ${fresh.length} row${fresh.length === 1 ? "" : "s"}`);
     renderHub();
     return;
   }
 
-  await withBusy(`Saving ${S.wb.name}…`, async () => {
-    // Re-read the workbook from disk right before uploading. The File taken at
-    // open time is a snapshot; if the file changed since (saved in Excel, a
-    // previous in-place write), Chrome refuses to read the stale snapshot with
-    // "state had changed since it was read from disk". A fresh read also means
-    // rows added in Excel meanwhile are preserved by the append.
-    if (S.wbHandle && S.wbHandle.getFile) {
-      try { S.wbFile = await S.wbHandle.getFile(); }
-      catch { /* keep the cached copy; the write step will surface any problem */ }
-    }
+  await withBusy("Saving…", async () => {
     const fd = new FormData();
     fd.append("rows", JSON.stringify(fresh));
     fd.append("market_agent", S.agent);
-    if (S.wbFile) fd.append("file", S.wbFile, S.wb.name);
-    let blob, historyWarning = null;
-    try {
-      const res = await api("/api/workbook/append", { method: "POST", body: fd });
-      // Recording history for Insights is best-effort on the server; if it
-      // failed, the workbook still comes back and we flag it non-blockingly.
-      historyWarning = res.headers.get("X-History-Warning");
-      blob = await res.blob();
-    } catch (e) {
-      // Reading the workbook for upload can fail if the file is locked or
-      // still changing on disk -- surface that as something actionable
-      // instead of Chrome's "state had changed since it was read from disk".
-      if (e && (e.name === "InvalidStateError" || e.name === "NotReadableError"
-                || /state had changed|not be read/i.test(e.message || ""))) {
-        throw new Error(`Couldn’t read ${S.wb.name} from disk — close it in Excel, then press Save again.`);
-      }
-      throw e;
-    }
-
-    if (!(await persistWorkbook(blob))) {
-      // User cancelled the save dialog: keep everything marked unsaved.
-      S.screen = "hub";
-      return;
-    }
-
-    // Those rows now live in the file: keep them, but never re-append them.
-    S.wbFile = blob;
+    const out = await (await api("/api/sales/save", { method: "POST", body: fd })).json();
     S.committed = S.committed.map(r => ({ ...r, existing: true, isNew: false }));
     S.saved = true;
     S.screen = "hub";
-    if (historyWarning) toast(historyWarning, true);
+    toast(`Saved ${out.saved} row${out.saved === 1 ? "" : "s"}`);
+    if (out.warning) toast(out.warning, true);
   });
-  if (S.saved) { setStep(3); noteBuyChanges(); }
 }
 
 /** New sales change what is worth buying, so the app says what moved rather
@@ -2792,12 +2490,6 @@ function toast(msg, bad) {
   toastT = setTimeout(() => t.remove(), bad ? 5200 : 2600);
 }
 // -------------------------------------------------------- file inputs
-const wbInput = document.getElementById("wbInput");
-wbInput.addEventListener("change", e => {
-  const f = e.target.files[0];
-  wbInput.value = "";
-  if (f) openWorkbook(f);
-});
 const pdfInput = document.getElementById("pdfInput");
 pdfInput.addEventListener("change", e => {
   const files = [...e.target.files];
@@ -2819,7 +2511,6 @@ paymentInput.addEventListener("change", e => {
 // PDF or CSV: the CSV exports of the same reports are preferred where
 // available, since their values are read rather than recovered from layout.
 const isPdf = f => /\.(pdf|csv)$/i.test(f.name) || f.type === "application/pdf" || f.type === "text/csv";
-const isWorkbook = f => /\.(xlsx|xlsm)$/i.test(f.name);
 
 let dragDepth = 0;
 function dropHighlight(on) {
@@ -2856,29 +2547,14 @@ document.addEventListener("drop", async e => {
   const itemNames = items.map(i => (i.kind === "file" ? i.getAsFile()?.name : null));
 
   const pdfs = files.filter(isPdf);
-  const books = files.filter(isWorkbook);
-
-  if (books.length && S.screen === "setup") {
-    // Reattach the dropped workbook's file handle when the browser offers
-    // one, so Save writes straight back to the same file.
-    const idx = itemNames.indexOf(books[0].name);
-    const handle = idx >= 0 ? await handlePromises[idx] : null;
-    await openWorkbook(books[0], handle && handle.kind === "file" ? handle : null);
-    return;
-  }
 
   if (pdfs.length) {
-    if (S.module !== "sales" || !S.wb) {
-      toast("Open a workbook first, then drop the statement PDFs in");
-      return;
-    }
+    if (S.module !== "sales") { toast("Open Sales & Payments, then drop the reports in"); return; }
     onPdfFiles(pdfs);
     return;
   }
 
-  toast(books.length
-    ? "To switch workbook, go to “Switch workbook” first, then drop it there"
-    : "Drop statement PDFs, or an .xlsx workbook on the opening screen");
+  toast("Drop a daily sales report or a payment details file");
 });
 
 // ------------------------------------------------------------- start

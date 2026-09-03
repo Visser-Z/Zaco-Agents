@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
@@ -28,11 +28,10 @@ from . import (
     procurement,
     reconcile,
     stock,
-    workbook,
 )
 from .supabase_auth import User, current_profile, db_delete, db_get, db_post, require_user
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow, WorkbookInfo
+from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
 
@@ -43,8 +42,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @app.middleware("http")
@@ -133,22 +130,6 @@ async def add_lookup(
 ) -> dict[str, str]:
     await remember_code(user, entry.product, entry.code)
     return {"status": "saved"}
-
-
-# --- workbook -------------------------------------------------------------
-
-@app.post("/api/workbook/open", response_model=WorkbookInfo)
-async def open_workbook(file: UploadFile = File(...), user: User | None = Depends(require_user)) -> WorkbookInfo:
-    """Read an existing workbook so the UI can show what is already in it."""
-    try:
-        wb = workbook.load(await file.read())
-    except Exception as exc:  # openpyxl raises a variety of errors on bad input
-        raise HTTPException(400, f"Could not open that workbook: {exc}") from exc
-    try:
-        rows = workbook.read_rows(wb)
-    except workbook.WorkbookFormatError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return WorkbookInfo(filename=file.filename or "workbook.xlsx", row_count=len(rows), rows=rows)
 
 
 # --- extraction -----------------------------------------------------------
@@ -695,16 +676,17 @@ async def persist_statements(user: User | None, rows: list[StatementRow]) -> str
 
 # --- append + save --------------------------------------------------------
 
-@app.post("/api/workbook/append")
-async def append(
+@app.post("/api/sales/save")
+async def save_rows(
     rows_json: str = Form(..., alias="rows"),
     market_agent: str = Form(...),
-    file: UploadFile | None = File(None),
     user: User | None = Depends(require_user),
-) -> StreamingResponse:
-    """Append reviewed rows to the uploaded workbook and return the new file.
+) -> dict:
+    """Record reviewed rows. The app's own store is the book now.
 
-    If no workbook is supplied we start one from the template headers.
+    This replaces the old append-to-workbook path. Nothing is written to a file
+    and nothing is returned to download: the rows go to the durable history and
+    the UI reads them back from there.
     """
     import json
 
@@ -717,83 +699,20 @@ async def append(
     if blocking:
         raise HTTPException(
             400,
-            f"{len(blocking)} row(s) still have unresolved issues and cannot be written.",
+            f"{len(blocking)} row(s) still have unresolved issues and cannot be saved.",
         )
 
-    if file is not None:
-        try:
-            wb = workbook.load(await file.read())
-        except Exception as exc:
-            raise HTTPException(400, f"Could not open that workbook: {exc}") from exc
-        filename = file.filename or "workbook.xlsx"
-    else:
-        wb = workbook.new_workbook()
-        filename = "workbook.xlsx"
+    # The workbook writer used to be what finalised the agent onto each row.
+    # Nothing else did it, so it moves here rather than disappearing with it.
+    for row in payload:
+        row.market_agent = row.market_agent or market_agent
 
-    try:
-        workbook.append_rows(wb, payload, market_agent)
-    except workbook.WorkbookFormatError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    # Rebuilt after the append so its range covers the rows just written.
-    workbook.refresh_pivot(wb)
-    data = workbook.to_bytes(wb)
-
-    # append_rows finalises each row's market_agent, so record the history only
-    # after the workbook write succeeds -- the two should never disagree.
     warning = await persist_statements(user, payload)
     # A DN the operator corrected on review is worth keeping: no export carries
     # it, so the alternative is re-entering it for the same delivery every round.
     await remember_delivery_notes(user, payload)
 
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    if warning:
-        # A non-blocking hint the frontend can toast; the workbook still returns.
-        headers["X-History-Warning"] = warning
-        headers["Access-Control-Expose-Headers"] = "X-History-Warning"
-
-    return StreamingResponse(iter([data]), media_type=XLSX_MEDIA_TYPE, headers=headers)
-
-
-@app.post("/api/workbook/netts")
-async def write_netts(
-    netts_json: str = Form(..., alias="netts"),
-    file: UploadFile = File(...),
-    user: User | None = Depends(require_user),
-) -> StreamingResponse:
-    """Fill reconciled Netts into rows already in the workbook, by statement
-    number. Returns the updated file and how many rows changed (a header).
-
-    This closes the reconciliation loop for daily rows saved in an earlier
-    round: the append path only adds new rows, so their Nett is filled in place
-    here rather than re-appending them."""
-    import json
-
-    try:
-        netts = {int(k): float(v) for k, v in json.loads(netts_json).items()}
-    except Exception as exc:
-        raise HTTPException(400, f"Malformed netts payload: {exc}") from exc
-
-    try:
-        wb = workbook.load(await file.read())
-    except Exception as exc:
-        raise HTTPException(400, f"Could not open that workbook: {exc}") from exc
-    filename = file.filename or "workbook.xlsx"
-
-    try:
-        updated = workbook.write_netts(wb, netts)
-    except workbook.WorkbookFormatError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    data = workbook.to_bytes(wb)
-
-    return StreamingResponse(
-        iter([data]),
-        media_type=XLSX_MEDIA_TYPE,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "X-Netts-Written": str(updated),
-            "Access-Control-Expose-Headers": "X-Netts-Written",
-        },
-    )
+    return {"saved": len(payload), "warning": warning}
 
 
 # --- analytics ------------------------------------------------------------

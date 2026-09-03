@@ -65,7 +65,7 @@ def test_the_write_is_never_retried_without_the_new_column(monkeypatch):
     rows = [StatementRow(source_file="june.csv", stm_no=1, market_agent="FT", consignment_id=i)
             for i in (900, 901)]
     asyncio.run(main.persist_statements(USER, rows))
-    assert calls == ["market_agent,stm_no,consignment_id"]
+    assert calls == ["market_agent,stm_no,consignment_id,group_date"]
 
 
 def test_schema_gaps_reports_each_missing_migration_once(monkeypatch):

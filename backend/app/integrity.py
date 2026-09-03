@@ -43,6 +43,15 @@ UNSOLD_MAJORITY = 0.50
 # A quarter of everything sent never selling is notable; the real June figures
 # run 7% (oranges, unremarkable) to 51% (nectarines, worth asking about).
 PRODUCT_UNSOLD_NOTABLE = 0.25
+# Realised price as a share of what the market averaged for that commodity that
+# day. Grounded in the first month the agent populated the Market Avg column:
+# across 57 priced consignment-days the median row sold at exactly 1.00 of the
+# market average and 63% landed between 0.80 and 1.20, so the middle of the
+# distribution is "sold at the going rate". The tail is what these catch: 19%
+# below 0.70 and 9% below 0.40.
+BELOW_MARKET = 0.70
+WELL_BELOW_MARKET = 0.40
+
 # Rows smaller than this are left out of the price range. A single carton dumped
 # at R1 is real, and it belongs in the unsold figure -- in a price spread it
 # reports "107x" for strawberries and drowns the comparison it was meant to make.
@@ -189,6 +198,94 @@ def by_product(rows: list[dict]) -> dict[str, dict]:
     return out
 
 
+def market_avg(row: dict) -> float | None:
+    """What the market averaged for this commodity that day, if the report said."""
+    try:
+        value = float(row.get("market_avg"))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def realised_price(row: dict) -> float | None:
+    """What Zaco's carton actually fetched. Nett of returns, as the row is."""
+    cartons = analytics.row_cartons(row)
+    return row_gross(row) / cartons if cartons > 0 else None
+
+
+def price_concerns(rows: list[dict]) -> list[dict]:
+    """Rows that sold well under what the market was paying that day.
+
+    This is the check the reports could never answer before: every export up to
+    July 2026 left ``Market Avg`` at 0.00 in every line. Where it is populated,
+    "did this fetch what the market was paying" finally has a figure behind it.
+
+    Ranked by the money, not by the ratio. Three cartons at a tenth of the
+    market average is a curiosity; a hundred cartons at half of it is R6 000.
+    Sorting on the ratio puts the curiosity first and buries the money.
+
+    A gap is NOT proof of anything. The market average covers every grade, size
+    and producer of that commodity that day, so a smaller or poorer line
+    legitimately sells under it, and an end-of-day clearance legitimately sells
+    well under it. This says how much, and lets the operator judge.
+    """
+    out: list[dict] = []
+    for row in rows:
+        avg, realised = market_avg(row), realised_price(row)
+        if avg is None or realised is None or realised <= 0:
+            continue
+        ratio = realised / avg
+        if ratio >= BELOW_MARKET:
+            continue
+        cartons = analytics.row_cartons(row)
+        out.append({
+            "stm_no": row.get("stm_no"), "dn": row.get("dn"),
+            "product": analytics.product_label(row),
+            "market_agent": row.get("market_agent"),
+            "date": row.get("group_date") or row.get("invoice_date"),
+            "cartons": int(cartons),
+            "realised": round(realised, 2),
+            "market_avg": round(avg, 2),
+            "ratio": round(ratio, 4),
+            "short_by": round(cartons * (avg - realised), 2),
+            "severity": "severe" if ratio < WELL_BELOW_MARKET else "watch",
+            "why": (f"Sold at R {realised:,.2f} a carton against a market average "
+                    f"of R {avg:,.2f}, which is {ratio:.0%} of it.").replace(",", " "),
+        })
+    # Purely by money. Leading on severity put a one-carton line R168 under the
+    # market above a hundred-carton line R6 229 under it, which is the burial
+    # this ranking exists to prevent. Severity still labels each line.
+    out.sort(key=lambda d: -d["short_by"])
+    return out
+
+
+def price_position(rows: list[dict]) -> dict:
+    """How the period priced against the market, and over how much of it.
+
+    Coverage is part of the answer. A period that predates the agent filling in
+    the Market Avg column can say nothing here, and must say so rather than
+    reporting a clean result over the handful of rows it could check.
+    """
+    priced = [r for r in rows
+              if market_avg(r) is not None and (realised_price(r) or 0) > 0]
+    if not priced:
+        return {"known": False, "covered": 0, "of": len(rows)}
+    at_market = sum(analytics.row_cartons(r) * market_avg(r) for r in priced)
+    realised = sum(row_gross(r) for r in priced)
+    concerns = price_concerns(priced)
+    return {
+        "known": True, "covered": len(priced), "of": len(rows),
+        "realised": round(realised, 2),
+        "at_market_average": round(at_market, 2),
+        # Negative means the produce fetched MORE than the market average.
+        "short_by": round(at_market - realised, 2),
+        "share_of_market": round(realised / at_market, 4) if at_market else None,
+        "concerns": concerns[:12],
+        "flagged": len(concerns),
+        "short_on_flagged": round(sum(c["short_by"] for c in concerns), 2),
+    }
+
+
 def price_spread(rows: list[dict]) -> list[dict]:
     """Per product, the range of prices its rows realised.
 
@@ -231,7 +328,10 @@ def summary(rows: list[dict]) -> dict:
     unsold = unsold_concerns(rows)
     spread = price_spread(rows)
     priced = [r for r in rows if deduction_rate(r) is not None]
+    price = price_position(rows)
     return {
+        # What a carton fetched against what the market was paying for it.
+        "price": price,
         "going_rate": round(rate, 4) if rate is not None else None,
         "rate_known_from": len(priced),
         "rate_concerns": concerns,
@@ -248,11 +348,13 @@ def summary(rows: list[dict]) -> dict:
         "by_product": by_product(rows),
         "price_spread": spread[:8],
         # Stated in the payload so the UI cannot imply the price was checked.
-        "price_unverifiable": (
-            "Whether each carton fetched what the report says cannot be checked "
-            "from these exports. The Daily Sales report has a Market Avg column "
-            "that would settle it and the export leaves it empty — ask "
-            "TechnoFresh to fill it in."
+        # Reports up to July 2026 left Market Avg at 0.00 in every line, so for
+        # those the price genuinely cannot be checked and saying so is the whole
+        # point. Where the column is populated, ``price`` above answers it.
+        "price_unverifiable": None if price["known"] else (
+            "Whether each carton fetched what the market was paying cannot be "
+            "checked over this period. The Daily Sales report has a Market Avg "
+            "column that would settle it and these exports leave it empty."
         ),
-        "flagged": len(concerns) + len(unsold),
+        "flagged": len(concerns) + len(unsold) + price.get("flagged", 0),
     }

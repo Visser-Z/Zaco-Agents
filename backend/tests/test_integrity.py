@@ -2,7 +2,13 @@
 
 Grounded in real June data: the deduction rate's median is 15.0% with 120 of 161
 account sales between 14% and 16%, so a line well outside that band is worth
-asking about. The price is deliberately NOT judged -- see integrity.py.
+asking about.
+
+The price used to be unanswerable, because every export up to July 2026 left the
+Market Avg column at 0.00 in every line. From August 2026 the agent fills it in,
+so ``price_concerns`` can finally compare what a carton fetched against what the
+market was paying for it. Where the column is still empty, the app must say the
+price cannot be checked rather than report a clean result.
 """
 
 from app import integrity
@@ -169,3 +175,70 @@ def test_the_summary_says_what_it_cannot_check():
     assert "Market Avg" in s["price_unverifiable"]
     assert s["going_rate"] == 0.15
     assert s["flagged"] == 0
+
+
+# --- what a carton fetched against what the market was paying --------------
+
+def _priced(realised, avg, cartons=10, **kw):
+    """A row that sold `cartons` at `realised` each, against a market average."""
+    return _row(None, sold=cartons, price=realised, market_avg=avg, **kw)
+
+
+def test_a_row_at_the_market_average_is_not_flagged():
+    assert integrity.price_concerns([_priced(100.0, 100.0)]) == []
+
+
+def test_beating_the_market_is_never_a_concern():
+    assert integrity.price_concerns([_priced(250.0, 100.0)]) == []
+
+
+def test_a_row_well_under_the_market_average_is_flagged():
+    c = integrity.price_concerns([_priced(50.0, 200.0, cartons=100)])
+    assert len(c) == 1
+    assert c[0]["ratio"] == 0.25
+    assert c[0]["severity"] == "severe"            # under 0.40
+    assert c[0]["short_by"] == 15000.0             # 100 cartons x R150 of gap
+
+
+def test_the_middle_band_is_a_question_not_a_severe_one():
+    c = integrity.price_concerns([_priced(60.0, 100.0)])
+    assert c[0]["severity"] == "watch"             # 0.60: under 0.70, over 0.40
+
+
+def test_concerns_are_ranked_by_money_not_by_ratio_or_severity():
+    """Three cartons at a tenth of the market average is a curiosity. A hundred
+    cartons at two thirds of it is real money. Ranking on the ratio, or on
+    severity first, buries the money under the curiosity."""
+    curiosity = _priced(10.0, 100.0, cartons=3, stm_no=1)    # 0.10 severe, R270
+    money = _priced(65.0, 100.0, cartons=100, stm_no=2)      # 0.65 watch, R3 500
+    got = integrity.price_concerns([curiosity, money])
+    assert [c["stm_no"] for c in got] == [2, 1]
+    assert [c["severity"] for c in got] == ["watch", "severe"]
+
+
+def test_a_missing_market_average_is_not_a_price_of_zero():
+    """Every export up to July 2026 left the column at 0.00. Read as a real
+    average, each of those rows looks infinitely below the market."""
+    assert integrity.price_concerns([_priced(100.0, None)]) == []
+    assert integrity.price_concerns([_priced(100.0, 0.0)]) == []
+
+
+def test_price_position_reports_its_own_coverage():
+    rows = [_priced(100.0, 100.0), _priced(50.0, 200.0), _priced(100.0, None)]
+    p = integrity.price_position(rows)
+    assert p["known"] is True
+    assert (p["covered"], p["of"]) == (2, 3)
+    assert p["realised"] == 1500.0                 # 10x100 + 10x50
+    assert p["at_market_average"] == 3000.0        # 10x100 + 10x200
+    assert p["short_by"] == 1500.0
+    assert p["share_of_market"] == 0.5
+
+
+def test_a_period_with_no_market_average_says_so_rather_than_reporting_clean():
+    rows = [_priced(100.0, None), _priced(80.0, None)]
+    assert integrity.price_position(rows)["known"] is False
+    assert integrity.summary(rows)["price_unverifiable"]
+
+
+def test_the_caveat_is_dropped_once_the_price_can_be_checked():
+    assert integrity.summary([_priced(100.0, 100.0)])["price_unverifiable"] is None

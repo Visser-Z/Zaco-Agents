@@ -173,3 +173,37 @@ def test_routes_through_extract_statements():
     # Delivery/Consignment IDs prove the daily-sales parser handled it, not the
     # account-sales one.
     assert [r.stm_no for r in rows] == [118170501, 118170503, 118246501]
+
+
+# --- one row per consignment per TRADING DAY ------------------------------
+
+def test_a_consignment_is_identified_as_a_consignment():
+    """Without this the field stays empty, every row becomes its own delivery,
+    and Qty Sent is counted once per row instead of once per consignment. A
+    consignment of 71 selling across three daily reports then claims 213 cartons
+    were sent and reports a third of its real sell-through."""
+    rows = daily_sales.parse_daily_sales([DAY], "day.txt")
+    assert all(r.consignment_id is not None for r in rows)
+    assert all(r.consignment_id == r.stm_no for r in rows)
+
+
+def test_the_same_consignment_on_two_days_is_two_rows_not_a_duplicate():
+    """The reports are loaded a trading day at a time and the PDF prints no
+    account sale number, so column E carries the Consignment ID and every day of
+    a consignment repeats it. Identity therefore has to include the day, or the
+    second day is read as the first one saved twice and thrown away."""
+    import app.main as main
+    from app.supabase_auth import User
+
+    user = User(id="u", email="op@x.com", token="t")
+    monday = daily_sales.parse_daily_sales([DAY], "mon.txt")[0]
+    wednesday = daily_sales.parse_daily_sales([DAY], "wed.txt")[0]
+    monday.market_agent = wednesday.market_agent = "Farmers Trust"
+    monday.date = date(2026, 8, 3)
+    wednesday.date = date(2026, 8, 5)
+
+    keys = set()
+    for row in (monday, wednesday):
+        rec = main._statement_record(row, user)
+        keys.add((rec["market_agent"], rec["stm_no"], rec["consignment_id"], rec["group_date"]))
+    assert len(keys) == 2, "the two days collapsed onto one key"

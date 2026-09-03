@@ -55,6 +55,11 @@ class StatementRow(BaseModel):
     # 0 means the report showed the figure and it was nothing.
     cartons_returned: int | None = None
     returns_total: float | None = None
+    # What the market itself averaged for this commodity that day, as the agent
+    # reports it. Older exports left this column at 0.00 in every line, which is
+    # why the price could never be checked; it is populated from August 2026.
+    # None means the report did not carry it, which is not the same as zero.
+    market_avg: float | None = None
     nett_total: float | None = None            # NETT AMOUNT
     date_received: Date | None = None          # DATE RECEIVED (when it reached the market)
     invoice_date: Date | None = None           # DATE (drives column T)

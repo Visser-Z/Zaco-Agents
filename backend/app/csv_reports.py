@@ -201,6 +201,21 @@ def _labelled(row: list[str]) -> dict[str, str]:
     return out
 
 
+def _market_avg(dockets: list[dict]) -> float | None:
+    """The market's own average for this commodity, weighted by cartons.
+
+    Dockets reporting 0.00 are not reporting an average and are left out. See
+    ``daily_sales._market_avg``.
+    """
+    weighted = total = 0.0
+    for d in dockets:
+        q, a = abs(d.get("qty") or 0), d.get("market_avg") or 0.0
+        if q and a > 0:
+            weighted += a * q
+            total += q
+    return round(weighted / total, 2) if total else None
+
+
 def _settled_under(ref: str | None) -> str:
     """The account sale a docket was paid under, or "" if it has not been paid.
 
@@ -274,6 +289,7 @@ def parse_daily_sales_csv(text: str, filename: str) -> list[StatementRow]:
                     "docket": _cell(row, 3),
                     "payment_ref": _cell(row, 4),
                     "qty": _int(_cell(row, 5)) or 0,
+                    "market_avg": _num(_cell(row, 6)),
                     "value": _num(_cell(row, 8)) or 0.0,
                 }
             )
@@ -375,6 +391,7 @@ def _statement_rows(block: dict, filename: str, index: int) -> list[StatementRow
         # than surviving only as a difference. See ``daily_sales.parse_daily_sales``.
         returns = [d for d in ds if d["qty"] < 0]
         row.cartons_sold = qty
+        row.market_avg = _market_avg(ds)
         row.cartons_returned = -sum(d["qty"] for d in returns)
         row.returns_total = round(abs(sum(d["value"] for d in returns)), 2)
         row.sales_total = round(value, 2)

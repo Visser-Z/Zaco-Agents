@@ -77,11 +77,28 @@ _PRODUCT_TAIL = re.compile(r"(?<=\))\s+\d+$")
 # A docket/sale line: date, docket no, qty sold, market avg, price, sales value.
 _DOCKET = re.compile(
     r"^\s*(\d{4}-\d{2}-\d{2})\s+\S+\s+(-?\d+)\s+"
-    r"R\s*-?[\d,]*\.?\d*\s+"          # Market Avg (ignored)
+    r"R\s*(-?[\d,]*\.?\d*)\s+"        # Market Avg
     r"R\s*(-?[\d,]*\.?\d*)\s+"        # Price
     r"R\s*(-?[\d,]*\.?\d*)\s*$",      # Sales Value
     re.M,
 )
+
+
+def _market_avg(dockets) -> float | None:
+    """What the market averaged for this commodity, over the dockets that say.
+
+    Weighted by cartons, so a one-carton line cannot outvote a hundred-carton
+    one. Dockets reporting 0.00 are not reporting an average and are left out
+    rather than dragging it down; if none of them report one, the answer is that
+    we do not know, not zero.
+    """
+    weighted = total = 0.0
+    for _, qty, avg, _, _ in dockets:
+        q, a = abs(int(qty)), _num(avg)
+        if q and a > 0:
+            weighted += a * q
+            total += q
+    return round(weighted / total, 2) if total else None
 
 
 def _num(token: str) -> float:
@@ -151,6 +168,12 @@ def parse_daily_sales(pages: list[str], filename: str) -> list[StatementRow]:
 
         if m := _CONSIGNMENT_ID.search(block):
             row.stm_no = _strip_id(m.group(1))      # E ← Consignment ID
+            # And keep it as the consignment it actually is. Without this the
+            # field stays empty, every row becomes its own delivery, and Qty Sent
+            # is counted once per row instead of once per consignment -- so a
+            # consignment of 18 that sold across three daily reports reports 54
+            # cartons sent and a third of its real sell-through.
+            row.consignment_id = row.stm_no
         else:
             flags.append(Flag(field="stm_no", message="No Consignment ID on this consignment."))
 
@@ -176,14 +199,15 @@ def parse_daily_sales(pages: list[str], filename: str) -> list[StatementRow]:
         # halves are kept instead of only their difference. Classified on the
         # quantity's sign; a return's Sales Value prints negative alongside it
         # and is held positive here, so "10 returned, R2,000" reads as it should.
-        returns = [(q, v) for _, q, _, v in dockets if int(q) < 0]
+        returns = [(q, v) for _, q, _, _, v in dockets if int(q) < 0]
         returned_qty = -sum(int(q) for q, _ in returns)
         returned_value = abs(sum(_num(v) for _, v in returns))
-        total_qty = sum(int(q) for _, q, _, _ in dockets)
-        total_value = sum(_num(v) for _, _, _, v in dockets)
+        total_qty = sum(int(q) for _, q, _, _, _ in dockets)
+        total_value = sum(_num(v) for _, _, _, _, v in dockets)
         sale_dates = sorted(datetime.strptime(d, "%Y-%m-%d").date() for d, *_ in dockets)
 
         row.cartons_sold = total_qty
+        row.market_avg = _market_avg(dockets)
         row.cartons_returned = returned_qty
         row.returns_total = round(returned_value, 2)
         row.price = round(total_value / total_qty, 2) if total_qty else 0.0

@@ -917,9 +917,30 @@ function watchStrip(w) {
         + `<span class="wq"> of ${fmtInt(w.totals.cartons_sent)} sent`
         + `${w.totals.share_unsold != null ? `, ${Math.round(w.totals.share_unsold * 100)}%` : ""}</span></div>`
       : ""}
+    ${priceBlock(w.price)}
     ${list ? `<ul class="watch-list">${list}</ul>` : ""}
-    <div class="wnote">${esc(w.price_unverifiable)}</div>
+    ${w.price_unverifiable ? `<div class="wnote">${esc(w.price_unverifiable)}</div>` : ""}
   </div>`;
+}
+
+/** What the produce fetched against what the market was paying for it.
+ *
+ *  Blank until the agent fills in the Market Avg column; every export up to
+ *  July 2026 left it at zero, and the caveat above covers those periods. */
+function priceBlock(p) {
+  if (!p || !p.known) return "";
+  const share = p.share_of_market == null ? null : Math.round(p.share_of_market * 100);
+  const over = p.short_by < 0;
+  const worst = (p.concerns || []).slice(0, 5).map(c => `
+    <li><span class="wsig ${c.severity}">${Math.round(c.ratio * 100)}%</span>
+      <span><b>${fmtInt(c.cartons)} ctn</b> ${esc(c.product || "")}
+      <span class="wq">R ${fmt(c.realised)} a carton against the market's R ${fmt(c.market_avg)}
+      — R ${fmt(c.short_by)} below it</span></span></li>`).join("");
+  return `<div><span class="wl">${over ? "Above the market" : "Against the market"}</span>
+      <b>${share == null ? "—" : share + "%"}</b>
+      <span class="wq"> of the market average, over ${fmtInt(p.covered)} of ${fmtInt(p.of)} sales`
+    + `${p.flagged ? ` · ${p.flagged} line${p.flagged === 1 ? "" : "s"} R ${fmt(p.short_on_flagged)} below` : ""}</span></div>
+    ${worst ? `<ul class="watch-list">${worst}</ul>` : ""}`;
 }
 
 /** Fetch the analytics payload quietly so watch flags work off the Insights page.

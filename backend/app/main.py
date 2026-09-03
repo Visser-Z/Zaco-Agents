@@ -153,26 +153,31 @@ async def flag_duplicates(user: User | None, rows: list[StatementRow]) -> None:
     where = {"stm_no": f"in.({','.join(str(n) for n in stm_nos)})"}
     try:
         existing = await db_get(
-            user, "statements", {"select": "stm_no,consignment_id,market_agent,created_at", **where}
+            user, "statements", {"select": "stm_no,consignment_id,market_agent,created_at,group_date", **where}
         )
     except Exception:  # noqa: BLE001 -- before migration 0010 there is no such column
         try:
             existing = await db_get(
-                user, "statements", {"select": "stm_no,market_agent,created_at", **where}
+                user, "statements",
+                {"select": "stm_no,market_agent,created_at,group_date", **where}
             )
         except Exception:  # noqa: BLE001 -- a duplicate warning is not worth failing an import
             return
     # An account sale covers several consignments, each its own row, so identity
     # is the pair. Keyed on the statement alone, a consignment would be called a
     # duplicate because a *different* product on the same account sale was saved.
+    # The trading day is part of identity now: the same consignment selling on
+    # Monday and on Wednesday is two rows, not one recorded twice.
     seen: dict[tuple, dict] = {}
     for rec in existing:
-        seen[(rec["stm_no"], rec.get("consignment_id") or 0)] = rec
-        seen.setdefault((rec["stm_no"], None), rec)
+        day = (rec.get("group_date") or "")[:10] or None
+        seen[(rec["stm_no"], rec.get("consignment_id") or 0, day)] = rec
+        seen.setdefault((rec["stm_no"], None, day), rec)
     for row in rows:
-        rec = seen.get((row.stm_no, row.consignment_id or 0))
+        day = row.date.isoformat() if row.date else None
+        rec = seen.get((row.stm_no, row.consignment_id or 0, day))
         if rec is None and row.consignment_id is None:
-            rec = seen.get((row.stm_no, None))
+            rec = seen.get((row.stm_no, None, day))
         if rec is None:
             continue
         when = (rec.get("created_at") or "")[:10]
@@ -357,6 +362,8 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 # ("column statements.consignment_id does not exist") or a bare 404, which reads
 # like a broken app rather than one pending setup step.
 _MIGRATIONS = {
+    "statements_unique_per_agent": "0014_statements_per_day.sql",
+    "market_avg": "0013_statements_market_avg.sql",
     "cartons_returned": "0012_statements_returns.sql",
     "returns_total": "0012_statements_returns.sql",
     "consignment_id": "0010_statements_consignment_id.sql",
@@ -385,6 +392,7 @@ async def schema_gaps(user: User | None) -> list[str]:
         return []
     gaps: list[str] = []
     probes = (
+        ("statements", "market_avg", "0013_statements_market_avg.sql"),
         ("statements", "cartons_returned", "0012_statements_returns.sql"),
         ("statements", "consignment_id", "0010_statements_consignment_id.sql"),
     )
@@ -606,6 +614,8 @@ def _statement_record(row: StatementRow, user: User) -> dict | None:
         # can be told apart again. See ``StatementRow.cartons_returned``.
         "cartons_returned": row.cartons_returned,
         "returns_total": row.returns_total,
+        # What the market itself was paying for this commodity that day.
+        "market_avg": row.market_avg,
         "price": row.price,
         "nett_total": row.nett_total,
         "date_received": _iso(row.date_received),
@@ -648,7 +658,7 @@ async def persist_statements(user: User | None, rows: list[StatementRow]) -> str
             upsert=True,
             # One account sale settles several consignments, each of which is its
             # own row, so the statement number alone is no longer unique.
-            on_conflict="market_agent,stm_no,consignment_id",
+            on_conflict="market_agent,stm_no,consignment_id,group_date",
             resolution="ignore-duplicates",
         )
     except Exception as exc:  # noqa: BLE001 -- save must succeed regardless
@@ -722,7 +732,9 @@ _ANALYTICS_COLUMNS = (
     "consignment_id,"
     # What came back, so Insights can report sold and returned rather than only
     # the net of the two.
-    "cartons_returned,returns_total"
+    "cartons_returned,returns_total,"
+    # What the market itself averaged, so the price can be checked against it.
+    "market_avg"
 )
 
 # Columns that arrived with a later migration, newest group first. Asking a
@@ -731,6 +743,7 @@ _ANALYTICS_COLUMNS = (
 # column none of them strictly needs -- so each group is dropped in turn and the
 # read retried, rather than the page going dark.
 _LATE_COLUMNS = (
+    ("market_avg",),                         # 0013
     ("cartons_returned", "returns_total"),   # 0012
     ("consignment_id",),                     # 0010
 )

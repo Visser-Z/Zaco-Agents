@@ -36,6 +36,10 @@ _MARKERS = (
 )
 
 
+# The closing line every Payment Details report carries, whether or not it has
+# any payments on it.
+_GRAND_TOTAL = re.compile(r"Grand\s+Total", re.I)
+
 _DATE_RANGE = re.compile(
     r"Date\s+Range\s*:\s*(\d{4})/(\d{2})/(\d{2})\s*-\s*(\d{4})/(\d{2})/(\d{2})", re.I
 )
@@ -54,10 +58,19 @@ def is_payment_details(text: str) -> bool:
 
     Requires the report title so it is never confused with the Nett Payment
     Adjustments report, which shares some column names but has no commodity
-    lines."""
+    lines.
+
+    A report for a day on which nothing was paid prints its header, a Grand
+    Total of zero, and no column headings at all -- six of eight real August
+    exports look like that. Requiring the column headings rejected those as
+    unreadable, which tells the operator their file is broken when the truth is
+    that the day was quiet. The title plus a grand total is enough.
+    """
     if not _MARKERS[0].search(text):
         return False
-    return sum(bool(p.search(text)) for p in _MARKERS) >= 3
+    if sum(bool(p.search(text)) for p in _MARKERS) >= 3:
+        return True
+    return bool(_GRAND_TOTAL.search(text))
 
 
 # --- parsing --------------------------------------------------------------

@@ -163,3 +163,46 @@ def test_another_producers_code_is_still_an_account_sale():
 def test_product_string_preserved_for_normalisation():
     r = next(r for r in _recs() if r["stm_no"] == 392828)
     assert r["lines"][0]["product"] == "NECTARINES OTHER CLASS 1 LARGE MULTI LAYER TRAYER 5.00 kg"
+
+
+# --- telling the reports apart, and telling empty from unreadable ----------
+
+EMPTY_PAYMENT = """\
+    Report                                              Zaco Agents (Pty) Ltd (20026)
+    Report:   Payment Details                               Run Date: 2026/09/02 20:01:14
+    Market:   ALL
+    Agent:    ALL
+    Date Range: 2026/08/01 - 2026/08/01
+
+    Grand Total                                R 0.00  R 0.00   R 0.00   R 0.00
+"""
+
+
+def test_a_day_with_no_payments_is_still_a_payment_report():
+    """Six of eight real August exports look like this: a header, a Grand Total
+    of zero, and no column headings, because there was nothing to head. Rejected
+    as unreadable it tells the operator their file is broken when the truth is
+    the day was quiet."""
+    from app import payment_details as pd
+    assert pd.is_payment_details(EMPTY_PAYMENT) is True
+    assert pd.parse_payment_details([EMPTY_PAYMENT], "empty.pdf") == []
+    assert pd.date_range(EMPTY_PAYMENT) == ("2026-08-01", "2026-08-01")
+
+
+def test_a_payment_report_is_not_read_as_an_adjustments_report():
+    """They share three column headings, and the sales import tests for an
+    adjustments report first, so without its own title a Payment Details PDF
+    dropped there contributed Netts nobody asked for."""
+    from app import nett_adjustments as na, payment_details as pd
+    with open("tests/fixtures/payment_details_week32.txt", encoding="utf-8") as fh:
+        text = fh.read()
+    assert pd.is_payment_details(text) is True
+    assert na.is_nett_adjustments(text) is False
+
+
+def test_an_adjustments_report_is_still_recognised():
+    from app import nett_adjustments as na, payment_details as pd
+    with open("tests/fixtures/nett_adjustments_july.txt", encoding="utf-8") as fh:
+        text = fh.read()
+    assert na.is_nett_adjustments(text) is True
+    assert pd.is_payment_details(text) is False

@@ -38,7 +38,16 @@ _MARKERS = (
 
 
 def is_nett_adjustments(text: str) -> bool:
-    """True if the text looks like the Nett Payment Adjustments report."""
+    """True if the text looks like the Nett Payment Adjustments report.
+
+    The title is required. Three of the four markers below are column headings
+    the Payment Details report also carries, so matching on those alone made
+    every payment report answer yes -- and because the sales import tests for
+    an adjustments report FIRST, a Payment Details PDF dropped there was read
+    as adjustments and quietly contributed Netts nobody asked for.
+    """
+    if not _MARKERS[0].search(text):
+        return False
     return sum(bool(p.search(text)) for p in _MARKERS) >= 2
 
 

@@ -26,6 +26,7 @@ from . import (
     integrity,
     reconcile,
     stock,
+    tracking,
 )
 from .supabase_auth import User, current_profile, db_delete, db_get, db_post, require_user
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
@@ -362,6 +363,7 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 # ("column statements.consignment_id does not exist") or a bare 404, which reads
 # like a broken app rather than one pending setup step.
 _MIGRATIONS = {
+    "payments": "0015_payments.sql",
     "statements_unique_per_agent": "0014_statements_per_day.sql",
     "market_avg": "0013_statements_market_avg.sql",
     "cartons_returned": "0012_statements_returns.sql",
@@ -780,6 +782,93 @@ async def _history_rows(user: User | None) -> list[dict]:
     raise failure
 
 
+# --- payments (the durable record behind the tracker) ---------------------
+
+def _payment_record(rec: dict, user: User) -> dict | None:
+    """Map a parsed payment onto a `payments` insert, or None if unkeyable.
+
+    The AccSale number is the key. A record without one cannot be recorded
+    without colliding with every other unkeyed payment, so it is left out (its
+    money still shows in the reconcile panel's unattributed line).
+    """
+    if not rec.get("accsale"):
+        return None
+    return {
+        "accsale": rec["accsale"],
+        "stm_no": rec.get("stm_no"),
+        "market_agent": rec.get("market_agent"),
+        "supplier_ref": rec.get("supplier_ref"),
+        "dn": rec.get("dn"),
+        "paid_on": rec.get("date"),
+        "nett": rec.get("nett"),
+        "gross": rec.get("gross"),
+        "deductions": rec.get("deductions"),
+        "vat": rec.get("vat"),
+        "lines": rec.get("lines") or [],
+        "created_by": user.id,
+    }
+
+
+async def persist_payments(user: User | None, records: list[dict]) -> str | None:
+    """Record reconciled payments, so outstanding money survives a refresh.
+
+    Best-effort, exactly like ``persist_statements``: reconciliation must still
+    return even if the write fails (the table's migration not run yet, say).
+    Re-processing a report keeps the first recorded copy -- a payment is a
+    financial record staff do not overwrite -- so the insert ignores duplicates.
+    """
+    if user is None:
+        return None
+    rows = [r for rec in records if (r := _payment_record(rec, user)) is not None]
+    if not rows:
+        return None
+    try:
+        await db_post(user, "payments", rows, upsert=True,
+                      on_conflict="accsale", resolution="ignore-duplicates")
+    except Exception as exc:  # noqa: BLE001 -- reconciliation must succeed regardless
+        if (migration := _pending_migration(exc)):
+            return (
+                f"Payments were matched but not recorded: the database is missing the "
+                f"{migration} migration. Run it in the Supabase SQL editor and re-drop "
+                f"the report; nothing is lost."
+            )
+        return None
+    return None
+
+
+async def _saved_payments(user: User | None) -> list[dict]:
+    """Every recorded payment, read as the caller so RLS applies."""
+    if user is None:
+        return []
+    query = {
+        "select": "accsale,stm_no,market_agent,supplier_ref,dn,paid_on,nett,gross,lines",
+        "limit": "10000",
+    }
+    try:
+        rows = await db_get(user, "payments", query)
+    except Exception:  # noqa: BLE001 -- before migration 0015 there are none
+        return []
+    # reconcile expects a payment's date under "date" and its breakdown under
+    # "lines"; the table stores the date as paid_on. Bridge the two shapes here.
+    for r in rows:
+        r["date"] = r.pop("paid_on", None)
+        r["lines"] = r.get("lines") or []
+    return rows
+
+
+@app.get("/api/tracking")
+async def get_tracking(user: User | None = Depends(require_user)) -> dict:
+    """The Tracking tab: paid vs outstanding, sales per day, slow stock.
+
+    Answered from saved data -- the statement history and the recorded payments
+    -- so it holds for the whole period rather than only the moment a file is
+    dropped. Empty but valid in local mode, where there is nothing saved.
+    """
+    sales = await _history_rows(user)
+    payments = await _saved_payments(user)
+    return tracking.compute(sales, payments)
+
+
 @app.get("/api/analytics")
 async def get_analytics(
     month: str | None = None,
@@ -974,6 +1063,13 @@ async def reconcile_payments(
             rlo, rhi = payment_details.date_range(text)
         lo = rlo if lo is None else min(lo, rlo or lo)
         hi = rhi if hi is None else max(hi, rhi or hi)
+
+    # Record the payments before matching, so the Tracking tab knows what is
+    # outstanding across the whole period rather than only while this file is
+    # open. Best-effort: a failed write must not cost the operator their match.
+    payment_warning = await persist_payments(user, records)
+    if payment_warning:
+        warnings.append(payment_warning)
 
     dns = {r["dn"] for r in records if r["dn"] is not None}
     daily = await _accumulated_daily(user, dns, lo, hi) if user is not None else []

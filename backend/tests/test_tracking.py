@@ -1,0 +1,140 @@
+"""The Tracking view: paid vs outstanding, sales per day, slow stock.
+
+Pure functions over saved-shaped dicts, so no database is needed. The point of
+the tab is that it answers from saved data, so these check the three questions
+hold together over a small hand-built history.
+"""
+
+from datetime import date
+
+from app import tracking
+
+
+def _sale(product, cartons, price, day, dn=100, sent=None, received=None,
+          last_sale=None, consignment_id=None, returned=0, ret_value=0.0):
+    return {
+        "dn": dn, "product": product, "description": None,
+        "market_agent": "Farmers Trust",
+        "cartons_sold": cartons, "cartons_returned": returned,
+        "returns_total": ret_value, "price": price,
+        "qty_received": sent, "consignment_id": consignment_id,
+        "group_date": day, "date_received": received or day, "last_sale": last_sale or day,
+        "nett_total": None, "payment_refs": None,
+    }
+
+
+def _payment(dn, product, gross, nett, accsale="PRE*BT*1"):
+    return {"dn": dn, "accsale": accsale, "stm_no": 1, "market_agent": "Farmers Trust",
+            "supplier_ref": f"20026*{dn}", "date": "2026-08-05", "nett": nett, "gross": gross,
+            "deductions": round(gross - nett, 2), "vat": 0.0,
+            "lines": [{"product": product, "delivered": 0, "sold": 0, "sales_total": gross}]}
+
+
+# --- payments -------------------------------------------------------------
+
+def test_a_sale_with_a_matching_payment_is_paid():
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01", dn=100)]
+    payments = [_payment(100, "GRAPES", gross=1000.0, nett=850.0)]
+    p = tracking.payment_status(sales, payments)
+    assert p["batches_paid"] == 1
+    assert p["batches_outstanding"] == 0
+    assert p["total_paid"] == 850.0
+    assert p["still_to_come"] == 0.0
+
+
+def test_a_sale_with_no_payment_is_still_to_come():
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01", dn=100)]
+    p = tracking.payment_status(sales, [])
+    assert p["batches_outstanding"] == 1
+    assert p["still_to_come"] == 1000.0        # the whole gross is owed
+    assert p["oldest_outstanding"] == "2026-08-01"
+
+
+def test_still_to_come_is_only_the_unpaid_shortfall():
+    """Sold more than the payment covered: only the shortfall is owed. Paid for
+    more than sold: nothing is owed, and it is surfaced separately rather than
+    netted off against real money owed elsewhere."""
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01", dn=100),   # sold 1000
+             _sale("PLUMS", 10, 100.0, "2026-08-01", dn=200)]    # sold 1000
+    payments = [_payment(100, "GRAPES", gross=600.0, nett=500.0),   # part paid
+                _payment(200, "PLUMS", gross=1200.0, nett=1000.0)]  # over paid
+    p = tracking.payment_status(sales, payments)
+    assert p["still_to_come"] == 400.0         # 1000 - 600, and nothing for plums
+    assert p["batches_outstanding"] == 1
+    # The over-payment is reported, never quietly cancelling out the shortfall.
+    assert [r["overpaid"] for r in p["overpaid"]] == [200.0]
+    assert p["total_paid"] == 1500.0           # both netts landed
+
+
+def test_a_payment_with_nothing_sold_is_an_exception_not_dropped():
+    payments = [_payment(999, "MANGOES", gross=500.0, nett=400.0)]
+    p = tracking.payment_status([], payments)
+    assert len(p["unmatched"]) == 1
+    assert p["unmatched"][0]["dn"] == 999
+    assert p["unmatched"][0]["paid"] == 500.0
+
+
+# --- sales per day --------------------------------------------------------
+
+def test_sales_group_by_day_newest_first_net_of_returns():
+    sales = [
+        _sale("GRAPES", 10, 100.0, "2026-08-01"),
+        _sale("PLUMS", 5, 50.0, "2026-08-01"),
+        _sale("GRAPES", 8, 100.0, "2026-08-03", returned=2, ret_value=200.0),
+    ]
+    days = tracking.sales_by_day(sales)["days"]
+    assert [d["date"] for d in days] == ["2026-08-03", "2026-08-01"]
+    assert days[0]["cartons"] == 8 and days[0]["returned"] == 2
+    # Within a day, products rank by value; grapes (1000) over plums (250).
+    assert [p["product"] for p in days[1]["products"]] == ["GRAPES", "PLUMS"]
+
+
+# --- slow to sell ---------------------------------------------------------
+
+def test_a_consignment_still_on_the_floor_is_flagged_by_age():
+    # Sent 100, sold 10 across one consignment, delivered 2026-08-01.
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-02", sent=100,
+                   received="2026-08-01", consignment_id=1)]
+    s = tracking.slow_stock(sales, today=date(2026, 8, 20))
+    assert s["flagged"] == 1
+    item = s["items"][0]
+    assert item["cartons_left"] == 90
+    assert item["days_on_floor"] == 19
+    assert item["tier"] == "dead"              # well past the default 15-day line
+
+
+def test_a_cleared_consignment_is_not_slow():
+    sales = [_sale("GRAPES", 100, 100.0, "2026-08-02", sent=100,
+                   received="2026-08-01", consignment_id=1)]
+    assert tracking.slow_stock(sales, today=date(2026, 8, 20))["flagged"] == 0
+
+
+def test_qty_sent_counts_once_per_consignment_across_days():
+    """The same consignment sold on two days must not read as 200 sent. If it
+    did, sell-through and what is 'left' would both be nonsense."""
+    sales = [
+        _sale("GRAPES", 10, 100.0, "2026-08-02", sent=100, received="2026-08-01", consignment_id=1),
+        _sale("GRAPES", 5, 100.0, "2026-08-03", sent=100, received="2026-08-01", consignment_id=1),
+    ]
+    s = tracking.slow_stock(sales, today=date(2026, 8, 20))
+    assert s["items"][0]["cartons_sent"] == 100     # once, not 200
+    assert s["items"][0]["cartons_left"] == 85      # 100 - (10 + 5)
+
+
+def test_thresholds_fall_back_to_the_brief_without_enough_history():
+    bands = tracking.slow_bands([_sale("X", 1, 1.0, "2026-08-01")])
+    assert (bands["watch"], bands["slow"], bands["dead"]) == (5, 10, 15)
+    assert "default" in bands["from"]
+
+
+def test_thresholds_are_read_from_the_data_when_there_is_enough():
+    # Ten cleared consignments, most quick, a slow tail at 12 and 20 days.
+    spans = [1, 1, 2, 2, 3, 3, 4, 5, 12, 20]
+    sales = []
+    for i, span in enumerate(spans):
+        sales.append(_sale("X", 10, 1.0, "2026-08-01", sent=10, consignment_id=i,
+                            received="2026-08-01",
+                            last_sale=date(2026, 8, 1 + span).isoformat()))
+    bands = tracking.slow_bands(sales, today=date(2026, 9, 1))
+    assert bands["from"].startswith("10 cleared")
+    assert bands["watch"] >= 4 and bands["slow"] >= bands["watch"] + 3

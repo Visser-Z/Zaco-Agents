@@ -1,0 +1,256 @@
+"""The Tracking view: what is paid, what is still owed, and what is not moving.
+
+Three questions the owner asks, answered from saved data alone so they hold up
+across the whole period rather than only in the moment a file is dropped:
+
+  * Payments  -- of everything sold, what has the agent paid for, and how much
+                 is still to come.
+  * Sales     -- how much sold each day, per product.
+  * Slow      -- what is taking too long to clear off the floor.
+
+Pure functions over plain row dicts (sales) and payment-record dicts, the same
+shapes ``analytics`` and ``reconcile`` already use, so this unit-tests without a
+database. Every figure that belongs to a delivery is counted once per
+consignment, never once per row -- the rule the rest of the app lives by.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import date
+
+from . import analytics, integrity, reconcile
+
+# --- payments -------------------------------------------------------------
+
+def payment_status(sales: list[dict], payments: list[dict]) -> dict:
+    """What has been paid, and what is still owed.
+
+    Reconciliation is the same match the payment panel does -- on the account
+    sale each docket names where the export gives it, otherwise on supplier ref
+    plus product -- run over ALL saved sales and ALL saved payments, so the
+    answer is the whole period's position rather than one file's.
+
+    "Still to come" is the sold value not yet covered by a payment: an unpaid
+    group in full, and the shortfall on a group only partly paid. A group paid
+    for more than sold contributes nothing to it (that is the agent's side to
+    explain, surfaced separately as an over-payment).
+    """
+    # Reconcile matches on each row's sold VALUE. The history read does not carry
+    # the exact docket total, so fill it with the gross the app trusts
+    # everywhere else -- cartons sold times price -- which differs only by
+    # rounding and is the figure being compared against on the payment side.
+    sales = [{**r, "sales_total": r.get("sales_total")
+              if r.get("sales_total") is not None else analytics.row_value(r)}
+             for r in sales]
+
+    exact = any(r.get("payment_refs") for r in sales)
+    if exact:
+        rows = reconcile.by_payment_reference(sales, payments)
+    else:
+        rows = reconcile.reconcile(sales, payments)
+
+    # reconcile's statuses, in this view's terms:
+    #   matched      sold and paid agree -- paid in full.
+    #   unpaid       a payment run has not reached this sale yet -- all owed.
+    #   over         sold MORE than the payment covered -- the shortfall is owed.
+    #   outstanding  the agent paid for MORE than sold -- nothing owed, and worth
+    #                a glance (a prepayment, or a sale not captured).
+    #   no_sales     paid, with nothing sold to match -- an exception to chase.
+    paid = still_to_come = 0.0
+    matched = outstanding = 0
+    outstanding_rows: list[dict] = []
+    overpaid_rows: list[dict] = []
+    for r in rows:
+        sold, gross, nett, status = (
+            r["daily_total"], r["payment_gross"], r["payment_nett"], r["status"])
+        if status != "unpaid":          # any payment that landed is money received
+            paid += nett
+        if status in ("unpaid", "over"):
+            owed = sold if status == "unpaid" else round(sold - gross, 2)
+            if owed > 0:
+                outstanding += 1
+                still_to_come += owed
+                outstanding_rows.append({**r, "owed": round(owed, 2)})
+        elif status == "matched":
+            matched += 1
+        elif status == "outstanding":
+            overpaid_rows.append({**r, "overpaid": round(gross - sold, 2)})
+
+    # Payments the sales side cannot account for. Never dropped -- either a sale
+    # not imported yet, or a mismatch to chase.
+    unmatched = [r for r in rows if r["status"] == "no_sales"]
+    unattributed = reconcile.unattributed(payments)
+
+    outstanding_rows.sort(key=lambda r: r["owed"], reverse=True)
+    # How old the oldest unpaid sale is. The reference match carries its own
+    # date; the PDF match (dn + product) does not, so there it comes from the
+    # sold rows themselves -- the earliest day anything still owed was sold.
+    own = [d for r in outstanding_rows if (d := analytics._parse_date(r.get("date")))]
+    owed_keys = {(r.get("dn"), reconcile.normalise_product(r.get("product")))
+                 for r in outstanding_rows}
+    from_sales = [
+        d for row in sales
+        if (row.get("dn"), reconcile.normalise_product(row.get("product"))) in owed_keys
+        and (d := analytics._parse_date(row.get("group_date"))) is not None
+    ]
+    dates = own or from_sales
+    oldest = min(dates).isoformat() if dates else None
+
+    return {
+        "total_paid": round(paid, 2),
+        "still_to_come": round(still_to_come, 2),
+        "batches_paid": matched,
+        "batches_outstanding": outstanding,
+        "oldest_outstanding": oldest,
+        "outstanding": outstanding_rows[:50],
+        "overpaid": sorted(overpaid_rows, key=lambda r: r["overpaid"], reverse=True)[:20],
+        "unmatched": [
+            {
+                "dn": r.get("dn"),
+                "product": r.get("product"),
+                "paid": r.get("payment_gross") or r.get("payment_nett") or 0.0,
+                "reason": "paid, nothing sold matches",
+            }
+            for r in unmatched
+        ],
+        "unattributed": unattributed,
+        "payments_recorded": len(payments),
+    }
+
+
+# --- sales per day, per product ------------------------------------------
+
+def sales_by_day(sales: list[dict]) -> dict:
+    """How much sold each trading day, broken down by product.
+
+    Net of returns, as every carton figure in the app is: a day that sold ten
+    and had two come back moved eight. Days come back newest first, which is the
+    order the owner reads them in.
+    """
+    by_day: dict[str, dict] = {}
+    for row in sales:
+        day = row.get("group_date")
+        if not day:
+            continue
+        day = str(day)[:10]
+        product = analytics.product_label(row)
+        d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
+                                    "value": 0.0, "products": defaultdict(lambda: {"cartons": 0.0, "value": 0.0})})
+        d["cartons"] += analytics.row_cartons(row)
+        d["returned"] += analytics.row_returned(row)
+        d["value"] += analytics.row_value(row)
+        p = d["products"][product]
+        p["cartons"] += analytics.row_cartons(row)
+        p["value"] += analytics.row_value(row)
+
+    days = []
+    for day in sorted(by_day, reverse=True):
+        d = by_day[day]
+        products = sorted(
+            ({"product": name, "cartons": round(v["cartons"], 2), "value": round(v["value"], 2)}
+             for name, v in d["products"].items()),
+            key=lambda x: x["value"], reverse=True,
+        )
+        days.append({
+            "date": day,
+            "cartons": round(d["cartons"], 2),
+            "returned": round(d["returned"], 2),
+            "value": round(d["value"], 2),
+            "products": products,
+        })
+    return {"days": days}
+
+
+# --- slow to sell ---------------------------------------------------------
+
+def _clearance_days(sales: list[dict], today: date) -> list[int]:
+    """Days each cleared consignment took, arrival to its last sale.
+
+    One figure per consignment, not per row. This is the sample the thresholds
+    are read from, so it must be what actually happened, not what is still open.
+    """
+    spans: list[int] = []
+    for group in analytics.group_consignments(sales):
+        d = analytics.consignment_days_to_sell(group)
+        if d is not None:
+            spans.append(d)
+    return spans
+
+
+def slow_bands(sales: list[dict], today: date | None = None) -> dict:
+    """Where "too long to sell" begins, read from the history itself.
+
+    Most produce clears fast, so the median says little; it is the slow tail
+    that matters. The Watch line is the 75th percentile of how long things have
+    actually taken (a quarter of everything took at least this long), Slow the
+    90th, Dead the 95th, each floored so a run of quick months cannot set the
+    bar at two days. With too little history to have a tail, it falls back to
+    the plain 5 / 10 / 15 trading days from the brief.
+    """
+    spans = sorted(_clearance_days(sales, today or date.today()))
+    if len(spans) < 8:
+        return {"watch": 5, "slow": 10, "dead": 15, "from": "default (too little history)"}
+
+    def pct(p: float) -> int:
+        return spans[min(len(spans) - 1, int(len(spans) * p))]
+
+    watch = max(pct(0.75), 4)
+    slow = max(pct(0.90), watch + 3)
+    dead = max(pct(0.95), slow + 3)
+    return {"watch": watch, "slow": slow, "dead": dead,
+            "from": f"{len(spans)} cleared consignments"}
+
+
+def slow_stock(sales: list[dict], today: date | None = None) -> dict:
+    """Consignments still on the floor, and how long they have been there.
+
+    Aging is measured from the delivery date to today, over the cartons that
+    have NOT sold -- counted once per consignment, so a delivery settled across
+    several days is one ageing position, not several. Produce that has fully
+    cleared is not here; this is only what is still sitting.
+    """
+    today = today or date.today()
+    bands = slow_bands(sales, today)
+    out: list[dict] = []
+    for group in analytics.group_consignments(sales):
+        sent = analytics.cartons_sent(group)
+        sold = sum(analytics.row_cartons(r) for r in group)
+        left = sent - sold
+        if sent <= 0 or left <= 0:
+            continue
+        arrived = min((d for r in group if (d := analytics._parse_date(r.get("date_received")))), default=None)
+        if arrived is None:
+            continue
+        days = (today - arrived).days
+        if days < bands["watch"]:
+            continue
+        tier = "dead" if days >= bands["dead"] else "slow" if days >= bands["slow"] else "watch"
+        first = group[0]
+        last_moved = max((d for r in group if (d := analytics._parse_date(r.get("last_sale")))), default=None)
+        out.append({
+            "product": analytics.product_label(first),
+            "dn": first.get("dn"),
+            "market_agent": first.get("market_agent"),
+            "cartons_left": int(left),
+            "cartons_sent": int(sent),
+            "days_on_floor": days,
+            "arrived": arrived.isoformat(),
+            "last_moved": last_moved.isoformat() if last_moved else None,
+            "tier": tier,
+        })
+    order = {"dead": 0, "slow": 1, "watch": 2}
+    out.sort(key=lambda r: (order[r["tier"]], -r["days_on_floor"], -r["cartons_left"]))
+    counts = {t: sum(1 for r in out if r["tier"] == t) for t in ("watch", "slow", "dead")}
+    return {"bands": bands, "counts": counts, "items": out[:50], "flagged": len(out)}
+
+
+# --- the whole payload ----------------------------------------------------
+
+def compute(sales: list[dict], payments: list[dict], today: date | None = None) -> dict:
+    """Everything the Tracking tab renders."""
+    return {
+        "payments": payment_status(sales, payments),
+        "sales_by_day": sales_by_day(sales),
+        "slow_stock": slow_stock(sales, today),
+    }

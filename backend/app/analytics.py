@@ -69,10 +69,9 @@ def product_label(row: dict) -> str:
     unrelated line -- the same fruit ranked twice in Insights, split across two
     rows of the buy list, and matched by neither buy chip. The raw name is what
     every report actually prints and what the consignment deals are keyed on
-    (``consignment.row_key``), so grouping on it makes those three agree.
+    so grouping on it keeps every view of a product agreeing.
 
-    The short code has not gone anywhere: ``description`` still carries it and
-    the workbook is still written from it.
+    The short code has not gone anywhere: ``description`` still carries it.
     """
     return (row.get("product") or row.get("description") or UNKNOWN) or UNKNOWN
 
@@ -409,43 +408,7 @@ def row_earned(row: dict) -> float:
     return float(nett) if nett is not None else row_value(row)
 
 
-def commission(rows: list[dict], deals: dict) -> dict:
-    """What Zaco earned, and what it owes, over the rows with agreed terms.
-
-    Replaces the old profit figure, which subtracted a purchase price that does
-    not exist: nothing is bought, so there is no spend to net off. What Zaco
-    keeps is its percentage of the Nett; the rest is money held on the
-    supplier's behalf, not income.
-
-    Deliberately reports its own coverage: commission over a fifth of the
-    business is a useful number only if you know it is a fifth.
-    """
-    from . import consignment
-
-    earned = owed = nett = 0.0
-    covered = 0
-    for row in rows:
-        line = consignment.settle_row(row, deals.get(consignment.row_key(row)))
-        if line is None:
-            continue
-        earned += line["commission"]
-        owed += 0.0 if line["settled"] else line["owed_to_supplier"]
-        nett += line["nett"]
-        covered += 1
-    if not covered:
-        return {"known": False, "covered": 0, "of": len(rows)}
-    return {
-        "known": True,
-        "covered": covered,
-        "of": len(rows),
-        "nett": round(nett, 2),
-        "commission": round(earned, 2),
-        "owed_to_suppliers": round(owed, 2),
-        "rate": round(earned / nett, 4) if nett else None,
-    }
-
-
-def compute(rows: list[dict], period: str = "week", deals: dict | None = None) -> dict:
+def compute(rows: list[dict], period: str = "week") -> dict:
     """The full analytics payload the frontend renders."""
     return {
         "kpis": kpis(rows),
@@ -454,7 +417,4 @@ def compute(rows: list[dict], period: str = "week", deals: dict | None = None) -
         "by_agent": _totals_by(rows, lambda r: r.get("market_agent")),
         "trend": trend(rows, period),
         "period": period,
-        # Turnover answers "how much moved". This answers "did we make money",
-        # which is the question the rest of the dashboard cannot.
-        "commission": commission(rows, deals or {}),
     }

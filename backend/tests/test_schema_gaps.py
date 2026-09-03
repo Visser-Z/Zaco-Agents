@@ -23,8 +23,9 @@ def test_a_missing_column_names_its_migration():
     assert main._pending_migration(exc) == "0010_statements_consignment_id.sql"
 
 
-def test_a_missing_table_names_its_migration():
-    assert main._pending_migration(_Boom("404: consignment_deals not found")) == "0009_consignment.sql"
+def test_a_missing_column_on_a_later_migration_names_that_one():
+    assert main._pending_migration(
+        _Boom("column statements.cartons_returned does not exist")) == "0012_statements_returns.sql"
 
 
 def test_an_ordinary_failure_is_not_blamed_on_a_migration():
@@ -68,12 +69,14 @@ def test_the_write_is_never_retried_without_the_new_column(monkeypatch):
 
 
 def test_schema_gaps_reports_each_missing_migration_once(monkeypatch):
+    """One probe per migration, and a database missing two is told about both."""
     async def fake_get(user, table, params=None):
-        if table == "consignment_deals":
+        if (params or {}).get("select") in ("cartons_returned", "consignment_id"):
             raise _Boom("404")
         return []
     monkeypatch.setattr(main, "db_get", fake_get)
-    assert asyncio.run(main.schema_gaps(USER)) == ["0009_consignment.sql"]
+    assert asyncio.run(main.schema_gaps(USER)) == [
+        "0012_statements_returns.sql", "0010_statements_consignment_id.sql"]
 
 
 def test_schema_gaps_is_silent_on_a_database_that_is_up_to_date(monkeypatch):

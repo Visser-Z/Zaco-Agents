@@ -18,14 +18,12 @@ from . import (
     analytics,
     assistant,
     config,
-    consignment,
     csv_reports,
     lookup,
     nett_adjustments,
     payment_details,
     delivery,
     integrity,
-    procurement,
     reconcile,
     stock,
 )
@@ -362,8 +360,6 @@ _MIGRATIONS = {
     "cartons_returned": "0012_statements_returns.sql",
     "returns_total": "0012_statements_returns.sql",
     "consignment_id": "0010_statements_consignment_id.sql",
-    "consignment_deals": "0009_consignment.sql",
-    "suppliers": "0009_consignment.sql",
     "purchase_costs": "0008_purchase_costs.sql",
     "last_sale": "0006_statements_last_sale.sql",
     "payment_refs": "0007_statements_payment_refs.sql",
@@ -391,7 +387,6 @@ async def schema_gaps(user: User | None) -> list[str]:
     probes = (
         ("statements", "cartons_returned", "0012_statements_returns.sql"),
         ("statements", "consignment_id", "0010_statements_consignment_id.sql"),
-        ("consignment_deals", "id", "0009_consignment.sql"),
     )
     for table, column, migration in probes:
         try:
@@ -789,7 +784,6 @@ async def get_analytics(
     so it returns an empty-but-valid payload and the UI shows its empty state.
     """
     rows = await _history_rows(user)
-    deals = await _deals(user)
 
     # Pickers list every period that has data, so they stay populated even when
     # the current filter narrows the view to one month or week.
@@ -797,7 +791,7 @@ async def get_analytics(
     scoped = analytics.filter_rows(rows, month, week)
     period = analytics.trend_granularity(month, week)
 
-    result = analytics.compute(scoped, period, deals=deals)
+    result = analytics.compute(scoped, period)
     result["available"] = available
     result["filter"] = {"month": month, "week": week}
     # How the agent has treated this money. Computed over the SAME scoped rows
@@ -834,178 +828,6 @@ async def delete_history(
 # Plain-language questions over the recorded sales history, for buying
 # decisions. Read-only: it can answer, never write. See `assistant` for why the
 # money is computed deterministically rather than by the model.
-
-
-async def _deals(user: User | None) -> dict[tuple, dict]:
-    """(supplier_ref, PRODUCT) -> the agreed consignment terms.
-
-    Joins the supplier name in so settlement lines can say WHO is owed without
-    a second lookup. Missing table is tolerated: without terms the buy list
-    still ranks on sales performance, which is better than a broken page.
-    """
-    if user is None:
-        return {}
-    try:
-        rows = await db_get(
-            user,
-            "consignment_deals",
-            {"select": "supplier_ref,product,commission_pct,supplier_id,"
-                       "settled_at,settled_amount,suppliers(name)"},
-        )
-    except Exception:  # noqa: BLE001 -- migration 0009 may not be applied yet
-        return {}
-    out: dict[tuple, dict] = {}
-    for r in rows:
-        supplier = r.get("suppliers") or {}
-        out[consignment.deal_key(r["supplier_ref"], r["product"])] = {
-            "commission_pct": r.get("commission_pct"),
-            "supplier_id": r.get("supplier_id"),
-            "supplier_name": supplier.get("name") if isinstance(supplier, dict) else None,
-            "settled_at": r.get("settled_at"),
-            "settled_amount": r.get("settled_amount"),
-        }
-    return out
-
-
-@app.get("/api/procurement")
-async def get_procurement(user: User | None = Depends(require_user)) -> dict:
-    """What is worth taking on next, ranked, with a priority level per line.
-
-    There is no budget parameter: Zaco pays nothing to acquire stock, so there
-    is no sum to divide. Where a commission has been agreed the line is ranked
-    on what it actually EARNED rather than on how well it sold.
-    """
-    rows = await _history_rows(user)
-    return procurement.recommend(rows, deals=await _deals(user))
-
-
-@app.get("/api/suppliers")
-async def list_suppliers(user: User | None = Depends(require_user)) -> dict:
-    """Everyone who has put produce through on consignment."""
-    if user is None:
-        return {"suppliers": [], "default_commission_pct": consignment.DEFAULT_COMMISSION_PCT}
-    try:
-        rows = await db_get(
-            user, "suppliers",
-            {"select": "id,name,contact,default_commission_pct", "order": "name"},
-        )
-    except Exception:  # noqa: BLE001 -- migration 0009 may not be applied yet
-        rows = []
-    return {"suppliers": rows, "default_commission_pct": consignment.DEFAULT_COMMISSION_PCT}
-
-
-@app.post("/api/suppliers")
-async def add_supplier(
-    name: str = Form(...),
-    contact: str | None = Form(None),
-    default_commission_pct: float = Form(consignment.DEFAULT_COMMISSION_PCT),
-    user: User | None = Depends(require_user),
-) -> dict:
-    """Add or correct a supplier."""
-    if not name.strip():
-        raise HTTPException(400, "A supplier needs a name.")
-    if not 0 <= default_commission_pct <= 100:
-        raise HTTPException(400, "A commission percentage must be between 0 and 100.")
-    if user is None:
-        raise HTTPException(400, "Adding suppliers is not available in local mode.")
-    await db_post(
-        user, "suppliers",
-        {
-            "name": name.strip(),
-            "contact": (contact or "").strip() or None,
-            "default_commission_pct": default_commission_pct,
-            "created_by": user.id,
-        },
-        upsert=True, on_conflict="name",
-    )
-    return {"status": "saved"}
-
-
-@app.get("/api/consignments")
-async def list_consignments(user: User | None = Depends(require_user)) -> dict:
-    """Settlement position: what Zaco earned, what each supplier is owed.
-
-    `awaiting_terms` is the work queue -- consignments the market has paid for
-    but which cannot be settled because nobody has said whose they are or at
-    what rate. Their money is deliberately excluded from every total.
-    """
-    rows = await _history_rows(user)
-    deals = await _deals(user)
-    settlement = consignment.settle(rows, deals)
-    return {
-        "commission_earned": settlement["commission_earned"],
-        "owed_to_suppliers": settlement["owed_to_suppliers"],
-        "paid_to_suppliers": settlement["paid_to_suppliers"],
-        "nett_received": settlement["nett_received"],
-        "unattributed_nett": settlement["unattributed_nett"],
-        "lines": settlement["lines"],
-        "by_supplier": consignment.by_supplier(settlement),
-        "awaiting_terms": settlement["awaiting_terms"],
-        "awaiting_payment": settlement["awaiting_payment"],
-        "outstanding_stock": consignment.outstanding_stock(rows, deals),
-        "default_commission_pct": consignment.DEFAULT_COMMISSION_PCT,
-    }
-
-
-@app.post("/api/consignments")
-async def set_deal(
-    supplier_ref: int = Form(...),
-    product: str = Form(...),
-    commission_pct: float = Form(...),
-    supplier_id: int | None = Form(None),
-    user: User | None = Depends(require_user),
-) -> dict:
-    """Record (or correct) the terms for one consignment line."""
-    if not 0 <= commission_pct <= 100:
-        raise HTTPException(400, "A commission percentage must be between 0 and 100.")
-    if not product.strip():
-        raise HTTPException(400, "Which product were these terms for?")
-    if user is None:
-        raise HTTPException(400, "Recording terms is not available in local mode.")
-    await db_post(
-        user, "consignment_deals",
-        {
-            "supplier_ref": supplier_ref,
-            "product": product.strip(),
-            "commission_pct": commission_pct,
-            "supplier_id": supplier_id,
-            "created_by": user.id,
-        },
-        upsert=True, on_conflict="supplier_ref,product",
-    )
-    return {"status": "saved"}
-
-
-@app.post("/api/consignments/settle")
-async def settle_deal(
-    supplier_ref: int = Form(...),
-    product: str = Form(...),
-    settled_amount: float = Form(...),
-    user: User | None = Depends(require_user),
-) -> dict:
-    """Mark a supplier as paid for one consignment line.
-
-    `settled_amount` is what they were ACTUALLY paid, which may differ from the
-    computed figure (a rounding, an advance, something agreed between them). The
-    computed figure is never overwritten, so the difference stays visible.
-    """
-    if settled_amount < 0:
-        raise HTTPException(400, "A payment cannot be negative.")
-    if user is None:
-        raise HTTPException(400, "Settling is not available in local mode.")
-    from datetime import datetime, timezone
-    await db_post(
-        user, "consignment_deals",
-        {
-            "supplier_ref": supplier_ref,
-            "product": product.strip(),
-            "settled_amount": settled_amount,
-            "settled_at": datetime.now(timezone.utc).isoformat(),
-            "created_by": user.id,
-        },
-        upsert=True, on_conflict="supplier_ref,product",
-    )
-    return {"status": "settled"}
 
 
 @app.get("/api/assistant")

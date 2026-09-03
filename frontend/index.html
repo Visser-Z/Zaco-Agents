@@ -515,14 +515,6 @@ const S = {
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
   recon: { data: null, loading: false, error: null, applied: false },
-  buys: { data: null, loading: false, error: null, tab: "take",
-          settle: null, settleLoading: false, suppliers: [], newSupplier: "", draft: {},
-          // Signals are read from any module, so the payload is fetched once in
-          // the background too. `tried` stops a render/fetch/render loop.
-          tried: false,
-          // Level per product before the last import, so a save can say what
-          // actually moved instead of leaving them to spot it.
-          was: null, changes: null },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -892,44 +884,6 @@ function render() {
   if (S.screen === "review") return renderReview();
 }
 
-// -------------------------------------------------------- procurement
-// Deliberately empty. The module exists so the shell can hold more than one
-// area of the business; nothing is implemented until the workflow is defined.
-// ---------------------------------------------------------- procurement
-// A ranked buy list, pushed rather than asked for. The levels come from
-// /api/procurement, which computes them from the saved sales history -- the
-// same history in always gives the same levels out, and every score can be
-// traced to the figures shown beside it.
-
-const LEVELS = {
-  critical: { label: "Critical", note: "take these on first" },
-  high:     { label: "High",     note: "worth taking on" },
-  low:      { label: "Low",      note: "don’t prioritise" },
-};
-
-/** Level per product label, for rendering a signal wherever a product appears.
- *  Keys are the same labels the analytics use (the raw product name, else the
- *  short code), so Insights, the review table and the buy list all agree. */
-function buyIndex() {
-  const recs = S.buys.data?.recommendations;
-  if (!recs) return null;
-  const ix = {};
-  for (const r of recs) ix[String(r.product).trim().toUpperCase()] = r;
-  return ix;
-}
-
-/** A product's buy signal as a small chip. Empty string when there is no
- *  history for it, which is not the same as a Low rating and must not look
- *  like one. */
-function buyChip(label) {
-  const ix = buyIndex();
-  if (!ix || !label) return "";
-  const r = ix[String(label).trim().toUpperCase()];
-  if (!r) return "";
-  const why = (r.reasons || [])[0] || "";
-  return `<span class="sig ${r.level}" title="${esc(LEVELS[r.level].label)} — ${esc(why)}">${esc(LEVELS[r.level].label)}</span>`;
-}
-
 // ---------------------------------------------------------- agent watch
 // How the agent has treated the money. Deliberately NOT a page of its own: the
 // question only means anything next to the figure that raised it, so the flags
@@ -969,8 +923,8 @@ function watchStrip(w) {
 }
 
 /** Fetch the analytics payload quietly so watch flags work off the Insights page.
- *  Mirrors ensureBuySignals: never flips `loading`, so it cannot blank a screen
- *  the operator is reading, and never retries after one failure. */
+ *  Never flips `loading`, so it cannot blank a screen the operator is reading,
+ *  and never retries after one failure. */
 async function ensureWatchSignals() {
   const I = S.insights;
   if (I.watchTried || I.data || I.loading || !S.live) return;
@@ -1037,338 +991,6 @@ function unsoldChip(label) {
 
 /** Fetch the buy payload quietly so signals work outside the buy list.
  *  Never flips `loading`, so it cannot blank a screen the user is reading. */
-async function ensureBuySignals() {
-  const B = S.buys;
-  if (B.tried || B.data || B.loading || !S.live) return;
-  B.tried = true;
-  try {
-    B.data = await (await api("/api/procurement")).json();
-    // A background fetch that succeeds must clear an earlier failure, or the
-    // buy list keeps showing "nothing to advise on" while holding real data.
-    B.error = null;
-    syncBuyBadge();
-    render();
-  } catch { /* signals are an enhancement; never block the page on them */ }
-}
-
-/** The rail badge counts what needs backing first, so the buy list advertises
- *  itself from every module instead of waiting to be visited. */
-function syncBuyBadge() {
-  const el = document.getElementById("buyBadge");
-  if (!el) return;
-  const recs = S.buys.data?.recommendations || [];
-  const n = recs.filter(r => r.level === "critical").length;
-  el.hidden = !n;
-  el.textContent = n ? String(n) : "";
-  el.title = n ? `${n} line${n === 1 ? "" : "s"} to back first` : "";
-}
-
-async function loadBuys() {
-  const B = S.buys;
-  B.loading = true; B.error = null; render();
-  try {
-    B.data = S.live ? await (await api("/api/procurement")).json() : null;
-    B.tried = true;
-    syncBuyBadge();
-    if (!S.live) B.error = "This reads your saved sales history, so it needs the live app.";
-  } catch (e) {
-    B.error = e.message || String(e);
-  } finally { B.loading = false; render(); }
-}
-
-// --------------------------------------------------------- settlement
-// Zaco buys nothing, so there is no budget. What is recorded per consignment
-// is the commission percentage agreed with the supplier, and whether they have
-// been paid their share yet.
-
-async function loadSettlement() {
-  const B = S.buys;
-  if (!S.live) { B.settle = { lines: [], by_supplier: [], awaiting_terms: [] }; render(); return; }
-  B.settleLoading = true; render();
-  try { B.settle = await (await api("/api/consignments")).json(); }
-  catch (e) { B.settle = { lines: [], by_supplier: [], awaiting_terms: [], error: e.message }; }
-  finally { B.settleLoading = false; render(); }
-}
-
-async function loadSuppliers() {
-  if (!S.live) { S.buys.suppliers = []; return; }
-  try { S.buys.suppliers = (await (await api("/api/suppliers")).json()).suppliers || []; }
-  catch { S.buys.suppliers = []; }
-}
-
-function setBuyTab(t) {
-  S.buys.tab = t;
-  if (t === "settle" && S.buys.settle === null) { loadSuppliers().then(loadSettlement); }
-  else render();
-}
-
-function setDealDraft(key, field, v) {
-  const d = S.buys.draft[key] || (S.buys.draft[key] = {});
-  d[field] = v;
-  // Deliberately no re-render: this fires on every keystroke and would fight
-  // the caret.
-}
-
-async function saveDeal(ref, product) {
-  const key = ref + "|" + product;
-  const draft = S.buys.draft[key] || {};
-  const pct = parseFloat(draft.pct);
-  if (!(pct >= 0 && pct <= 100)) { toast("Enter your commission as a percentage, 0 to 100", true); return; }
-  try {
-    const body = new URLSearchParams({ supplier_ref: ref, product, commission_pct: pct });
-    if (draft.supplier_id) body.set("supplier_id", draft.supplier_id);
-    await api("/api/consignments", { method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
-    delete S.buys.draft[key];
-    toast("Saved " + pct + "% commission");
-    // Terms change both what is owed and how the line ranks.
-    S.buys.settle = null; S.buys.data = null; S.buys.tried = false;
-    await loadSettlement(); loadBuys();
-  } catch (e) { toast(e.message || String(e), true); }
-}
-
-async function markPaid(ref, product, amount) {
-  if (!confirm("Record that the supplier has been paid R " + fmt(amount) + " for this consignment?")) return;
-  try {
-    const body = new URLSearchParams({ supplier_ref: ref, product, settled_amount: amount });
-    await api("/api/consignments/settle", { method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
-    toast("Marked as paid");
-    S.buys.settle = null;
-    await loadSettlement();
-  } catch (e) { toast(e.message || String(e), true); }
-}
-
-async function addSupplier() {
-  const name = (S.buys.newSupplier || "").trim();
-  if (!name) { toast("Give the supplier a name", true); return; }
-  try {
-    await api("/api/suppliers", { method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ name }).toString() });
-    S.buys.newSupplier = "";
-    toast("Added " + name);
-    await loadSuppliers(); render();
-  } catch (e) { toast(e.message || String(e), true); }
-}
-
-function renderSettlement() {
-  const B = S.buys;
-  const c = B.settle;
-  if (B.settleLoading || !c) return `<div class="card"><div class="busy"><span class="spin"></span> Working out what is owed…</div></div>`;
-  if (c.error) return `<div class="banner bad"><span class="bi">!</span><span>${esc(c.error)}</span></div>`;
-
-  const supplierOpts = (B.suppliers || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
-  const q = (x) => JSON.stringify(x).replace(/"/g, "&quot;");
-
-  // What the market has paid for but nobody has claimed: the work queue.
-  const queue = (c.awaiting_terms || []).length ? `
-    <div class="card ins-card wide">
-      <div class="ins-card-head"><h2>Needs terms</h2></div>
-      <p class="ins-sub">The market has paid for these, but nothing can be settled until you say whose they are and what your cut is.
-         <b>R ${fmt(c.unattributed_nett)}</b> is sitting unallocated and is left out of every total above.</p>
-      <div class="table-wrap"><div class="table-scroll"><table class="recon">
-        <thead><tr><th>DN</th><th>Product</th><th class="rt">Sold</th><th class="rt">Nett in</th>
-          <th>Supplier</th><th class="rt">Your %</th><th></th></tr></thead>
-        <tbody>${c.awaiting_terms.map(e => {
-          const key = e.supplier_ref + "|" + e.product;
-          return `<tr>
-            <td class="num">${e.supplier_ref}</td>
-            <td class="rp" title="${esc(e.product)}">${esc(e.product)}</td>
-            <td class="rt num">${fmtInt(e.cartons_sold)}</td>
-            <td class="rt num">${e.nett == null ? "—" : "R " + fmt(e.nett)}</td>
-            <td><select class="mini-select" onchange="setDealDraft('${esc(key)}','supplier_id',this.value)">
-              <option value="">Whose is it?</option>${supplierOpts}</select></td>
-            <td class="rt"><input class="cell-input cost-in" inputmode="decimal" placeholder="${c.default_commission_pct}%"
-                 oninput="setDealDraft('${esc(key)}','pct',this.value)"></td>
-            <td><button class="btn primary sm" onclick="saveDeal(${e.supplier_ref}, ${q(e.product)})">Save</button></td>
-          </tr>`; }).join("")}</tbody>
-      </table></div></div>
-    </div>` : "";
-
-  const positions = (c.by_supplier || []).length ? `
-    <div class="card ins-card wide">
-      <div class="ins-card-head"><h2>By supplier</h2></div>
-      <p class="ins-sub">What each supplier is owed from produce that has already sold and been paid for.</p>
-      <div class="table-wrap"><div class="table-scroll"><table class="recon">
-        <thead><tr><th>Supplier</th><th class="rt">Consignments</th><th class="rt">Sold</th><th class="rt">Unsold</th>
-          <th class="rt">Nett in</th><th class="rt">Your commission</th><th class="rt">Owed</th><th class="rt">Paid</th></tr></thead>
-        <tbody>${c.by_supplier.map(g => `<tr>
-          <td><b>${esc(g.supplier)}</b></td>
-          <td class="rt num">${fmtInt(g.consignments)}</td>
-          <td class="rt num">${fmtInt(g.cartons_sold)}</td>
-          <td class="rt num">${g.unsold ? fmtInt(g.unsold) : "—"}</td>
-          <td class="rt num">R ${fmt(g.nett)}</td>
-          <td class="rt num">R ${fmt(g.commission)}</td>
-          <td class="rt num"><b>${g.owed ? "R " + fmt(g.owed) : "—"}</b></td>
-          <td class="rt num">${g.paid ? "R " + fmt(g.paid) : "—"}</td>
-        </tr>`).join("")}</tbody>
-      </table></div></div>
-    </div>` : "";
-
-  const lines = (c.lines || []).length ? `
-    <div class="card ins-card wide">
-      <div class="ins-card-head"><h2>Settlements</h2></div>
-      <p class="ins-sub">Each consignment the market has paid for, split between your commission and the supplier's share.</p>
-      <div class="table-wrap"><div class="table-scroll"><table class="recon">
-        <thead><tr><th>DN</th><th>Product</th><th>Supplier</th><th class="rt">Nett in</th>
-          <th class="rt">Your %</th><th class="rt">You keep</th><th class="rt">They get</th><th></th></tr></thead>
-        <tbody>${c.lines.map(l => `<tr class="${l.settled ? "existing" : ""}">
-          <td class="num">${l.supplier_ref}</td>
-          <td class="rp" title="${esc(l.product)}">${esc(l.product)}</td>
-          <td>${esc(l.supplier || "—")}</td>
-          <td class="rt num">R ${fmt(l.nett)}</td>
-          <td class="rt num">${l.commission_pct}%</td>
-          <td class="rt num">R ${fmt(l.commission)}</td>
-          <td class="rt num"><b>R ${fmt(l.owed_to_supplier)}</b></td>
-          <td>${l.settled
-            ? `<span class="tag existing">paid${l.settled_amount != null && Number(l.settled_amount) !== l.owed_to_supplier ? " R " + fmt(l.settled_amount) : ""}</span>`
-            : `<button class="btn ghost sm" onclick="markPaid(${l.supplier_ref}, ${q(l.product)}, ${l.owed_to_supplier})">Mark paid</button>`}</td>
-        </tr>`).join("")}</tbody>
-      </table></div></div>
-    </div>` : "";
-
-  const stock = (c.outstanding_stock || []).length ? `
-    <div class="card ins-card wide">
-      <div class="ins-card-head"><h2>Still in the market</h2></div>
-      <p class="ins-sub">Consignment stock sent but not yet sold. On consignment this is the supplier's risk rather than yours, but it is produce ageing on a floor right now and earning you nothing.</p>
-      <div class="table-wrap"><div class="table-scroll"><table class="recon">
-        <thead><tr><th>DN</th><th>Product</th><th>Supplier</th><th>Where</th>
-          <th class="rt">Sent</th><th class="rt">Sold</th><th class="rt">Left</th></tr></thead>
-        <tbody>${c.outstanding_stock.slice(0, 40).map(o => `<tr>
-          <td class="num">${o.supplier_ref}</td>
-          <td class="rp" title="${esc(o.product)}">${esc(o.product)}</td>
-          <td>${esc(o.supplier || "—")}</td>
-          <td>${esc(o.market_agent || o.market || "—")}</td>
-          <td class="rt num">${fmtInt(o.cartons_sent)}</td>
-          <td class="rt num">${fmtInt(o.cartons_sold)}</td>
-          <td class="rt num"><b>${fmtInt(o.cartons_left)}</b></td>
-        </tr>`).join("")}</tbody>
-      </table></div></div>
-    </div>` : "";
-
-  return `
-    <div class="ins-controls">
-      <label class="ctl"><span>Add a supplier</span>
-        <input class="ask-input" placeholder="Farm or grower name"
-               oninput="S.buys.newSupplier = this.value"
-               onkeydown="if(event.key==='Enter'){event.preventDefault();addSupplier();}"></label>
-      <button class="btn ghost sm" onclick="addSupplier()">+ Add</button>
-    </div>
-    ${queue}${positions}${lines}${stock}
-    ${!queue && !positions && !lines ? `<div class="card placeholder"><div class="pi">◆</div>
-      <h2>Nothing to settle yet</h2><p>Save some sales, then record whose produce it was and what your cut is.</p></div>` : ""}`;
-}
-
-function renderProcurement() {
-  const B = S.buys;
-  if (B.data === null && !B.loading && B.error === null) loadBuys();
-
-  const head = `<div class="head"><h1>What to take on</h1>
-    <p>Ranked from what the produce actually did: how much of it sold, how fast, and at what price.</p></div>`;
-
-  if (B.loading) {
-    main.innerHTML = `<section class="screen">${head}<div class="card"><div class="busy"><span class="spin"></span> Working out what is worth taking on…</div></div></section>`;
-    return;
-  }
-  // Data wins over a stale error: having something to show and refusing to
-  // show it is the worse failure.
-  if (!B.data) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="card placeholder"><div class="pi">◆</div><h2>Nothing to advise on yet</h2>
-      <p>${esc(B.error || "Save some sales first — the advice is built from them.")}</p></div></section>`;
-    return;
-  }
-
-  const d = B.data;
-  const recs = d.recommendations || [];
-  if (!recs.length) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="card placeholder"><div class="pi">◆</div><h2>No history yet</h2>
-      <p>Save a round of sales and this fills in.</p></div></section>`;
-    return;
-  }
-
-  const earn = d.earnings || {};
-  const h = d.history || {};
-  const group = lvl => recs.filter(r => r.level === lvl);
-
-  main.innerHTML = `
-    <section class="screen ins">
-      <div class="head ins-head">
-        <div><h1>What to take on</h1>
-          <p>Which lines are worth accepting from your suppliers. Work down it against what they are actually
-             offering. Prices shown are what these lines <b>realised</b> on consignment, not a price you are promised.
-             From ${h.consignments} consignment${h.consignments === 1 ? "" : "s"} across ${h.months} month${h.months === 1 ? "" : "s"}${h.from ? ` (${esc(h.from)} to ${esc(h.to)})` : ""}.</p></div>
-        <div class="ins-actions">
-          <div class="seg"><button class="${B.tab === "take" ? "on" : ""}" onclick="setBuyTab('take')">What to take on</button><button class="${B.tab === "settle" ? "on" : ""}" onclick="setBuyTab('settle')">Settlements${d.termed && d.termed.of ? ` (${d.termed.products}/${d.termed.of})` : ""}</button></div>
-          <button class="btn ghost sm refresh" onclick="loadBuys()">↻ Refresh</button>
-        </div>
-      </div>
-
-      <div class="banner"><span class="bi">◆</span><span>${esc(d.basis)}</span></div>
-
-      ${B.changes ? `<div class="banner moved"><span class="bi">↑</span><span>
-        <b>Since your last save, ${B.changes.length} line${B.changes.length === 1 ? "" : "s"} moved up:</b>
-        ${B.changes.slice(0, 8).map(c => `${esc(c.product)} <span class="lvl ${c.to} tiny">${LEVELS[c.to].label}</span>`).join(", ")}${B.changes.length > 8 ? ", and more" : ""}.
-      </span><button class="btn ghost sm" onclick="dismissBuyChanges()">Dismiss</button></div>` : ""}
-
-      ${B.tab === "settle" ? renderSettlement() : `
-      <div class="kpis">
-        ${kpiCard("You earned", "R " + fmt(earn.commission), esc(earn.source || ""))}
-        ${kpiCard("Owed to suppliers", "R " + fmt(earn.owed_to_suppliers), "their share, not yet paid out")}
-        ${kpiCard("Take on first", fmtInt(group("critical").length), "critical lines")}
-        ${kpiCard("Worth taking", fmtInt(group("high").length), "high priority")}
-      </div>
-
-      ${["critical", "high", "low"].map(lvl => {
-        const items = group(lvl);
-        if (!items.length) return "";
-        return `<div class="buy-group">
-          <h2 class="buy-head"><span class="lvl ${lvl}">${LEVELS[lvl].label}</span>
-            <span class="buy-note">${LEVELS[lvl].note}</span></h2>
-          ${items.map(buyCard).join("")}
-        </div>`;
-      }).join("")}`}
-    </section>`;
-}
-
-function buyCard(r) {
-  // Nothing is paid to acquire stock, so there is no spend to show. Where the
-  // terms are on record this is what the line actually EARNED; otherwise it is
-  // the share of effort worth putting behind it.
-  const spend = r.earning
-    ? `<div class="buy-spend"><b>R ${fmt(r.earning.per_carton)}</b><span>your commission a carton</span></div>`
-    : r.share
-      ? `<div class="buy-spend"><b>${(r.share * 100).toFixed(1)}%</b><span>of your effort</span></div>`
-      : `<div class="buy-spend muted"><b>—</b><span>don’t prioritise</span></div>`;
-  // On consignment the same carton earns differently depending on who sells it,
-  // so where to send it is part of the recommendation, not a footnote.
-  // Shown even with a single destination: "this goes to Subtropico" is still an
-  // instruction. `compared` guards against implying a choice was made where
-  // there was only ever one place for it to go.
-  const dst = r.destination;
-  const send = dst
-    ? `<div class="buy-send"><span class="sl">${dst.compared ? "Best via" : "Goes to"}</span>
-         <b>${esc(dst.agent || dst.market)}</b>
-         <span class="sp">${dst.agent && dst.market ? `at ${esc(dst.market)} · ` : ""}R ${fmt(dst.avg_price)}/crt realised${dst.compared ? ` · best of ${dst.options}` : ""}</span>
-       </div>`
-    : "";
-  return `<div class="card buy-card ${r.level}">
-    <div class="buy-main">
-      <div class="buy-name">${esc(r.product)}${r.thin_evidence ? `<span class="buy-thin">thin evidence</span>` : ""}</div>
-      ${send}
-      <ul class="buy-why">${(r.reasons || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul>
-      <div class="buy-tags">
-        ${dst && !dst.compared ? "" : `<span class="buy-tag">R ${fmt(r.avg_price)}/carton realised</span>`}
-        <span class="buy-tag">${r.sell_through != null ? Math.round(r.sell_through * 100) + "% sold" : "sell-through unknown"}</span>
-        <span class="buy-tag">${fmtInt(r.cartons)} cartons over ${r.consignments} consignment${r.consignments === 1 ? "" : "s"}</span>
-      </div>
-    </div>
-    ${spend}
-  </div>`;
-}
-
 function renderBusy() {
   main.innerHTML = `<section class="screen"><div class="card"><div class="busy"><span class="spin"></span> ${esc(S.busyMsg || "Working…")}</div></div></section>`;
 }
@@ -1563,7 +1185,6 @@ function renderInsights() {
   const I = S.insights;
   // Kick off the first load lazily once the module is opened.
   if (I.data === null && !I.loading && I.error === null) { loadInsights(); }
-  ensureBuySignals();   // so best sellers carry their buy signal
 
   if (I.loading && I.data === null) {
     main.innerHTML = `<section class="screen"><div class="head"><h1>Insights</h1>
@@ -1622,16 +1243,6 @@ function renderInsights() {
       </div>
 
       ${scopedEmpty ? `<div class="banner"><span class="bi">◔</span><span>No statements recorded in <b>${esc(scopeLabel(I))}</b>. Pick another month or week above.</span></div>` : ""}
-
-      ${(() => { const c = d.commission || {};
-        if (!c.known) return "";
-        return `<div class="profit-strip up">
-          <div><span class="pl">Your commission</span><b>R ${fmt(c.commission)}</b></div>
-          <div><span class="pl">Rate</span><b>${c.rate == null ? "—" : (c.rate * 100).toFixed(1) + "%"}</b></div>
-          <div><span class="pl">Nett received</span><b>R ${fmt(c.nett)}</b></div>
-          <div><span class="pl">Owed to suppliers</span><b>R ${fmt(c.owed_to_suppliers)}</b></div>
-          <div class="pcov">based on ${c.covered} of ${c.of} consignments with agreed terms</div>
-        </div>`; })()}
 
       ${watchStrip(d.integrity)}
 
@@ -1772,7 +1383,7 @@ function barList(items, metric, opts) {
     // A best seller and a good buy are not the same claim: turnover says what
     // moved, the signal says whether backing it again is worth the money. Shown
     // together so the difference is visible rather than assumed.
-    const sig = opts.signals ? buyChip(i.label) : "";
+    const sig = "";
     // A top seller most of which never sold is the shape worth noticing, so the
     // flag sits on the same line as the turnover that hides it.
     const unsold = opts.signals ? unsoldChip(i.label) : "";
@@ -2353,36 +1964,6 @@ async function saveRows() {
  *  than waiting to be asked. Diffed against the levels held before the save;
  *  only promotions are reported, since a line falling back is not something to
  *  act on this morning. */
-async function noteBuyChanges() {
-  const B = S.buys;
-  if (!S.live) return;
-  const before = {};
-  for (const r of (B.data?.recommendations || [])) before[r.product] = r.level;
-
-  B.data = null; B.tried = false; B.costs = null;   // history moved underneath them
-  try { B.data = await (await api("/api/procurement")).json(); }
-  catch { return; }                                 // never let this break a save
-  syncBuyBadge();
-
-  const RANK = { low: 0, high: 1, critical: 2 };
-  const moved = [];
-  for (const r of (B.data.recommendations || [])) {
-    const was = before[r.product];
-    if (was === undefined) {
-      // Brand new to the list. Only worth mentioning if it arrived worth buying.
-      if (r.level !== "low") moved.push({ product: r.product, to: r.level, fresh: true });
-    } else if (RANK[r.level] > RANK[was]) {
-      moved.push({ product: r.product, to: r.level, from: was });
-    }
-  }
-  B.changes = moved.length ? moved : null;
-  if (moved.length) {
-    toast(`${moved.length} line${moved.length === 1 ? "" : "s"} moved up your list`);
-  }
-  render();
-}
-
-function dismissBuyChanges() { S.buys.changes = null; render(); }
 
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
@@ -2455,7 +2036,7 @@ function cellHtml(c, r, i, pool, editable) {
         <select class="mini-select${r.description ? " set" : ""}" onchange="resolveCode(${i}, this.value)">${opts}</select>
         ${raw}${note}</td>`;
     }
-    return `<td><b>${esc(r.description || "—")}</b>${buyChip(r.product || r.description)}${raw}</td>`;
+    return `<td><b>${esc(r.description || "—")}</b>${raw}</td>`;
   }
 
   const flag = c.field ? flagFor(r, c.field) : null;

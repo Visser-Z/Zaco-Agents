@@ -274,6 +274,35 @@
      may wrap on a narrow card, but a figure never may: the thousands separator
      is a space, so "R 90 100,00" breaking across lines reads as two amounts. */
   .kpi .kback { color: var(--crit); }
+  .kpis.kpis-2 { grid-template-columns: repeat(2, 1fr); max-width: 620px; }
+  .trk-list { list-style: none; margin: 0; padding: 0; }
+  .trk-list li { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .trk-list li:last-child { border-bottom: 0; }
+  .trk-p { flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trk-n { color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .trk-note { font-size: 12px; color: var(--ink-faint); margin: 10px 0 0; }
+  .trk-note.warn { color: var(--warn); }
+  .trk-bands { font-size: 11px; color: var(--ink-faint); }
+  /* Fixed layout: the expanded day's product names are nowrap-with-ellipsis,
+     which in an auto-layout table forces the whole thing wider than its card
+     and pushes Value off the right edge. */
+  /* The wrapper the wide cards use. Not previously defined, so wide content
+     overflowed its card instead of scrolling inside it. */
+  .scroll { overflow-x: auto; }
+  /* min-width:0 defeats the global `table { min-width: 1560px }`, which exists
+     for the review table and would otherwise push Value off this card. */
+  table.trk-days { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+  table.trk-days col.c-day { width: 34%; }
+  table.trk-days col.c-num { width: 20%; }
+  table.trk-days col.c-caret { width: 26px; }
+  table.trk-days th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 650; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+  table.trk-days th:not(:first-child), table.trk-days td:not(:first-child):not(.trk-caret) { text-align: right; }
+  table.trk-days td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); }
+  tr.trk-day { cursor: pointer; }
+  tr.trk-day:hover td { background: var(--surface-2); }
+  tr.trk-day.open td { background: var(--accent-tint); }
+  td.trk-caret { color: var(--ink-faint); width: 20px; text-align: right; }
+  tr.trk-detail td { background: var(--surface-2); padding: 4px 14px 10px; }
   .kpi .kn .nb { white-space: nowrap; }
 
   .ins-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -481,6 +510,7 @@
 
   <nav class="tabs">
     <button class="tab" data-module="sales" onclick="setModule('sales')">Sales &amp; Payments</button>
+    <button class="tab" data-module="tracking" onclick="setModule('tracking')">Tracking</button>
     <button class="tab" data-module="insights" onclick="setModule('insights')">Insights</button>
   </nav>
 
@@ -498,7 +528,7 @@ const API = "";
 const AGENTS = ["Farmers Trust", "Cape Fruit Co-op", "Karsten Marketing", "Dutoit Agri"];
 
 const S = {
-  module: "sales",      // "sales" | "insights"
+  module: "sales",      // "sales" | "tracking" | "insights"
   screen: "hub",
   live: false,          // true once /api/health answers
   authRequired: false,  // true when the server has Supabase auth configured
@@ -514,6 +544,7 @@ const S = {
   busy: false,
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
+  tracking: { data: null, loading: false, error: null, day: null },
   recon: { data: null, loading: false, error: null, applied: false },
 };
 
@@ -872,16 +903,137 @@ function setModule(m) {
   // Insights reads the saved history; re-fetch on entry so it reflects any
   // statements saved since it was last opened, rather than a stale snapshot.
   if (m === "insights") S.insights.data = null;
+  if (m === "tracking") S.tracking.data = null;
   render();
   main.scrollTo(0, 0);
 }
 function go(screen) { S.screen = screen; render(); main.scrollTo(0, 0); }
 function render() {
   syncModuleNav();
+  if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
   if (S.busy) return renderBusy();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
+}
+
+// ------------------------------------------------------------- tracking
+// Three questions the owner asks, answered from saved data: what has been paid
+// and what is still owed, how much sold each day, and what is not moving.
+
+async function loadTracking() {
+  const T = S.tracking;
+  T.loading = true; T.error = null; render();
+  try {
+    T.data = S.live ? await (await api("/api/tracking")).json() : null;
+    if (!S.live) T.error = "This reads your saved history, so it needs the live app.";
+  } catch (e) {
+    T.error = e.message || String(e);
+  } finally {
+    T.loading = false; render();
+  }
+}
+
+function setTrackingDay(d) {
+  S.tracking.day = S.tracking.day === d ? null : d;
+  render();
+}
+
+/** Days between an ISO date and today, or null. */
+function ageInDays(iso) {
+  if (!iso) return null;
+  const then = new Date(iso + "T00:00:00");
+  if (isNaN(then)) return null;
+  return Math.round((Date.now() - then) / 86400000);
+}
+
+function renderTracking() {
+  const T = S.tracking;
+  if (T.data === null && !T.loading && T.error === null) loadTracking();
+
+  const head = `<div class="head ins-head">
+      <div><h1>Tracking</h1></div>
+      <div class="ins-actions">
+        <button class="btn ghost sm refresh" onclick="loadTracking()">↻ Refresh</button>
+      </div>
+    </div>`;
+
+  if (T.loading && !T.data) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card"><div class="busy"><span class="spin"></span> Loading…</div></div></section>`;
+    return;
+  }
+  if (!T.data) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card placeholder"><div class="pi">◔</div><h2>Nothing tracked yet</h2>
+      <p>${esc(T.error || "Save some sales, then load a Payment Details report.")}</p></div></section>`;
+    return;
+  }
+
+  const p = T.data.payments || {};
+  const days = (T.data.sales_by_day || {}).days || [];
+  const slow = T.data.slow_stock || { bands: {}, counts: {}, items: [] };
+  const oldestAge = ageInDays(p.oldest_outstanding);
+
+  main.innerHTML = `
+    <section class="screen ins">
+      ${head}
+
+      <div class="kpis kpis-2">
+        ${kpiCard("Paid", "R " + fmt(p.total_paid),
+          `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`)}
+        ${kpiCard("Still to come", "R " + fmt(p.still_to_come),
+          `${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"} outstanding`
+          + (oldestAge != null ? ` · oldest ${oldestAge} day${oldestAge === 1 ? "" : "s"}` : ""))}
+      </div>
+
+      <div class="ins-grid">
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>Outstanding</h2></div>
+          ${(p.outstanding || []).length ? `<ul class="trk-list">
+            ${p.outstanding.slice(0, 12).map(r => `<li>
+              <span class="trk-p">${esc(r.product || r.reference || "—")}</span>
+              <span class="trk-n num">R ${fmt(r.owed)}</span></li>`).join("")}
+          </ul>` : `<p class="ins-empty">Everything sold has been paid for.</p>`}
+          ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((s, r) => s + r.overpaid, 0))}.</p>` : ""}
+          ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
+          ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} the report gives no product breakdown for, so it can never match.</p>` : ""}
+        </div>
+
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>Taking too long to sell</h2>
+            <span class="trk-bands num">${fmtInt(slow.bands.watch)}/${fmtInt(slow.bands.slow)}/${fmtInt(slow.bands.dead)} days</span></div>
+          ${(slow.items || []).length ? `<ul class="trk-list">
+            ${slow.items.slice(0, 12).map(r => `<li>
+              <span class="wsig ${r.tier === "dead" ? "severe" : "watch"}">${fmtInt(r.days_on_floor)}d</span>
+              <span class="trk-p">${esc(r.product)}</span>
+              <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)} left</span></li>`).join("")}
+          </ul>` : `<p class="ins-empty">Nothing is sitting longer than usual.</p>`}
+        </div>
+
+        <div class="card ins-card wide">
+          <div class="ins-card-head"><h2>Sales per day</h2></div>
+          ${days.length ? `<div class="scroll"><table class="trk-days">
+            <colgroup><col class="c-day"><col class="c-num"><col class="c-num"><col class="c-num"><col class="c-caret"></colgroup>
+            <thead><tr><th>Day</th><th>Cartons</th><th>Returned</th><th>Value</th><th></th></tr></thead>
+            <tbody>${days.map(d => `
+              <tr class="trk-day${S.tracking.day === d.date ? " open" : ""}" onclick="setTrackingDay('${d.date}')">
+                <td><b>${esc(niceDate(d.date) || d.date)}</b></td>
+                <td class="num">${fmtInt(d.cartons)}</td>
+                <td class="num">${d.returned ? fmtInt(d.returned) : "—"}</td>
+                <td class="num">R ${fmt(d.value)}</td>
+                <td class="trk-caret">${S.tracking.day === d.date ? "▾" : "▸"}</td>
+              </tr>
+              ${S.tracking.day === d.date ? `<tr class="trk-detail"><td colspan="5">
+                <ul class="trk-list">${d.products.map(x => `<li>
+                  <span class="trk-p">${esc(x.product)}</span>
+                  <span class="trk-n num">${fmtInt(x.cartons)} ctn · R ${fmt(x.value)}</span></li>`).join("")}</ul>
+              </td></tr>` : ""}`).join("")}
+            </tbody></table></div>`
+            : `<p class="ins-empty">No sales recorded yet.</p>`}
+        </div>
+      </div>
+    </section>`;
 }
 
 // ---------------------------------------------------------- agent watch

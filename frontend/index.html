@@ -276,16 +276,21 @@
   .kpi .kback { color: var(--crit); }
 
   @media print {
-    /* Printing the outstanding list prints ONLY that: no chrome, no other
-       cards, and the items run across the page instead of down it. */
+    /* Printing the outstanding list prints ONLY that list: no app chrome, no
+       other blocks, no card furniture, and the items run across the page
+       instead of down it. Targets the open block by its data attribute -- an
+       earlier version keyed on an id the layout no longer has. */
     body.printing-outstanding .topbar,
     body.printing-outstanding .tabs,
     body.printing-outstanding .head,
     body.printing-outstanding .kpis,
-    body.printing-outstanding .ins-card:not(#outstandingCard),
-    body.printing-outstanding #outstandingCard .ins-actions { display: none !important; }
-    body.printing-outstanding .ins-grid { display: block; }
-    body.printing-outstanding #outstandingCard { border: 0; padding: 0; box-shadow: none; }
+    body.printing-outstanding .trk-block:not([data-block="owed"]),
+    body.printing-outstanding .trk-head,
+    body.printing-outstanding .trk-note { display: none !important; }
+    body.printing-outstanding .trk-grid { display: block; gap: 0; }
+    body.printing-outstanding .trk-block[data-block="owed"] {
+      border: 0; padding: 0; box-shadow: none; overflow: visible; }
+    body.printing-outstanding .trk-body { padding: 0; }
     body.printing-outstanding .print-head { display: block; font-weight: 600; font-size: 13px;
       margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #000; }
     body.printing-outstanding .trk-cols { columns: 3; column-gap: 18px; font-size: 10.5px; }
@@ -300,6 +305,37 @@
   .trk-p { flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .trk-n { color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .trk-note { font-size: 12px; color: var(--ink-faint); margin: 10px 0 0; }
+
+  /* Three blocks abreast. Opening one gives it the full width and drops the
+     others below it, so a long list is never squeezed into a third of the page. */
+  .trk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+  .trk-grid.has-open .trk-block.open { grid-column: 1 / -1; order: -1; }
+  .trk-block { padding: 0; overflow: hidden; }
+  .trk-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px;
+              cursor: pointer; border-bottom: 1px solid var(--line); }
+  .trk-head:hover { background: var(--surface-2); }
+  .trk-block.open .trk-head { background: var(--surface-2); }
+  .trk-title { flex: 1; min-width: 0; }
+  .trk-title h2 { margin: 0; font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
+  .trk-sum { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-faint);
+             font-variant-numeric: tabular-nums; }
+  .trk-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+  .trk-toggle { appearance: none; border: 1px solid var(--line-strong); background: var(--surface);
+                border-radius: 7px; font-family: var(--sans); font-size: 12px; font-weight: 600;
+                color: var(--ink-soft); padding: 5px 9px; cursor: pointer; white-space: nowrap;
+                display: inline-flex; align-items: center; gap: 5px; }
+  .trk-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+  .trk-toggle .chev { color: var(--ink-faint); font-size: 10px; }
+  .trk-body { padding: 6px 18px 16px; }
+  .trk-body .ins-empty { padding: 6px 0; }
+  .ctl.inline { flex-direction: row; align-items: center; gap: 6px; }
+  .ctl.inline > span { font-size: 10px; }
+  .ctl.inline input { padding: 5px 8px; font-size: 12px; border: 1px solid var(--line-strong);
+                      border-radius: 7px; background: var(--surface); color: var(--ink);
+                      font-family: var(--sans); }
+  .trk-cols-2 { columns: 2; column-gap: 26px; }
+  .trk-cols-2 li { break-inside: avoid; }
+  @media (max-width: 1000px) { .trk-grid { grid-template-columns: 1fr; } }
   /* Laid ACROSS in columns rather than one long stack, so a hundred lines fit
      on a page or two instead of scrolling forever. */
   .trk-cols { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 28px; }
@@ -571,7 +607,7 @@ const S = {
   busy: false,
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
-  tracking: { data: null, loading: false, error: null, day: null, from: "", to: "" },
+  tracking: { data: null, loading: false, error: null, day: null, from: "", to: "", open: null },
   recon: { data: null, loading: false, error: null, applied: false },
 };
 
@@ -965,6 +1001,15 @@ async function loadTracking() {
   }
 }
 
+/** Open one block full width, or close it. Only one is open at a time: two
+ *  long lists side by side is the layout this replaced. */
+function toggleTrackingBlock(key) {
+  S.tracking.open = S.tracking.open === key ? null : key;
+  if (S.tracking.open !== "sales") S.tracking.day = null;
+  render();
+  main.scrollTo(0, 0);
+}
+
 function setTrackingDay(d) {
   S.tracking.day = S.tracking.day === d ? null : d;
   render();
@@ -973,12 +1018,14 @@ function setTrackingDay(d) {
 function setTrackingRange(which, value) {
   S.tracking[which] = value || "";
   S.tracking.day = null;          // a stale open day may be outside the new range
+  S.tracking.open = "sales";      // stay where the operator was working
   loadTracking();
 }
 
 function clearTrackingRange() {
   S.tracking.from = S.tracking.to = "";
   S.tracking.day = null;
+  S.tracking.open = "sales";
   loadTracking();
 }
 
@@ -1009,19 +1056,9 @@ function renderTracking() {
   const T = S.tracking;
   if (T.data === null && !T.loading && T.error === null) loadTracking();
 
-  const span = (T.data && T.data.span) || {};
-  const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
-  const ranged = !!(T.from || T.to);
   const head = `<div class="head ins-head">
       <div><h1>Tracking</h1></div>
       <div class="ins-actions">
-        <label class="ctl"><span>From</span>
-          <input type="date" value="${esc(T.from)}" ${bounds}
-                 onchange="setTrackingRange('from', this.value)"></label>
-        <label class="ctl"><span>To</span>
-          <input type="date" value="${esc(T.to)}" ${bounds}
-                 onchange="setTrackingRange('to', this.value)"></label>
-        ${ranged ? `<button class="btn ghost sm" onclick="clearTrackingRange()">Clear</button>` : ""}
         <button class="btn ghost sm refresh" onclick="loadTracking()">↻ Refresh</button>
       </div>
     </div>`;
@@ -1041,72 +1078,124 @@ function renderTracking() {
   const p = T.data.payments || {};
   const days = (T.data.sales_by_day || {}).days || [];
   const slow = T.data.slow_stock || { bands: {}, counts: {}, items: [] };
-  const oldestAge = ageInDays(p.oldest_outstanding);
+  const owed = p.outstanding || [];
+  const slowItems = slow.items || [];
+  const open = T.open;                      // "owed" | "slow" | "sales" | null
+
+  /** One block: five rows at rest, everything once opened. */
+  const block = (key, title, count, summary, preview, full, actions) => {
+    const isOpen = open === key;
+    const label = isOpen ? "Close" : (count > 5 ? "Show all " + fmtInt(count) : "Open");
+    return `<section class="trk-block card${isOpen ? " open" : ""}" data-block="${key}">
+      <header class="trk-head" onclick="toggleTrackingBlock('${key}')">
+        <div class="trk-title"><h2>${title}</h2><span class="trk-sum">${summary}</span></div>
+        <div class="trk-tools">${isOpen ? (actions || "") : ""}
+          <button class="trk-toggle" aria-expanded="${isOpen}"
+            onclick="event.stopPropagation(); toggleTrackingBlock('${key}')">${label}
+            <span class="chev">${isOpen ? "▴" : "▾"}</span></button></div>
+      </header>
+      <div class="trk-body">${isOpen ? full : preview}</div>
+    </section>`;
+  };
+
+  const emptyBlock = (title, summary, message) => `
+    <section class="trk-block card">
+      <header class="trk-head"><div class="trk-title"><h2>${title}</h2>
+        <span class="trk-sum">${summary}</span></div></header>
+      <div class="trk-body"><p class="ins-empty">${message}</p></div></section>`;
+
+  // --- outstanding ---------------------------------------------------------
+  const owedRow = r => `<li>
+      <span class="trk-p">${esc(r.product || r.reference || "—")}</span>
+      <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
+      <span class="trk-n num">R ${fmt(r.owed)}</span></li>`;
+
+  const owedFull = `
+    <div class="print-head">Outstanding payments · ${esc(niceDate(new Date().toISOString().slice(0, 10)))}
+      · ${fmtInt(owed.length)} to collect · R ${fmt(p.still_to_come)}</div>
+    <ol class="trk-cols">${owed.map(owedRow).join("")}</ol>
+    ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((a, r) => a + r.overpaid, 0))}.</p>` : ""}
+    ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
+    ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} with no product breakdown, so it can never match.</p>` : ""}`;
+
+  const owedBlock = owed.length
+    ? block("owed", "Outstanding", owed.length,
+        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}`,
+        `<ul class="trk-list">${owed.slice(0, 5).map(owedRow).join("")}</ul>`,
+        owedFull,
+        `<button class="btn ghost sm" onclick="event.stopPropagation(); printOutstanding()">Print</button>`)
+    : emptyBlock("Outstanding", "nothing owed", "Everything sold has been paid for.");
+
+  // --- slow stock ----------------------------------------------------------
+  const slowRow = r => `<li>
+      <span class="wsig ${r.tier === "dead" ? "severe" : "watch"}">${fmtInt(r.days_on_floor)}d</span>
+      <span class="trk-p">${esc(r.product)}</span>
+      <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span></li>`;
+
+  const slowBlock = slowItems.length
+    ? block("slow", "Taking too long to sell", slowItems.length,
+        `${fmtInt(slow.flagged)} line${slow.flagged === 1 ? "" : "s"} · flagged past ${fmtInt(slow.bands.watch)} days`,
+        `<ul class="trk-list">${slowItems.slice(0, 5).map(slowRow).join("")}</ul>`,
+        `<ul class="trk-list trk-cols-2">${slowItems.map(slowRow).join("")}</ul>
+         <p class="trk-note">Watch ${fmtInt(slow.bands.watch)}d · Slow ${fmtInt(slow.bands.slow)}d · Dead ${fmtInt(slow.bands.dead)}d, read from ${esc(slow.bands.from || "")}.</p>`)
+    : emptyBlock("Taking too long to sell", "nothing sitting", "Nothing is sitting longer than usual.");
+
+  // --- sales per day -------------------------------------------------------
+  const span = T.data.span || {};
+  const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
+  const ranged = !!(T.from || T.to);
+
+  const dayRow = d => `<li>
+      <span class="trk-p">${esc(niceDate(d.date) || d.date)}</span>
+      <span class="trk-d">${fmtInt(d.cartons)} ctn${d.returned ? " · " + fmtInt(d.returned) + " back" : ""}</span>
+      <span class="trk-n num">R ${fmt(d.value)}</span></li>`;
+
+  const dayTable = `<div class="scroll"><table class="trk-days">
+      <colgroup><col class="c-day"><col class="c-num"><col class="c-num"><col class="c-num"><col class="c-caret"></colgroup>
+      <thead><tr><th>Day</th><th>Cartons</th><th>Returned</th><th>Value</th><th></th></tr></thead>
+      <tbody>${days.map(d => `
+        <tr class="trk-day${T.day === d.date ? " open" : ""}" onclick="setTrackingDay('${d.date}')">
+          <td><b>${esc(niceDate(d.date) || d.date)}</b></td>
+          <td class="num">${fmtInt(d.cartons)}</td>
+          <td class="num">${d.returned ? fmtInt(d.returned) : "—"}</td>
+          <td class="num">R ${fmt(d.value)}</td>
+          <td class="trk-caret">${T.day === d.date ? "▾" : "▸"}</td></tr>
+        ${T.day === d.date ? `<tr class="trk-detail"><td colspan="5">
+          <ul class="trk-list">${d.products.map(x => `<li>
+            <span class="trk-p">${esc(x.product)}</span>
+            <span class="trk-n num">${fmtInt(x.cartons)} ctn · R ${fmt(x.value)}</span></li>`).join("")}</ul>
+        </td></tr>` : ""}`).join("")}
+      </tbody></table></div>`;
+
+  const pickers = `
+    <label class="ctl inline"><span>From</span><input type="date" value="${esc(T.from)}" ${bounds}
+      onclick="event.stopPropagation()" onchange="setTrackingRange('from', this.value)"></label>
+    <label class="ctl inline"><span>To</span><input type="date" value="${esc(T.to)}" ${bounds}
+      onclick="event.stopPropagation()" onchange="setTrackingRange('to', this.value)"></label>
+    ${ranged ? `<button class="btn ghost sm" onclick="event.stopPropagation(); clearTrackingRange()">Clear</button>` : ""}`;
+
+  const totalCartons = days.reduce((a, d) => a + d.cartons, 0);
+  const salesBlock = (days.length || ranged)
+    ? block("sales", "Sales per day", days.length,
+        `${fmtInt(days.length)} day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons${ranged ? " · filtered" : ""}`,
+        days.length ? `<ul class="trk-list">${days.slice(0, 5).map(dayRow).join("")}</ul>`
+                    : `<p class="ins-empty">No sales in that range.</p>`,
+        days.length ? dayTable : `<p class="ins-empty">No sales in that range.</p>`,
+        pickers)
+    : emptyBlock("Sales per day", "nothing recorded", "No sales recorded yet.");
 
   main.innerHTML = `
     <section class="screen ins">
       ${head}
-
       <div class="kpis kpis-2">
         ${kpiCard("Paid", "R " + fmt(p.total_paid),
           `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`)}
         ${kpiCard("Still to come", "R " + fmt(p.still_to_come),
-          `${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"} outstanding`
-          + (oldestAge != null ? ` · oldest ${oldestAge} day${oldestAge === 1 ? "" : "s"}` : ""))}
+          `${fmtInt(p.batches_outstanding)} outstanding`
+          + (p.oldest_outstanding ? ` · oldest ${ageInDays(p.oldest_outstanding)} days` : ""))}
       </div>
-
-      <div class="ins-grid">
-        <div class="card ins-card wide" id="outstandingCard">
-          <div class="ins-card-head"><h2>Outstanding</h2>
-            <div class="ins-actions">
-              <span class="trk-bands">${fmtInt((p.outstanding || []).length)} to collect · R ${fmt(p.still_to_come)}</span>
-              ${(p.outstanding || []).length ? `<button class="btn ghost sm" onclick="printOutstanding()">Print</button>` : ""}
-            </div></div>
-          <div class="print-head">Outstanding payments · ${esc(niceDate(new Date().toISOString().slice(0, 10)))}
-            · ${fmtInt((p.outstanding || []).length)} to collect · R ${fmt(p.still_to_come)}</div>
-          ${(p.outstanding || []).length ? `<ol class="trk-cols">
-            ${p.outstanding.map(r => `<li>
-              <span class="trk-p">${esc(r.product || r.reference || "—")}</span>
-              <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
-              <span class="trk-n num">R ${fmt(r.owed)}</span></li>`).join("")}
-          </ol>` : `<p class="ins-empty">Everything sold has been paid for.</p>`}
-          ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((s, r) => s + r.overpaid, 0))}.</p>` : ""}
-          ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
-          ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} the report gives no product breakdown for, so it can never match.</p>` : ""}
-        </div>
-
-        <div class="card ins-card">
-          <div class="ins-card-head"><h2>Taking too long to sell</h2>
-            <span class="trk-bands num">${fmtInt(slow.bands.watch)}/${fmtInt(slow.bands.slow)}/${fmtInt(slow.bands.dead)} days</span></div>
-          ${(slow.items || []).length ? `<ul class="trk-list">
-            ${slow.items.slice(0, 12).map(r => `<li>
-              <span class="wsig ${r.tier === "dead" ? "severe" : "watch"}">${fmtInt(r.days_on_floor)}d</span>
-              <span class="trk-p">${esc(r.product)}</span>
-              <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)} left</span></li>`).join("")}
-          </ul>` : `<p class="ins-empty">Nothing is sitting longer than usual.</p>`}
-        </div>
-
-        <div class="card ins-card wide">
-          <div class="ins-card-head"><h2>Sales per day</h2></div>
-          ${days.length ? `<div class="scroll"><table class="trk-days">
-            <colgroup><col class="c-day"><col class="c-num"><col class="c-num"><col class="c-num"><col class="c-caret"></colgroup>
-            <thead><tr><th>Day</th><th>Cartons</th><th>Returned</th><th>Value</th><th></th></tr></thead>
-            <tbody>${days.map(d => `
-              <tr class="trk-day${S.tracking.day === d.date ? " open" : ""}" onclick="setTrackingDay('${d.date}')">
-                <td><b>${esc(niceDate(d.date) || d.date)}</b></td>
-                <td class="num">${fmtInt(d.cartons)}</td>
-                <td class="num">${d.returned ? fmtInt(d.returned) : "—"}</td>
-                <td class="num">R ${fmt(d.value)}</td>
-                <td class="trk-caret">${S.tracking.day === d.date ? "▾" : "▸"}</td>
-              </tr>
-              ${S.tracking.day === d.date ? `<tr class="trk-detail"><td colspan="5">
-                <ul class="trk-list">${d.products.map(x => `<li>
-                  <span class="trk-p">${esc(x.product)}</span>
-                  <span class="trk-n num">${fmtInt(x.cartons)} ctn · R ${fmt(x.value)}</span></li>`).join("")}</ul>
-              </td></tr>` : ""}`).join("")}
-            </tbody></table></div>`
-            : `<p class="ins-empty">No sales recorded yet.</p>`}
-        </div>
+      <div class="trk-grid${open ? " has-open" : ""}">
+        ${owedBlock}${slowBlock}${salesBlock}
       </div>
     </section>`;
 }

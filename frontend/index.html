@@ -333,6 +333,23 @@
   .ctl.inline input { padding: 5px 8px; font-size: 12px; border: 1px solid var(--line-strong);
                       border-radius: 7px; background: var(--surface); color: var(--ink);
                       font-family: var(--sans); }
+  /* Sales per day: a day heading, then exactly what sold under it. */
+  .sday-list { display: grid; gap: 18px; }
+  .sday-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+               padding: 0 0 6px; border-bottom: 1px solid var(--line-strong); }
+  .sday-date { font-weight: 650; font-size: 13.5px; }
+  .sday-tot { font-size: 12px; color: var(--ink-soft); }
+  table.sday-items { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; }
+  table.sday-items col.c-n { width: 18%; }
+  table.sday-items th { text-align: right; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+                        color: var(--ink-faint); font-weight: 650; padding: 6px 0 4px; }
+  table.sday-items th:first-child { text-align: left; }
+  table.sday-items td { padding: 5px 0; border-bottom: 1px solid var(--line); text-align: right; }
+  table.sday-items td.sday-p { text-align: left; color: var(--ink); overflow: hidden;
+                               text-overflow: ellipsis; white-space: nowrap; }
+  .sday-back { margin-left: 7px; font-size: 10px; color: var(--crit); }
+  .sday-mkt { display: block; font-size: 10px; color: var(--ink-faint); }
+  table.sday-items td.under { color: var(--crit); }
   .trk-cols-2 { columns: 2; column-gap: 26px; }
   .trk-cols-2 li { break-inside: avoid; }
   @media (max-width: 1000px) { .trk-grid { grid-template-columns: 1fr; } }
@@ -1150,22 +1167,27 @@ function renderTracking() {
       <span class="trk-d">${fmtInt(d.cartons)} ctn${d.returned ? " · " + fmtInt(d.returned) + " back" : ""}</span>
       <span class="trk-n num">R ${fmt(d.value)}</span></li>`;
 
-  const dayTable = `<div class="scroll"><table class="trk-days">
-      <colgroup><col class="c-day"><col class="c-num"><col class="c-num"><col class="c-num"><col class="c-caret"></colgroup>
-      <thead><tr><th>Day</th><th>Cartons</th><th>Returned</th><th>Value</th><th></th></tr></thead>
-      <tbody>${days.map(d => `
-        <tr class="trk-day${T.day === d.date ? " open" : ""}" onclick="setTrackingDay('${d.date}')">
-          <td><b>${esc(niceDate(d.date) || d.date)}</b></td>
-          <td class="num">${fmtInt(d.cartons)}</td>
-          <td class="num">${d.returned ? fmtInt(d.returned) : "—"}</td>
-          <td class="num">R ${fmt(d.value)}</td>
-          <td class="trk-caret">${T.day === d.date ? "▾" : "▸"}</td></tr>
-        ${T.day === d.date ? `<tr class="trk-detail"><td colspan="5">
-          <ul class="trk-list">${d.products.map(x => `<li>
-            <span class="trk-p">${esc(x.product)}</span>
-            <span class="trk-n num">${fmtInt(x.cartons)} ctn · R ${fmt(x.value)}</span></li>`).join("")}</ul>
-        </td></tr>` : ""}`).join("")}
-      </tbody></table></div>`;
+  /* Every day, with exactly what sold under it. The product lines are always
+     visible: hiding them behind a click per day was the whole complaint. */
+  const dayBlock = d => `<div class="sday">
+      <div class="sday-head">
+        <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
+        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)}</span>
+      </div>
+      <table class="sday-items">
+        <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
+        <thead><tr><th>Product</th><th>Cartons</th><th>Per carton</th><th>Value</th></tr></thead>
+        <tbody>${d.products.map(x => {
+          const off = x.market_avg && x.price < x.market_avg * 0.7;
+          return `<tr>
+            <td class="sday-p">${esc(x.product)}${x.returned ? `<span class="sday-back">${fmtInt(x.returned)} back</span>` : ""}</td>
+            <td class="num">${fmtInt(x.cartons)}</td>
+            <td class="num${off ? " under" : ""}">R ${fmt(x.price)}${x.market_avg ? `<span class="sday-mkt">mkt R ${fmt(x.market_avg)}</span>` : ""}</td>
+            <td class="num">R ${fmt(x.value)}</td></tr>`;
+        }).join("")}</tbody>
+      </table>
+    </div>`;
+  const dayTable = `<div class="sday-list">${days.map(dayBlock).join("")}</div>`;
 
   const pickers = `
     <label class="ctl inline"><span>From</span><input type="date" value="${esc(T.from)}" ${bounds}

@@ -176,3 +176,40 @@ def test_the_outstanding_list_is_not_truncated():
     sales = [_sale(f"P{i}", 1, 100.0, "2026-08-01", dn=i) for i in range(60)]
     p = tracking.payment_status(sales, [])
     assert len(p["outstanding"]) == 60
+
+
+# --- exactly what sold, per product, per day ------------------------------
+
+def test_each_day_says_what_sold_at_what_price():
+    """'How much sold' is not enough to act on. The owner needs the products,
+    what each fetched a carton, and what the market was paying for it."""
+    sales = [
+        dict(_sale("GRAPES", 20, 80.0, "2026-08-03"), market_avg=112.29),
+        dict(_sale("CHERRIES", 5, 200.0, "2026-08-03"), market_avg=None),
+    ]
+    day = tracking.sales_by_day(sales)["days"][0]
+    grapes, cherries = day["products"]           # ranked by value: 1600 then 1000
+    assert (grapes["product"], grapes["cartons"], grapes["value"]) == ("GRAPES", 20, 1600.0)
+    assert grapes["price"] == 80.0               # what it actually fetched
+    assert grapes["market_avg"] == 112.29        # what the market was paying
+    assert grapes["agents"] == ["Farmers Trust"]
+    # No market average on the report means unknown, never zero.
+    assert cherries["market_avg"] is None
+    assert cherries["price"] == 200.0
+
+
+def test_a_products_market_average_is_weighted_by_cartons():
+    """A one-carton line must not outvote a hundred-carton one."""
+    sales = [
+        dict(_sale("GRAPES", 100, 80.0, "2026-08-03", dn=1), market_avg=100.0),
+        dict(_sale("GRAPES", 1, 80.0, "2026-08-03", dn=2), market_avg=500.0),
+    ]
+    p = tracking.sales_by_day(sales)["days"][0]["products"][0]
+    assert p["cartons"] == 101
+    assert p["market_avg"] == round((100 * 100 + 500 * 1) / 101, 2)   # 103.96, not 300
+
+
+def test_returns_show_against_the_product_that_came_back():
+    sales = [_sale("GRAPES", 8, 100.0, "2026-08-03", returned=2, ret_value=200.0)]
+    p = tracking.sales_by_day(sales)["days"][0]["products"][0]
+    assert (p["cartons"], p["returned"]) == (8, 2)

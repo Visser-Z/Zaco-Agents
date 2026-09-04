@@ -141,20 +141,40 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             continue
         product = analytics.product_label(row)
         d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
-                                    "value": 0.0, "products": defaultdict(lambda: {"cartons": 0.0, "value": 0.0})})
+                                    "value": 0.0, "products": defaultdict(
+                                        lambda: {"cartons": 0.0, "value": 0.0, "returned": 0.0,
+                                                 "agents": set(), "market_avg": [], "weight": 0.0})})
         d["cartons"] += analytics.row_cartons(row)
         d["returned"] += analytics.row_returned(row)
         d["value"] += analytics.row_value(row)
         p = d["products"][product]
-        p["cartons"] += analytics.row_cartons(row)
+        cartons = analytics.row_cartons(row)
+        p["cartons"] += cartons
         p["value"] += analytics.row_value(row)
+        p["returned"] += analytics.row_returned(row)
+        if row.get("market_agent"):
+            p["agents"].add(row["market_agent"])
+        # The market's own average for this commodity that day, weighted by
+        # cartons so a one-carton line cannot outvote a hundred-carton one.
+        if (avg := integrity.market_avg(row)) is not None and cartons > 0:
+            p["market_avg"].append(avg * cartons)
+            p["weight"] += cartons
 
     days = []
     for day in sorted(by_day, reverse=True):
         d = by_day[day]
         products = sorted(
-            ({"product": name, "cartons": round(v["cartons"], 2), "value": round(v["value"], 2)}
-             for name, v in d["products"].items()),
+            ({
+                "product": name,
+                "cartons": round(v["cartons"], 2),
+                "returned": round(v["returned"], 2),
+                "value": round(v["value"], 2),
+                # What a carton actually fetched that day.
+                "price": round(v["value"] / v["cartons"], 2) if v["cartons"] else 0.0,
+                # And what the market was paying for it, where the report says.
+                "market_avg": round(sum(v["market_avg"]) / v["weight"], 2) if v["weight"] else None,
+                "agents": sorted(v["agents"]),
+             } for name, v in d["products"].items()),
             key=lambda x: x["value"], reverse=True,
         )
         days.append({

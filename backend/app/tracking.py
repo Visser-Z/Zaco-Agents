@@ -103,7 +103,8 @@ def payment_status(sales: list[dict], payments: list[dict]) -> dict:
         "batches_paid": matched,
         "batches_outstanding": outstanding,
         "oldest_outstanding": oldest,
-        "outstanding": outstanding_rows[:50],
+        # Not truncated: this is the list the operator prints and works down.
+        "outstanding": outstanding_rows,
         "overpaid": sorted(overpaid_rows, key=lambda r: r["overpaid"], reverse=True)[:20],
         "unmatched": [
             {
@@ -121,7 +122,8 @@ def payment_status(sales: list[dict], payments: list[dict]) -> dict:
 
 # --- sales per day, per product ------------------------------------------
 
-def sales_by_day(sales: list[dict]) -> dict:
+def sales_by_day(sales: list[dict], start: str | None = None,
+                 end: str | None = None) -> dict:
     """How much sold each trading day, broken down by product.
 
     Net of returns, as every carton figure in the app is: a day that sold ten
@@ -134,6 +136,9 @@ def sales_by_day(sales: list[dict]) -> dict:
         if not day:
             continue
         day = str(day)[:10]
+        # ISO dates compare correctly as strings, so no parsing is needed.
+        if (start and day < start) or (end and day > end):
+            continue
         product = analytics.product_label(row)
         d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
                                     "value": 0.0, "products": defaultdict(lambda: {"cartons": 0.0, "value": 0.0})})
@@ -247,10 +252,26 @@ def slow_stock(sales: list[dict], today: date | None = None) -> dict:
 
 # --- the whole payload ----------------------------------------------------
 
-def compute(sales: list[dict], payments: list[dict], today: date | None = None) -> dict:
-    """Everything the Tracking tab renders."""
+def date_span(sales: list[dict]) -> dict:
+    """The first and last day anything sold, so the pickers can bound themselves."""
+    days = sorted({str(d)[:10] for r in sales if (d := r.get("group_date"))})
+    return {"first": days[0] if days else None, "last": days[-1] if days else None}
+
+
+def compute(sales: list[dict], payments: list[dict], today: date | None = None,
+            start: str | None = None, end: str | None = None) -> dict:
+    """Everything the Tracking tab renders.
+
+    ``start`` and ``end`` narrow the per-day sales list only. What is owed is a
+    running position rather than a period figure -- money owed from March is
+    still owed in August -- so filtering it to a date window would quietly
+    understate the exposure. Slow stock is likewise about what is sitting on the
+    floor right now.
+    """
     return {
         "payments": payment_status(sales, payments),
-        "sales_by_day": sales_by_day(sales),
+        "sales_by_day": sales_by_day(sales, start, end),
         "slow_stock": slow_stock(sales, today),
+        "span": date_span(sales),
+        "filter": {"from": start, "to": end},
     }

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -857,16 +857,24 @@ async def _saved_payments(user: User | None) -> list[dict]:
 
 
 @app.get("/api/tracking")
-async def get_tracking(user: User | None = Depends(require_user)) -> dict:
+async def get_tracking(
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+    user: User | None = Depends(require_user),
+) -> dict:
     """The Tracking tab: paid vs outstanding, sales per day, slow stock.
 
     Answered from saved data -- the statement history and the recorded payments
     -- so it holds for the whole period rather than only the moment a file is
     dropped. Empty but valid in local mode, where there is nothing saved.
+
+    `from` and `to` ("YYYY-MM-DD") narrow the per-day sales list only. What is
+    owed is a running position, not a period figure, so date-filtering it would
+    understate the exposure.
     """
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
-    return tracking.compute(sales, payments)
+    return tracking.compute(sales, payments, start=date_from, end=date_to)
 
 
 @app.get("/api/analytics")

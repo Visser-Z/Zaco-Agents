@@ -274,6 +274,25 @@
      may wrap on a narrow card, but a figure never may: the thousands separator
      is a space, so "R 90 100,00" breaking across lines reads as two amounts. */
   .kpi .kback { color: var(--crit); }
+
+  @media print {
+    /* Printing the outstanding list prints ONLY that: no chrome, no other
+       cards, and the items run across the page instead of down it. */
+    body.printing-outstanding .topbar,
+    body.printing-outstanding .tabs,
+    body.printing-outstanding .head,
+    body.printing-outstanding .kpis,
+    body.printing-outstanding .ins-card:not(#outstandingCard),
+    body.printing-outstanding #outstandingCard .ins-actions { display: none !important; }
+    body.printing-outstanding .ins-grid { display: block; }
+    body.printing-outstanding #outstandingCard { border: 0; padding: 0; box-shadow: none; }
+    body.printing-outstanding .print-head { display: block; font-weight: 600; font-size: 13px;
+      margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #000; }
+    body.printing-outstanding .trk-cols { columns: 3; column-gap: 18px; font-size: 10.5px; }
+    body.printing-outstanding .trk-cols li { padding: 3px 0; border-bottom: 1px solid #ddd; }
+    body.printing-outstanding, body.printing-outstanding * { color: #000 !important; background: #fff !important; }
+    @page { margin: 12mm; }
+  }
   .kpis.kpis-2 { grid-template-columns: repeat(2, 1fr); max-width: 620px; }
   .trk-list { list-style: none; margin: 0; padding: 0; }
   .trk-list li { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -281,6 +300,14 @@
   .trk-p { flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .trk-n { color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .trk-note { font-size: 12px; color: var(--ink-faint); margin: 10px 0 0; }
+  /* Laid ACROSS in columns rather than one long stack, so a hundred lines fit
+     on a page or two instead of scrolling forever. */
+  .trk-cols { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 28px; }
+  .trk-cols li { break-inside: avoid; display: flex; align-items: baseline; gap: 8px;
+                 padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .trk-cols .trk-d { color: var(--ink-faint); font-size: 11px; white-space: nowrap; }
+  @media (min-width: 1100px) { .trk-cols { columns: 3; } }
+  .print-head { display: none; }
   .trk-note.warn { color: var(--warn); }
   .trk-bands { font-size: 11px; color: var(--ink-faint); }
   /* Fixed layout: the expanded day's product names are nowrap-with-ellipsis,
@@ -544,7 +571,7 @@ const S = {
   busy: false,
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
-  tracking: { data: null, loading: false, error: null, day: null },
+  tracking: { data: null, loading: false, error: null, day: null, from: "", to: "" },
   recon: { data: null, loading: false, error: null, applied: false },
 };
 
@@ -925,7 +952,11 @@ async function loadTracking() {
   const T = S.tracking;
   T.loading = true; T.error = null; render();
   try {
-    T.data = S.live ? await (await api("/api/tracking")).json() : null;
+    const qs = new URLSearchParams();
+    if (T.from) qs.set("from", T.from);
+    if (T.to) qs.set("to", T.to);
+    const q = qs.toString();
+    T.data = S.live ? await (await api(`/api/tracking${q ? "?" + q : ""}`)).json() : null;
     if (!S.live) T.error = "This reads your saved history, so it needs the live app.";
   } catch (e) {
     T.error = e.message || String(e);
@@ -937,6 +968,33 @@ async function loadTracking() {
 function setTrackingDay(d) {
   S.tracking.day = S.tracking.day === d ? null : d;
   render();
+}
+
+function setTrackingRange(which, value) {
+  S.tracking[which] = value || "";
+  S.tracking.day = null;          // a stale open day may be outside the new range
+  loadTracking();
+}
+
+function clearTrackingRange() {
+  S.tracking.from = S.tracking.to = "";
+  S.tracking.day = null;
+  loadTracking();
+}
+
+/** Print just the outstanding list. A class on <body> swaps the page over to a
+ *  print-only sheet, so there is no popup to be blocked and no second render
+ *  path that could disagree with what is on screen. */
+function printOutstanding() {
+  document.body.classList.add("printing-outstanding");
+  const done = () => {
+    document.body.classList.remove("printing-outstanding");
+    window.removeEventListener("afterprint", done);
+  };
+  window.addEventListener("afterprint", done);
+  window.print();
+  // Safari and some Chrome builds never fire afterprint; clear it regardless.
+  setTimeout(done, 1000);
 }
 
 /** Days between an ISO date and today, or null. */
@@ -951,9 +1009,19 @@ function renderTracking() {
   const T = S.tracking;
   if (T.data === null && !T.loading && T.error === null) loadTracking();
 
+  const span = (T.data && T.data.span) || {};
+  const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
+  const ranged = !!(T.from || T.to);
   const head = `<div class="head ins-head">
       <div><h1>Tracking</h1></div>
       <div class="ins-actions">
+        <label class="ctl"><span>From</span>
+          <input type="date" value="${esc(T.from)}" ${bounds}
+                 onchange="setTrackingRange('from', this.value)"></label>
+        <label class="ctl"><span>To</span>
+          <input type="date" value="${esc(T.to)}" ${bounds}
+                 onchange="setTrackingRange('to', this.value)"></label>
+        ${ranged ? `<button class="btn ghost sm" onclick="clearTrackingRange()">Clear</button>` : ""}
         <button class="btn ghost sm refresh" onclick="loadTracking()">↻ Refresh</button>
       </div>
     </div>`;
@@ -988,13 +1056,20 @@ function renderTracking() {
       </div>
 
       <div class="ins-grid">
-        <div class="card ins-card">
-          <div class="ins-card-head"><h2>Outstanding</h2></div>
-          ${(p.outstanding || []).length ? `<ul class="trk-list">
-            ${p.outstanding.slice(0, 12).map(r => `<li>
+        <div class="card ins-card wide" id="outstandingCard">
+          <div class="ins-card-head"><h2>Outstanding</h2>
+            <div class="ins-actions">
+              <span class="trk-bands">${fmtInt((p.outstanding || []).length)} to collect · R ${fmt(p.still_to_come)}</span>
+              ${(p.outstanding || []).length ? `<button class="btn ghost sm" onclick="printOutstanding()">Print</button>` : ""}
+            </div></div>
+          <div class="print-head">Outstanding payments · ${esc(niceDate(new Date().toISOString().slice(0, 10)))}
+            · ${fmtInt((p.outstanding || []).length)} to collect · R ${fmt(p.still_to_come)}</div>
+          ${(p.outstanding || []).length ? `<ol class="trk-cols">
+            ${p.outstanding.map(r => `<li>
               <span class="trk-p">${esc(r.product || r.reference || "—")}</span>
+              <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
               <span class="trk-n num">R ${fmt(r.owed)}</span></li>`).join("")}
-          </ul>` : `<p class="ins-empty">Everything sold has been paid for.</p>`}
+          </ol>` : `<p class="ins-empty">Everything sold has been paid for.</p>`}
           ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((s, r) => s + r.overpaid, 0))}.</p>` : ""}
           ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
           ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} the report gives no product breakdown for, so it can never match.</p>` : ""}

@@ -138,3 +138,41 @@ def test_thresholds_are_read_from_the_data_when_there_is_enough():
     bands = tracking.slow_bands(sales, today=date(2026, 9, 1))
     assert bands["from"].startswith("10 cleared")
     assert bands["watch"] >= 4 and bands["slow"] >= bands["watch"] + 3
+
+
+# --- narrowing the per-day list to a date range ---------------------------
+
+def test_a_date_range_narrows_the_day_list():
+    sales = [_sale("A", 1, 10.0, "2026-08-01"), _sale("B", 1, 10.0, "2026-08-05"),
+             _sale("C", 1, 10.0, "2026-08-09")]
+    days = tracking.sales_by_day(sales, start="2026-08-04", end="2026-08-06")["days"]
+    assert [d["date"] for d in days] == ["2026-08-05"]
+
+
+def test_an_open_ended_range_works_from_either_side():
+    sales = [_sale("A", 1, 10.0, "2026-08-01"), _sale("B", 1, 10.0, "2026-08-09")]
+    assert len(tracking.sales_by_day(sales, start="2026-08-05")["days"]) == 1
+    assert len(tracking.sales_by_day(sales, end="2026-08-05")["days"]) == 1
+    assert len(tracking.sales_by_day(sales)["days"]) == 2
+
+
+def test_the_date_range_never_narrows_what_is_owed():
+    """Money owed from an earlier day is still owed. Filtering the outstanding
+    list to the window would quietly understate the exposure."""
+    sales = [_sale("A", 10, 100.0, "2026-08-01"), _sale("B", 10, 100.0, "2026-08-09")]
+    out = tracking.compute(sales, [], today=date(2026, 8, 10),
+                           start="2026-08-09", end="2026-08-09")
+    assert len(out["sales_by_day"]["days"]) == 1          # the day list narrows
+    assert out["payments"]["still_to_come"] == 2000.0     # the exposure does not
+
+
+def test_the_span_bounds_the_pickers():
+    sales = [_sale("A", 1, 10.0, "2026-08-03"), _sale("B", 1, 10.0, "2026-08-01")]
+    assert tracking.date_span(sales) == {"first": "2026-08-01", "last": "2026-08-03"}
+
+
+def test_the_outstanding_list_is_not_truncated():
+    """It is printed and worked down, so every line has to be there."""
+    sales = [_sale(f"P{i}", 1, 100.0, "2026-08-01", dn=i) for i in range(60)]
+    p = tracking.payment_status(sales, [])
+    assert len(p["outstanding"]) == 60

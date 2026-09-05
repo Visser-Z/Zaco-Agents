@@ -348,6 +348,23 @@
   table.sday-items td.sday-p { text-align: left; color: var(--ink); overflow: hidden;
                                text-overflow: ellipsis; white-space: nowrap; }
   .sday-back { margin-left: 7px; font-size: 10px; color: var(--crit); }
+  /* Product performance: pick lines, then watch them day by day. */
+  .pchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 16px; }
+  .pchip { appearance: none; border: 1px solid var(--line-strong); background: var(--surface);
+           color: var(--ink-soft); border-radius: 99px; padding: 4px 11px; font-size: 11.5px;
+           font-family: var(--sans); font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .pchip:hover { border-color: var(--ink-faint); color: var(--ink); }
+  .pchip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pseries { margin-bottom: 20px; }
+  .pseries-head { display: flex; align-items: baseline; gap: 10px; padding-bottom: 5px;
+                  border-bottom: 1px solid var(--line-strong); }
+  .pseries-name { font-weight: 650; font-size: 13px; }
+  .pseries-tot { margin-left: auto; font-size: 11.5px; color: var(--ink-soft); }
+  .pmove { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
+  .pmove.up { color: var(--ok); background: var(--ok-tint); }
+  .pmove.down { color: var(--crit); background: var(--crit-tint); }
+  .pmove.flat { color: var(--ink-faint); background: var(--surface-2); }
+  table.sday-items td.mkt { color: var(--ink-faint); }
   .sday-mkt { display: block; font-size: 10px; color: var(--ink-faint); }
   table.sday-items td.under { color: var(--crit); }
   .trk-cols-2 { columns: 2; column-gap: 26px; }
@@ -624,7 +641,8 @@ const S = {
   busy: false,
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
-  tracking: { data: null, loading: false, error: null, day: null, from: "", to: "", open: null },
+  tracking: { data: null, loading: false, error: null, day: null, from: "", to: "",
+              open: null, products: [] },   // products: which lines to trend
   recon: { data: null, loading: false, error: null, applied: false },
 };
 
@@ -1008,6 +1026,8 @@ async function loadTracking() {
     const qs = new URLSearchParams();
     if (T.from) qs.set("from", T.from);
     if (T.to) qs.set("to", T.to);
+    // Pipe-separated: product names are full of commas and brackets.
+    if (T.products.length) qs.set("products", T.products.join("|"));
     const q = qs.toString();
     T.data = S.live ? await (await api(`/api/tracking${q ? "?" + q : ""}`)).json() : null;
     if (!S.live) T.error = "This reads your saved history, so it needs the live app.";
@@ -1025,6 +1045,28 @@ function toggleTrackingBlock(key) {
   if (S.tracking.open !== "sales") S.tracking.day = null;
   render();
   main.scrollTo(0, 0);
+}
+
+/** A product name as a safe JS string literal, for an inline onclick. */
+function q(v) { return JSON.stringify(String(v)); }
+
+/** Product names run to sixty characters. Keep the fruit and the class, drop
+ *  the packaging, so a column of them stays readable. */
+function shortProduct(name) {
+  const s = String(name || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
+  return s.length > 34 ? s.slice(0, 33) + "…" : s;
+}
+
+/** Add or remove a product from the day-to-day trend. */
+function toggleTrendProduct(name) {
+  const T = S.tracking;
+  const chosen = (T.data && T.data.product_trend && T.data.product_trend.selected) || [];
+  // First click starts from whatever is on screen, so the default picks are not
+  // silently thrown away the moment one more product is added.
+  const base = T.products.length ? T.products : chosen;
+  T.products = base.includes(name) ? base.filter(x => x !== name) : base.concat([name]);
+  T.open = "trend";
+  loadTracking();
 }
 
 function setTrackingDay(d) {
@@ -1206,6 +1248,61 @@ function renderTracking() {
         pickers)
     : emptyBlock("Sales per day", "nothing recorded", "No sales recorded yet.");
 
+  // --- day-to-day performance of chosen products ---------------------------
+  const tr = T.data.product_trend || { available: [], selected: [], series: [] };
+  const chips = (tr.available || []).map(name => {
+    const on = (tr.selected || []).includes(name);
+    return `<button class="pchip${on ? " on" : ""}" title="${esc(name)}"
+      onclick="event.stopPropagation(); toggleTrendProduct(${q(name)})">${esc(shortProduct(name))}</button>`;
+  }).join("");
+
+  const moveTag = s => {
+    if (s.days_sold < 2) return `<span class="pmove flat">one day</span>`;
+    const up = s.price_move > 0, flat = Math.abs(s.price_move) < 0.005;
+    return `<span class="pmove ${flat ? "flat" : up ? "up" : "down"}">${flat ? "level"
+      : (up ? "▲ R " : "▼ R ") + fmt(Math.abs(s.price_move)) + " a carton"}</span>`;
+  };
+
+  const seriesRows = s => s.days.map(d => {
+    const off = d.market_avg && d.price < d.market_avg * 0.7;
+    return `<tr>
+      <td>${esc(niceDate(d.date) || d.date)}</td>
+      <td class="num">${fmtInt(d.cartons)}</td>
+      <td class="num${off ? " under" : ""}">R ${fmt(d.price)}</td>
+      <td class="num mkt">${d.market_avg ? "R " + fmt(d.market_avg) : "—"}</td>
+      <td class="num">R ${fmt(d.value)}</td></tr>`;
+  }).join("");
+
+  const seriesCard = s => `<div class="pseries">
+      <div class="pseries-head">
+        <span class="pseries-name" title="${esc(s.product)}">${esc(shortProduct(s.product))}</span>
+        ${moveTag(s)}
+        <span class="pseries-tot num">${fmtInt(s.cartons)} ctn · R ${fmt(s.price)} avg · R ${fmt(s.value)}</span>
+      </div>
+      <table class="sday-items">
+        <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
+        <thead><tr><th>Day</th><th>Cartons</th><th>Per carton</th><th>Market</th><th>Value</th></tr></thead>
+        <tbody>${seriesRows(s)}</tbody>
+      </table>
+    </div>`;
+
+  const trendPreview = (tr.series || []).length
+    ? `<ul class="trk-list">${tr.series.map(s => `<li>
+        <span class="trk-p" title="${esc(s.product)}">${esc(shortProduct(s.product))}</span>
+        <span class="trk-d">${fmtInt(s.days_sold)} day${s.days_sold === 1 ? "" : "s"}</span>
+        <span class="trk-n num">R ${fmt(s.price)} ${moveTag(s)}</span></li>`).join("")}</ul>`
+    : `<p class="ins-empty">Nothing sold in this window.</p>`;
+
+  const trendBlock = (tr.available || []).length
+    ? block("trend", "Product performance", (tr.series || []).length,
+        `${fmtInt((tr.selected || []).length)} of ${fmtInt(tr.available.length)} products, day by day`,
+        trendPreview,
+        `<div class="pchips">${chips}</div>
+         ${(tr.series || []).length ? tr.series.map(seriesCard).join("")
+           : `<p class="ins-empty">Choose a product above.</p>`}`,
+        "")
+    : emptyBlock("Product performance", "nothing recorded", "No sales recorded yet.");
+
   main.innerHTML = `
     <section class="screen ins">
       ${head}
@@ -1217,7 +1314,7 @@ function renderTracking() {
           + (p.oldest_outstanding ? ` · oldest ${ageInDays(p.oldest_outstanding)} days` : ""))}
       </div>
       <div class="trk-grid${open ? " has-open" : ""}">
-        ${owedBlock}${slowBlock}${salesBlock}
+        ${owedBlock}${slowBlock}${salesBlock}${trendBlock}
       </div>
     </section>`;
 }

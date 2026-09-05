@@ -860,6 +860,7 @@ async def _saved_payments(user: User | None) -> list[dict]:
 async def get_tracking(
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
+    products: str | None = Query(None),
     user: User | None = Depends(require_user),
 ) -> dict:
     """The Tracking tab: paid vs outstanding, sales per day, slow stock.
@@ -874,7 +875,9 @@ async def get_tracking(
     """
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
-    return tracking.compute(sales, payments, start=date_from, end=date_to)
+    chosen = [p for p in (products or "").split("|") if p.strip()]
+    return tracking.compute(sales, payments, start=date_from, end=date_to,
+                            products=chosen)
 
 
 @app.get("/api/analytics")

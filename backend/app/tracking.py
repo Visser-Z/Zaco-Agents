@@ -272,6 +272,88 @@ def slow_stock(sales: list[dict], today: date | None = None) -> dict:
 
 # --- the whole payload ----------------------------------------------------
 
+# --- day-to-day performance of chosen products ----------------------------
+
+# Enough to see a shape without turning the card into a wall.
+TREND_DEFAULT_PRODUCTS = 3
+
+
+def product_trend(sales: list[dict], products: list[str] | None = None,
+                  start: str | None = None, end: str | None = None) -> dict:
+    """How the products you care about did, day by day.
+
+    One series per product: what sold each trading day, what a carton fetched,
+    and what the market was paying for it. That last pairing is the point -- a
+    price falling on its own may just be the market softening, and only the two
+    together say whether this produce is losing ground or the whole commodity is.
+
+    With nothing chosen it follows the money and shows the biggest earners over
+    the window, so the card says something useful before anyone touches it.
+    """
+    per: dict[str, dict[str, dict]] = defaultdict(dict)
+    totals: dict[str, dict] = defaultdict(
+        lambda: {"cartons": 0.0, "value": 0.0, "returned": 0.0})
+
+    for row in sales:
+        day = row.get("group_date")
+        if not day:
+            continue
+        day = str(day)[:10]
+        if (start and day < start) or (end and day > end):
+            continue
+        name = analytics.product_label(row)
+        cartons = analytics.row_cartons(row)
+        d = per[name].setdefault(day, {"date": day, "cartons": 0.0, "value": 0.0,
+                                       "returned": 0.0, "avg_weighted": 0.0, "weight": 0.0})
+        d["cartons"] += cartons
+        d["value"] += analytics.row_value(row)
+        d["returned"] += analytics.row_returned(row)
+        if (avg := integrity.market_avg(row)) is not None and cartons > 0:
+            d["avg_weighted"] += avg * cartons
+            d["weight"] += cartons
+        t = totals[name]
+        t["cartons"] += cartons
+        t["value"] += analytics.row_value(row)
+        t["returned"] += analytics.row_returned(row)
+
+    available = sorted(totals, key=lambda n: totals[n]["value"], reverse=True)
+    chosen = [p for p in (products or []) if p in per] or available[:TREND_DEFAULT_PRODUCTS]
+
+    series = []
+    for name in chosen:
+        days = []
+        for day in sorted(per[name]):
+            d = per[name][day]
+            days.append({
+                "date": day,
+                "cartons": round(d["cartons"], 2),
+                "returned": round(d["returned"], 2),
+                "value": round(d["value"], 2),
+                "price": round(d["value"] / d["cartons"], 2) if d["cartons"] else 0.0,
+                "market_avg": round(d["avg_weighted"] / d["weight"], 2) if d["weight"] else None,
+            })
+        t = totals[name]
+        priced = [d for d in days if d["cartons"]]
+        # The move is measured between the first and last day this product
+        # actually sold, not the ends of the window: a gap in the middle is not
+        # a price change.
+        first = priced[0]["price"] if priced else 0.0
+        last = priced[-1]["price"] if priced else 0.0
+        series.append({
+            "product": name,
+            "days": days,
+            "cartons": round(t["cartons"], 2),
+            "returned": round(t["returned"], 2),
+            "value": round(t["value"], 2),
+            "price": round(t["value"] / t["cartons"], 2) if t["cartons"] else 0.0,
+            "first_price": first,
+            "last_price": last,
+            "price_move": round(last - first, 2),
+            "days_sold": len(priced),
+        })
+    return {"available": available, "selected": chosen, "series": series}
+
+
 def date_span(sales: list[dict]) -> dict:
     """The first and last day anything sold, so the pickers can bound themselves."""
     days = sorted({str(d)[:10] for r in sales if (d := r.get("group_date"))})
@@ -279,7 +361,8 @@ def date_span(sales: list[dict]) -> dict:
 
 
 def compute(sales: list[dict], payments: list[dict], today: date | None = None,
-            start: str | None = None, end: str | None = None) -> dict:
+            start: str | None = None, end: str | None = None,
+            products: list[str] | None = None) -> dict:
     """Everything the Tracking tab renders.
 
     ``start`` and ``end`` narrow the per-day sales list only. What is owed is a
@@ -291,6 +374,7 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
     return {
         "payments": payment_status(sales, payments),
         "sales_by_day": sales_by_day(sales, start, end),
+        "product_trend": product_trend(sales, products, start, end),
         "slow_stock": slow_stock(sales, today),
         "span": date_span(sales),
         "filter": {"from": start, "to": end},

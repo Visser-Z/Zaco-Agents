@@ -213,3 +213,54 @@ def test_returns_show_against_the_product_that_came_back():
     sales = [_sale("GRAPES", 8, 100.0, "2026-08-03", returned=2, ret_value=200.0)]
     p = tracking.sales_by_day(sales)["days"][0]["products"][0]
     assert (p["cartons"], p["returned"]) == (8, 2)
+
+
+# --- day-to-day performance of chosen products ----------------------------
+
+def test_a_product_gets_a_day_by_day_series():
+    sales = [
+        dict(_sale("GRAPES", 20, 100.0, "2026-08-01"), market_avg=120.0),
+        dict(_sale("GRAPES", 10, 80.0, "2026-08-03"), market_avg=115.0),
+        _sale("PLUMS", 5, 50.0, "2026-08-02"),
+    ]
+    out = tracking.product_trend(sales, ["GRAPES"])
+    assert out["selected"] == ["GRAPES"]
+    s = out["series"][0]
+    assert [d["date"] for d in s["days"]] == ["2026-08-01", "2026-08-03"]   # oldest first
+    assert [d["price"] for d in s["days"]] == [100.0, 80.0]
+    assert [d["market_avg"] for d in s["days"]] == [120.0, 115.0]
+    assert s["cartons"] == 30 and s["value"] == 2800.0
+    assert s["price_move"] == -20.0        # R100 down to R80
+
+
+def test_the_price_move_spans_days_it_actually_sold():
+    """A gap in the middle is not a price change, so the move runs between the
+    first and last day the product moved, not the ends of the window."""
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01"),
+             _sale("GRAPES", 10, 130.0, "2026-08-09")]
+    s = tracking.product_trend(sales, ["GRAPES"])["series"][0]
+    assert (s["first_price"], s["last_price"], s["price_move"]) == (100.0, 130.0, 30.0)
+    assert s["days_sold"] == 2
+
+
+def test_with_nothing_chosen_it_follows_the_money():
+    sales = [_sale("SMALL", 1, 10.0, "2026-08-01"),
+             _sale("BIG", 100, 100.0, "2026-08-01"),
+             _sale("MID", 10, 100.0, "2026-08-01"),
+             _sale("TINY", 1, 1.0, "2026-08-01")]
+    out = tracking.product_trend(sales, None)
+    assert out["selected"] == ["BIG", "MID", "SMALL"]      # top three by value
+    assert out["available"][0] == "BIG"
+
+
+def test_a_product_that_does_not_exist_falls_back_rather_than_showing_nothing():
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01")]
+    out = tracking.product_trend(sales, ["NOT A REAL PRODUCT"])
+    assert out["selected"] == ["GRAPES"]
+
+
+def test_the_trend_respects_the_date_range():
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01"),
+             _sale("GRAPES", 10, 100.0, "2026-08-09")]
+    s = tracking.product_trend(sales, ["GRAPES"], start="2026-08-05")["series"][0]
+    assert [d["date"] for d in s["days"]] == ["2026-08-09"]

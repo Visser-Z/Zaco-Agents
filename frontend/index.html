@@ -1048,7 +1048,10 @@ function toggleTrackingBlock(key) {
 }
 
 /** A product name as a safe JS string literal, for an inline onclick. */
-function q(v) { return JSON.stringify(String(v)); }
+/** A JS string literal safe to drop inside a double-quoted HTML attribute.
+ *  JSON.stringify alone quotes with `"`, which closes the attribute early
+ *  and silently truncates the handler, so the quotes are escaped too. */
+function q(v) { return esc(JSON.stringify(String(v))); }
 
 /** Product names run to sixty characters. Keep the fruit and the class, drop
  *  the packaging, so a column of them stays readable. */

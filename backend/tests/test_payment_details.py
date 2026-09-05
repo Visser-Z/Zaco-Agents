@@ -194,7 +194,7 @@ def test_a_payment_report_is_not_read_as_an_adjustments_report():
     adjustments report first, so without its own title a Payment Details PDF
     dropped there contributed Netts nobody asked for."""
     from app import nett_adjustments as na, payment_details as pd
-    with open("tests/fixtures/payment_details_week32.txt", encoding="utf-8") as fh:
+    with open(FIX / "payment_details_week32.txt", encoding="utf-8") as fh:
         text = fh.read()
     assert pd.is_payment_details(text) is True
     assert na.is_nett_adjustments(text) is False
@@ -202,7 +202,7 @@ def test_a_payment_report_is_not_read_as_an_adjustments_report():
 
 def test_an_adjustments_report_is_still_recognised():
     from app import nett_adjustments as na, payment_details as pd
-    with open("tests/fixtures/nett_adjustments_july.txt", encoding="utf-8") as fh:
+    with open(FIX / "nett_adjustments_july.txt", encoding="utf-8") as fh:
         text = fh.read()
     assert na.is_nett_adjustments(text) is True
     assert pd.is_payment_details(text) is False

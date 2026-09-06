@@ -363,6 +363,7 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 # ("column statements.consignment_id does not exist") or a bare 404, which reads
 # like a broken app rather than one pending setup step.
 _MIGRATIONS = {
+    "dismissals": "0016_dismissals.sql",
     "payments": "0015_payments.sql",
     "statements_unique_per_agent": "0014_statements_per_day.sql",
     "market_avg": "0013_statements_market_avg.sql",

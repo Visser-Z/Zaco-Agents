@@ -90,3 +90,13 @@ def test_schema_gaps_skipped_without_a_user():
     """Local development has no Supabase at all; probing it would warn about
     every migration on a machine that needs none of them."""
     assert asyncio.run(main.schema_gaps(None)) == []
+
+
+def test_a_missing_dismissals_table_names_its_migration():
+    """Closing a Tracking line is the one feature 0016 adds, so a database
+    without it must say so rather than report a generic failure."""
+    assert main._pending_migration(
+        _Boom('relation "public.dismissals" does not exist')) == "0016_dismissals.sql"
+    # PostgREST answers a missing table with a bare 404 as well.
+    assert main._pending_migration(
+        _Boom("404: Could not find the table 'public.dismissals'")) == "0016_dismissals.sql"

@@ -132,10 +132,9 @@ def sales_by_day(sales: list[dict], start: str | None = None,
     """
     by_day: dict[str, dict] = {}
     for row in sales:
-        day = row.get("group_date")
+        day = selling_day(row)
         if not day:
             continue
-        day = str(day)[:10]
         # ISO dates compare correctly as strings, so no parsing is needed.
         if (start and day < start) or (end and day > end):
             continue
@@ -188,6 +187,20 @@ def sales_by_day(sales: list[dict], start: str | None = None,
 
 
 # --- slow to sell ---------------------------------------------------------
+
+def selling_day(row: dict) -> str | None:
+    """The day a row actually sold on.
+
+    ``group_date`` is the consignment's date -- the earliest across its
+    delivery-note group, i.e. the day the load was sent -- so several selling
+    days share one value. Dropping a week of reports at once collapsed 46 of 60
+    rows onto a single day and reported R192 965 as one day's trade. The row
+    carries its own sale date in ``last_sale``; use it, and keep ``group_date``
+    as the fallback for history recorded before it was captured.
+    """
+    day = row.get("last_sale") or row.get("group_date")
+    return str(day)[:10] if day else None
+
 
 def _clearance_days(sales: list[dict], today: date) -> list[int]:
     """Days each cleared consignment took, arrival to its last sale.
@@ -274,7 +287,7 @@ def slow_stock(sales: list[dict], today: date | None = None) -> dict:
 
 def date_span(sales: list[dict]) -> dict:
     """The first and last day anything sold, so the pickers can bound themselves."""
-    days = sorted({str(d)[:10] for r in sales if (d := r.get("group_date"))})
+    days = sorted({d for r in sales if (d := selling_day(r))})
     return {"first": days[0] if days else None, "last": days[-1] if days else None}
 
 

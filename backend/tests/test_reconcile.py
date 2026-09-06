@@ -164,3 +164,46 @@ def test_accumulated_daily_maps_and_scopes_by_supplier_and_date(monkeypatch):
 def test_accumulated_daily_no_suppliers_skips_query():
     # No supplier refs -> nothing to reconcile, no DB call.
     assert asyncio.run(main._accumulated_daily(USER, set(), "2026-08-01", "2026-08-05")) == []
+
+
+# --- mixed histories ------------------------------------------------------
+
+def _pdf_row(dn, product, total, stm):
+    return {"dn": dn, "product": product, "sales_total": total,
+            "stm_no": stm, "payment_refs": None}
+
+
+def _pay(dn, accsale, product, gross, nett):
+    return {"dn": dn, "accsale": accsale, "gross": gross, "nett": nett,
+            "lines": [{"product": product, "sales_total": gross}]}
+
+
+def test_one_referenced_row_does_not_strip_the_rest_of_the_history():
+    """A single CSV-sourced row used to switch the whole run to reference
+    matching, where PDF rows have nothing to match on. On a real August round
+    that reported R107 580 of matched sales as R0."""
+    rows = [_pdf_row(14584, "GRAPES CRIMSON SEEDLESS CLASS 2", 1000.0, 1),
+            _pdf_row(14585, "GRAPES WHITE SEEDLESS CLASS 2", 400.0, 2)]
+    pays = [_pay(14584, "PRE*BT*1", "GRAPES CRIMSON SEEDLESS CLASS 2", 1000.0, 850.0),
+            _pay(14585, "PRE*BT*2", "GRAPES WHITE SEEDLESS CLASS 2", 400.0, 340.0)]
+    clean = reconcile.reconcile_any(rows, pays)
+    assert [r["status"] for r in clean] == ["matched", "matched"]
+
+    rows[0] = dict(rows[0], payment_refs="PRE*BT*1=1000.00")
+    mixed = reconcile.reconcile_any(rows, pays)
+    assert sorted(r["status"] for r in mixed) == ["matched", "matched"]
+
+
+def test_a_payment_claimed_by_reference_is_not_matched_again_by_product():
+    """Otherwise the same money would be reported twice, once per strategy."""
+    rows = [dict(_pdf_row(14584, "GRAPES", 1000.0, 1), payment_refs="PRE*BT*1=1000.00"),
+            _pdf_row(14584, "GRAPES", 1000.0, 2)]
+    pays = [_pay(14584, "PRE*BT*1", "GRAPES", 1000.0, 850.0)]
+    out = reconcile.reconcile_any(rows, pays)
+    assert sum(r["payment_gross"] for r in out) == 1000.0
+
+
+def test_a_history_with_no_references_still_matches_on_product():
+    rows = [_pdf_row(14584, "GRAPES", 1000.0, 1)]
+    pays = [_pay(14584, "PRE*BT*1", "GRAPES", 1000.0, 850.0)]
+    assert [r["status"] for r in reconcile.reconcile_any(rows, pays)] == ["matched"]

@@ -214,3 +214,24 @@ def test_returns_show_against_the_product_that_came_back():
     p = tracking.sales_by_day(sales)["days"][0]["products"][0]
     assert (p["cartons"], p["returned"]) == (8, 2)
 
+
+
+# --- which day a row belongs to -------------------------------------------
+
+def test_a_day_is_the_day_it_sold_not_the_day_it_was_sent():
+    """group_date is the consignment's send date, shared by every selling day
+    under it. Dropping a week of reports at once put 46 of 60 real rows on one
+    day and reported R192 965 as a single day's trade."""
+    sales = [
+        dict(_sale("GRAPES", 10, 100.0, "2026-08-01"), last_sale="2026-08-01"),
+        dict(_sale("GRAPES", 10, 100.0, "2026-08-01"), last_sale="2026-08-04"),
+        dict(_sale("GRAPES", 10, 100.0, "2026-08-01"), last_sale="2026-08-06"),
+    ]
+    days = tracking.sales_by_day(sales)["days"]
+    assert [d["date"] for d in days] == ["2026-08-06", "2026-08-04", "2026-08-01"]
+    assert tracking.date_span(sales) == {"first": "2026-08-01", "last": "2026-08-06"}
+
+
+def test_history_without_a_sale_date_still_falls_back_to_the_group_date():
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01")]
+    assert [d["date"] for d in tracking.sales_by_day(sales)["days"]] == ["2026-08-01"]

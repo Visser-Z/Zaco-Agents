@@ -1456,7 +1456,7 @@ function reconcileBody(R) {
       ${rows.map(r => {
         const st = RECON_STATUS[r.status] || { label: r.status, cls: "mut" };
         return `<div class="pm-row">
-          <span class="pm-p" title="DN ${r.dn} · ${esc(r.product)}">${esc(r.product)}</span>
+          <span class="pm-p" title="DN ${r.dn} · ${esc(r.product || r.reference || "")}">${esc(r.product || r.reference || "—")}</span>
           <span class="pm-n num">${r.status === "matched" ? "R " + fmt(r.payment_nett) : "R " + fmt(r.daily_total) + "/" + fmt(r.payment_gross)}</span>
           <span class="rstat ${st.cls}">${st.label}</span>
         </div>`;

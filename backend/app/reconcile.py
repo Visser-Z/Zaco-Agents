@@ -243,3 +243,50 @@ def fill_netts(daily_rows: list[dict], payment_records: list[dict]) -> int:
             r["nett_total"] = round(pay["nett"] * (float(r.get("sales_total") or 0) / dtot), 2)
             filled += 1
     return filled
+
+
+# --- mixed histories ------------------------------------------------------
+#
+# A history can hold rows from both exports at once: CSV rows name the account
+# sale that paid them, PDF rows never do. Choosing one strategy for the whole
+# run on the strength of `any(payment_refs)` meant a single CSV row switched
+# every PDF row to reference matching, where it has no reference to match on
+# and reports as "no sales". On a real August round that turned R107 580 of
+# matched sales into R0. So each row is matched by what it actually carries.
+
+
+def _split_on_refs(daily_rows: list[dict], payment_records: list[dict]):
+    """Rows and payments split into the reference-matchable and the rest."""
+    with_refs = [r for r in daily_rows if r.get("payment_refs")]
+    without = [r for r in daily_rows if not r.get("payment_refs")]
+    claimed: set[str] = set()
+    for row in with_refs:
+        claimed |= set(parse_payment_refs(row.get("payment_refs")))
+    named = [p for p in payment_records if p.get("accsale") in claimed]
+    unnamed = [p for p in payment_records if p.get("accsale") not in claimed]
+    return with_refs, without, named, unnamed
+
+
+def reconcile_any(daily_rows: list[dict], payment_records: list[dict]) -> list[dict]:
+    """Reconcile a history whose rows came from either export, or from both.
+
+    Rows naming their payment are matched on that reference, which is exact.
+    The rest fall back to supplier ref + product. A payment already claimed by
+    reference is not offered to the fallback, so nothing is counted twice.
+    """
+    with_refs, without, named, unnamed = _split_on_refs(daily_rows, payment_records)
+    if not with_refs:
+        return reconcile(daily_rows, payment_records)
+    out = by_payment_reference(with_refs, named)
+    if without or unnamed:
+        out += reconcile(without, unnamed)
+    return out
+
+
+def fill_netts_any(daily_rows: list[dict], payment_records: list[dict]) -> int:
+    """``fill_netts`` for a mixed history, split the same way as ``reconcile_any``."""
+    with_refs, without, named, unnamed = _split_on_refs(daily_rows, payment_records)
+    if not with_refs:
+        return fill_netts(daily_rows, payment_records)
+    return (fill_netts_by_reference(with_refs, named)
+            + fill_netts(without, unnamed))

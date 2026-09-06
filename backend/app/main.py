@@ -1082,16 +1082,13 @@ async def reconcile_payments(
     dns = {r["dn"] for r in records if r["dn"] is not None}
     daily = await _accumulated_daily(user, dns, lo, hi) if user is not None else []
 
-    # Where the sales side names the payment it belongs to (the CSV export
-    # does), match on that reference: it is exact. Otherwise fall back to
-    # supplier ref + product name, which is all a PDF gives us.
-    exact = any(r.get("payment_refs") for r in daily)
-    if exact:
-        summary = reconcile.by_payment_reference(daily, records)
-        reconcile.fill_netts_by_reference(daily, records)
-    else:
-        summary = reconcile.reconcile(daily, records)
-        reconcile.fill_netts(daily, records)
+    # Row by row: a sale that names the payment it belongs to (the CSV export
+    # does) is matched on that reference, which is exact; a sale that does not
+    # (every PDF row) falls back to supplier ref + product name. Deciding this
+    # once for the whole run meant one CSV row in the window sent every PDF row
+    # down the reference path, where it has nothing to match on.
+    summary = reconcile.reconcile_any(daily, records)
+    reconcile.fill_netts_any(daily, records)
     # Per statement, SUMMED across the rows under it -- not one entry per row.
     # A dict comprehension keyed on the statement number silently kept whichever
     # row came last, so a statement covering three consignments reached the

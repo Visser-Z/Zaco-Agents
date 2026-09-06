@@ -235,3 +235,32 @@ def test_a_day_is_the_day_it_sold_not_the_day_it_was_sent():
 def test_history_without_a_sale_date_still_falls_back_to_the_group_date():
     sales = [_sale("GRAPES", 10, 100.0, "2026-08-01")]
     assert [d["date"] for d in tracking.sales_by_day(sales)["days"]] == ["2026-08-01"]
+
+
+# --- closing a line off ----------------------------------------------------
+
+def test_closing_a_slow_line_takes_it_off_the_live_list_but_keeps_it():
+    sales = [_sale("GRAPES", 1, 100.0, "2026-01-01", dn=14588, sent=100,
+                   received="2026-01-01")]
+    open_ = tracking.slow_stock(sales, date(2026, 3, 1))
+    assert open_["flagged"] == 1 and open_["closed_count"] == 0
+    ref = open_["items"][0]["ref"]
+
+    shut = tracking.slow_stock(sales, date(2026, 3, 1), closed={ref})
+    assert shut["flagged"] == 0
+    assert [r["ref"] for r in shut["closed"]] == [ref]
+    # reopening is just dropping the ref again
+    assert tracking.slow_stock(sales, date(2026, 3, 1))["flagged"] == 1
+
+
+def test_closing_an_owed_line_never_hides_the_money():
+    """It comes off the total, so it must stay visible with its value."""
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01", dn=14584)]
+    live = tracking.payment_status(sales, [])
+    ref = live["outstanding"][0]["ref"]
+    assert live["still_to_come"] == 1000.0
+
+    shut = tracking.payment_status(sales, [], closed={ref})
+    assert shut["still_to_come"] == 0.0
+    assert shut["closed_value"] == 1000.0
+    assert [r["ref"] for r in shut["closed"]] == [ref]

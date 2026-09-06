@@ -856,6 +856,61 @@ async def _saved_payments(user: User | None) -> list[dict]:
     return rows
 
 
+async def _closed_refs(user: User | None) -> set[str]:
+    """Tracking lines the team has closed off, read as the caller."""
+    if user is None:
+        return set()
+    try:
+        rows = await db_get(user, "dismissals", {"select": "kind,ref", "limit": "5000"})
+    except Exception:  # noqa: BLE001 -- before migration 0016 nothing is closed
+        return set()
+    return {f"{r['kind']}:{r['ref']}" for r in rows if r.get("ref")}
+
+
+@app.post("/api/tracking/close")
+async def close_tracking_item(
+    kind: str = Form(...),
+    ref: str = Form(...),
+    note: str | None = Form(None),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Mark one Tracking line as dealt with.
+
+    Advisory only: nothing in the sales or payment history changes, and the
+    line keeps its value on the closed list so closing can never quietly
+    shrink what is owed.
+    """
+    if user is None:
+        raise HTTPException(401, "Sign in to close an item.")
+    if kind not in ("owed", "slow"):
+        raise HTTPException(400, f"Unknown kind “{kind}”.")
+    try:
+        await db_post(user, "dismissals",
+                      [{"kind": kind, "ref": ref, "note": note, "created_by": user.id}],
+                      upsert=True, on_conflict="kind,ref",
+                      resolution="ignore-duplicates")
+    except Exception as exc:  # noqa: BLE001
+        if (migration := _pending_migration(exc)):
+            raise HTTPException(
+                400, f"Closing needs the {migration} migration, which has not been "
+                     f"run in the Supabase SQL editor yet.") from exc
+        raise HTTPException(400, f"Could not close that item: {exc}") from exc
+    return {"closed": f"{kind}:{ref}"}
+
+
+@app.post("/api/tracking/reopen")
+async def reopen_tracking_item(
+    kind: str = Form(...),
+    ref: str = Form(...),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Put a closed line back on the live list."""
+    if user is None:
+        raise HTTPException(401, "Sign in to reopen an item.")
+    await db_delete(user, "dismissals", {"kind": f"eq.{kind}", "ref": f"eq.{ref}"})
+    return {"reopened": f"{kind}:{ref}"}
+
+
 @app.get("/api/tracking")
 async def get_tracking(
     date_from: str | None = Query(None, alias="from"),
@@ -874,7 +929,9 @@ async def get_tracking(
     """
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
-    return tracking.compute(sales, payments, start=date_from, end=date_to)
+    closed = await _closed_refs(user)
+    return tracking.compute(sales, payments, start=date_from, end=date_to,
+                            closed=closed)
 
 
 @app.get("/api/analytics")
@@ -1049,6 +1106,7 @@ async def reconcile_payments(
     """Reconcile Payment Details report(s) against the accumulated daily history."""
     records: list[dict] = []
     warnings: list[str] = []
+    empty: list[str] = []
     lo: str | None = None
     hi: str | None = None
     for f in files:
@@ -1067,10 +1125,25 @@ async def reconcile_payments(
             text = "\n".join(pages)
             if not payment_details.is_payment_details(text):
                 raise HTTPException(400, f"“{name}” is not a Payment Details report.")
-            records.extend(payment_details.parse_payment_details(pages, name))
+            found = payment_details.parse_payment_details(pages, name)
+            records.extend(found)
             rlo, rhi = payment_details.date_range(text)
+            # An export with a Grand Total of nil is a valid report of "nothing
+            # was paid that day". Silently contributing nothing looked instead
+            # like the app had failed to read it -- on a real week six of eight
+            # files were empty and nothing said so.
+            if not found:
+                span = f" for {rlo}" if rlo and rlo == rhi else (
+                    f" for {rlo} to {rhi}" if rlo else "")
+                empty.append(f"“{name}” records no payments{span}.")
         lo = rlo if lo is None else min(lo, rlo or lo)
         hi = rhi if hi is None else max(hi, rhi or hi)
+
+    if empty:
+        head = (f"{len(empty)} of the {len(files)} files carry no payments"
+                if len(empty) > 1 else "One file carries no payments")
+        warnings.append(f"{head}: " + " ".join(empty)
+                        + " Re-export those days if you expected figures on them.")
 
     # Record the payments before matching, so the Tracking tab knows what is
     # outstanding across the whole period rather than only while this file is
@@ -1133,7 +1206,12 @@ async def reconcile_payments(
     kept.sort(key=lambda d: (d["severity"] != "severe", -(d["gross"] - d["nett"])))
 
     return {
-        "matched_on": "payment reference" if exact else "supplier ref and product",
+        # Both strategies can run in one pass now, so say which were used
+        # rather than which one was chosen.
+        "matched_on": " and ".join(
+            [w for w, on in (("payment reference", any("reference" in r for r in summary)),
+                             ("supplier ref and product", any("product" in r for r in summary)))
+             if on]) or "nothing to match",
         "warnings": warnings,
         "reconciliation": summary,
         "deductions": {

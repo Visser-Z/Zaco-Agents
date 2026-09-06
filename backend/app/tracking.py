@@ -23,7 +23,21 @@ from . import analytics, integrity, reconcile
 
 # --- payments -------------------------------------------------------------
 
-def payment_status(sales: list[dict], payments: list[dict]) -> dict:
+def item_ref(row: dict) -> str:
+    """A stable name for one Tracking line, so it can be closed and stay closed.
+
+    The lists are recomputed from the history on every load and carry no id of
+    their own, so the name has to come from what the line *is*: the account
+    sale where the match knew one, otherwise the delivery note and the
+    commodity, normalised the same way the matcher normalises it.
+    """
+    if row.get("reference"):
+        return f"ref:{row['reference']}"
+    return f"{row.get('dn')}:{reconcile.normalise_product(row.get('product'))}"
+
+
+def payment_status(sales: list[dict], payments: list[dict],
+                   closed: set[str] | frozenset[str] = frozenset()) -> dict:
     """What has been paid, and what is still owed.
 
     Reconciliation is the same match the payment panel does -- on the account
@@ -44,11 +58,10 @@ def payment_status(sales: list[dict], payments: list[dict]) -> dict:
               if r.get("sales_total") is not None else analytics.row_value(r)}
              for r in sales]
 
-    exact = any(r.get("payment_refs") for r in sales)
-    if exact:
-        rows = reconcile.by_payment_reference(sales, payments)
-    else:
-        rows = reconcile.reconcile(sales, payments)
+    # Row by row, never one strategy for the whole history: a single row
+    # carrying a payment reference used to send every PDF-sourced row down the
+    # reference path, where it has nothing to match on and reports as unsold.
+    rows = reconcile.reconcile_any(sales, payments)
 
     # reconcile's statuses, in this view's terms:
     #   matched      sold and paid agree -- paid in full.
@@ -61,6 +74,7 @@ def payment_status(sales: list[dict], payments: list[dict]) -> dict:
     matched = outstanding = 0
     outstanding_rows: list[dict] = []
     overpaid_rows: list[dict] = []
+    closed_rows: list[dict] = []
     for r in rows:
         sold, gross, nett, status = (
             r["daily_total"], r["payment_gross"], r["payment_nett"], r["status"])
@@ -69,9 +83,15 @@ def payment_status(sales: list[dict], payments: list[dict]) -> dict:
         if status in ("unpaid", "over"):
             owed = sold if status == "unpaid" else round(sold - gross, 2)
             if owed > 0:
-                outstanding += 1
-                still_to_come += owed
-                outstanding_rows.append({**r, "owed": round(owed, 2)})
+                row = {**r, "owed": round(owed, 2), "ref": item_ref(r)}
+                # A closed line stays visible on its own list with its value,
+                # so closing can never quietly shrink the exposure.
+                if row["ref"] in closed:
+                    closed_rows.append(row)
+                else:
+                    outstanding += 1
+                    still_to_come += owed
+                    outstanding_rows.append(row)
         elif status == "matched":
             matched += 1
         elif status == "outstanding":
@@ -117,6 +137,9 @@ def payment_status(sales: list[dict], payments: list[dict]) -> dict:
         ],
         "unattributed": unattributed,
         "payments_recorded": len(payments),
+        # Closed lines and what they were worth, reported rather than dropped.
+        "closed": sorted(closed_rows, key=lambda r: r["owed"], reverse=True),
+        "closed_value": round(sum(r["owed"] for r in closed_rows), 2),
     }
 
 
@@ -240,7 +263,8 @@ def slow_bands(sales: list[dict], today: date | None = None) -> dict:
             "from": f"{len(spans)} cleared consignments"}
 
 
-def slow_stock(sales: list[dict], today: date | None = None) -> dict:
+def slow_stock(sales: list[dict], today: date | None = None,
+               closed: set[str] | frozenset[str] = frozenset()) -> dict:
     """Consignments still on the floor, and how long they have been there.
 
     Aging is measured from the delivery date to today, over the cartons that
@@ -267,6 +291,8 @@ def slow_stock(sales: list[dict], today: date | None = None) -> dict:
         first = group[0]
         last_moved = max((d for r in group if (d := analytics._parse_date(r.get("last_sale")))), default=None)
         out.append({
+            "ref": item_ref({"dn": first.get("dn"),
+                             "product": analytics.product_label(first)}),
             "product": analytics.product_label(first),
             "dn": first.get("dn"),
             "market_agent": first.get("market_agent"),
@@ -279,8 +305,11 @@ def slow_stock(sales: list[dict], today: date | None = None) -> dict:
         })
     order = {"dead": 0, "slow": 1, "watch": 2}
     out.sort(key=lambda r: (order[r["tier"]], -r["days_on_floor"], -r["cartons_left"]))
+    shut = [r for r in out if r["ref"] in closed]
+    out = [r for r in out if r["ref"] not in closed]
     counts = {t: sum(1 for r in out if r["tier"] == t) for t in ("watch", "slow", "dead")}
-    return {"bands": bands, "counts": counts, "items": out[:50], "flagged": len(out)}
+    return {"bands": bands, "counts": counts, "items": out[:50], "flagged": len(out),
+            "closed": shut, "closed_count": len(shut)}
 
 
 # --- the whole payload ----------------------------------------------------
@@ -292,7 +321,8 @@ def date_span(sales: list[dict]) -> dict:
 
 
 def compute(sales: list[dict], payments: list[dict], today: date | None = None,
-            start: str | None = None, end: str | None = None) -> dict:
+            start: str | None = None, end: str | None = None,
+            closed: set[str] | frozenset[str] = frozenset()) -> dict:
     """Everything the Tracking tab renders.
 
     ``start`` and ``end`` narrow the per-day sales list only. What is owed is a
@@ -302,9 +332,9 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
     floor right now.
     """
     return {
-        "payments": payment_status(sales, payments),
+        "payments": payment_status(sales, payments, closed),
         "sales_by_day": sales_by_day(sales, start, end),
-        "slow_stock": slow_stock(sales, today),
+        "slow_stock": slow_stock(sales, today, closed),
         "span": date_span(sales),
         "filter": {"from": start, "to": end},
     }

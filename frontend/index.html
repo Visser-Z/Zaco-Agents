@@ -303,13 +303,16 @@
   /* One row is name | context | amount. A grid rather than a flex line so the
      amounts stack into a straight column instead of drifting with the width of
      whatever sits beside them. */
-  .trk-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  /* name | context | amount | close. The close column is `auto`, so on a list
+     with no close button it collapses to nothing and the amount stays flush
+     right. */
+  .trk-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto;
                  align-items: baseline; gap: 4px 12px; padding: 8px 0;
                  border-bottom: 1px solid var(--line); font-size: 13px; }
   .trk-list li:last-child { border-bottom: 0; }
   /* Slow stock leads with a days-on-floor badge, so its name is the second
      column rather than the first. */
-  .trk-list.trk-sig li { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .trk-list.trk-sig li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
   .trk-p { min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .trk-d { color: var(--ink-faint); font-size: 11.5px; white-space: nowrap;
            font-variant-numeric: tabular-nums; }
@@ -349,6 +352,22 @@
                       border-radius: 7px; background: var(--surface); color: var(--ink);
                       font-family: var(--sans); }
   /* Sales per day: a day heading, then exactly what sold under it. */
+  /* Day-to-day sales by product. */
+  .chart-head { display: flex; justify-content: flex-end; margin: 2px 0 6px; }
+  .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+  .seg button { appearance: none; border: 0; background: var(--surface); color: var(--ink-soft);
+                font: 600 11.5px var(--sans); padding: 5px 12px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line-strong); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  svg.daychart { width: 100%; height: auto; display: block; }
+  svg.daychart .cg { stroke: var(--line); stroke-width: 1; }
+  svg.daychart .ca { stroke: var(--line-strong); stroke-width: 1; }
+  svg.daychart .ct { fill: var(--ink-faint); font: 10px var(--sans); }
+  svg.daychart .cx { fill: var(--ink-soft); font: 10.5px var(--sans); }
+  svg.daychart .cv { fill: var(--ink-faint); font: 9.5px var(--sans); }
+  .clegend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 18px; }
+  .clg { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); }
+  .clg i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
   .sday-list { display: grid; gap: 18px; }
   .sday-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
                padding: 0 0 6px; border-bottom: 1px solid var(--line-strong); }
@@ -502,6 +521,17 @@
           padding: 1px 6px; border-radius: 99px; flex: none; cursor: help; }
   .wsig.severe { background: var(--crit-tint); color: var(--crit); }
   .wsig.watch { background: var(--warn-tint, var(--surface-2)); color: var(--warn, var(--ink-soft)); }
+  /* Three bands, three weights of alarm: past the Watch line, past Slow, past
+     Dead. One colour for all of them made a fortnight look like a quarter. */
+  .wsig.t-watch { background: var(--surface-2); color: var(--ink-soft); }
+  .wsig.t-slow  { background: var(--warn-tint); color: var(--warn); }
+  .wsig.t-dead  { background: var(--crit-tint); color: var(--crit); }
+  .trk-list li.done { opacity: .5; }
+  .trk-list li.done .trk-p { text-decoration: line-through; }
+  .xbtn { appearance: none; border: 0; background: none; cursor: pointer; padding: 0 2px;
+          color: var(--ink-faint); font-size: 14px; line-height: 1; border-radius: 4px; }
+  .xbtn:hover { color: var(--crit); background: var(--crit-tint); }
+  .xbtn.undo { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
   .watch-strip { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
                  padding: 11px 14px; margin-bottom: 14px; border-radius: 10px;
                  border: 1px solid var(--line); background: var(--surface-2); font-size: 12.5px; }
@@ -641,7 +671,7 @@ const S = {
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
   tracking: { data: null, loading: false, error: null, day: null, from: "", to: "",
-              open: null },
+              open: null, chart: "value" },
   recon: { data: null, loading: false, error: null, applied: false },
 };
 
@@ -1044,6 +1074,29 @@ function toggleTrackingBlock(key) {
   main.scrollTo(0, 0);
 }
 
+/** Close a Tracking line, or put it back. Advisory only: the sale and the
+ *  payment behind it are untouched, and a closed line keeps its value on the
+ *  closed list so closing can never quietly shrink what is owed. */
+async function closeTrackingItem(kind, ref, reopen) {
+  const T = S.tracking;
+  const body = new FormData();
+  body.append("kind", kind);
+  body.append("ref", ref);
+  try {
+    const r = await api(`/api/tracking/${reopen ? "reopen" : "close"}`, { method: "POST", body });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+    await loadTracking();
+  } catch (e) {
+    T.error = e.message || String(e);
+    render();
+  }
+}
+
+function setTrackingChart(metric) {
+  S.tracking.chart = metric;
+  render();
+}
+
 function setTrackingDay(d) {
   S.tracking.day = S.tracking.day === d ? null : d;
   render();
@@ -1085,6 +1138,107 @@ function ageInDays(iso) {
   if (isNaN(then)) return null;
   return Math.round((Date.now() - then) / 86400000);
 }
+
+/* --- day-to-day sales, per product -----------------------------------------
+ *  A stacked bar per selling day, one band per product, so the question the
+ *  owner actually asks -- "what moved, and on which day" -- is answered by
+ *  looking rather than by reading down eight tables. Products beyond the top
+ *  few are pooled into Other: a legend of thirty commodities tells nobody
+ *  anything, and the tail is individually tiny by definition.
+ */
+const CHART_COLOURS = ["#1F5FA8", "#1E7A4D", "#9A6410", "#B23B34", "#5B4B9E",
+                       "#0E7490", "#A34A78", "#4D6B1F"];
+const CHART_TOP = 8;
+
+function chartSeries(days, metric) {
+  const total = {};
+  days.forEach(d => (d.products || []).forEach(p => {
+    total[p.product] = (total[p.product] || 0) + (p[metric] || 0);
+  }));
+  const ranked = Object.keys(total).sort((a, b) => total[b] - total[a]);
+  const top = ranked.slice(0, CHART_TOP);
+  const named = new Set(top);
+  const hasOther = ranked.length > top.length;
+  const names = hasOther ? top.concat(["Other"]) : top;
+  const rows = days.map(d => {
+    const by = {};
+    (d.products || []).forEach(p => {
+      const key = named.has(p.product) ? p.product : "Other";
+      by[key] = (by[key] || 0) + (p[metric] || 0);
+    });
+    return { date: d.date, by, total: names.reduce((t, n) => t + (by[n] || 0), 0) };
+  });
+  return { names, rows };
+}
+
+/** Stacked bars: x is the selling day, y is cartons or rand. */
+function dayChart(days, metric) {
+  const chron = days.slice().reverse();            // days arrive newest first
+  if (!chron.length) return `<p class="ins-empty">Nothing to chart.</p>`;
+  const { names, rows } = chartSeries(chron, metric);
+  if (!names.length) return `<p class="ins-empty">No products on these days.</p>`;
+
+  const W = 900, H = 300, L = 62, R = 12, T = 14, B = 44;
+  const iw = W - L - R, ih = H - T - B;
+  const peak = Math.max(...rows.map(r => r.total), 0) || 1;
+  // A round number above the tallest bar, so the gridlines read as figures.
+  const step = Math.pow(10, Math.floor(Math.log10(peak))) / 2;
+  const top = Math.ceil(peak / step) * step;
+  const y = v => T + ih - (v / top) * ih;
+  const bw = Math.min(58, (iw / rows.length) * 0.68);
+  const money = metric === "value";
+  const tick = v => money ? "R " + fmtInt(v) : fmtInt(v);
+
+  const grid = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const v = top * f;
+    return `<line class="cg" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>
+            <text class="ct" x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${tick(v)}</text>`;
+  }).join("");
+
+  const bars = rows.map((r, i) => {
+    const cx = L + (iw / rows.length) * (i + 0.5);
+    let acc = 0;
+    const seg = names.map((n, j) => {
+      const v = r.by[n] || 0;
+      if (v <= 0) return "";
+      const y0 = y(acc + v), y1 = y(acc);
+      acc += v;
+      return `<rect x="${cx - bw / 2}" y="${y0}" width="${bw}" height="${Math.max(0.6, y1 - y0)}"
+                fill="${CHART_COLOURS[j % CHART_COLOURS.length]}"><title>${esc(niceDate(r.date) || r.date)}
+${esc(n)} — ${tick(v)}</title></rect>`;
+    }).join("");
+    return `${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>
+            <text class="cv" x="${cx}" y="${y(r.total) - 5}" text-anchor="middle">${tick(r.total)}</text>`;
+  }).join("");
+
+  const legend = names.map((n, j) => `<span class="clg">
+      <i style="background:${CHART_COLOURS[j % CHART_COLOURS.length]}"></i>${esc(shortProduct(n))}</span>`).join("");
+
+  return `<div class="chart-head">
+      <div class="seg">
+        <button class="${metric === "value" ? "on" : ""}" onclick="event.stopPropagation(); setTrackingChart('value')">Rand</button>
+        <button class="${metric === "cartons" ? "on" : ""}" onclick="event.stopPropagation(); setTrackingChart('cartons')">Cartons</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" class="daychart" role="img"
+      aria-label="Sales per day by product" preserveAspectRatio="xMidYMid meet">
+      ${grid}
+      <line class="ca" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>
+      ${bars}
+    </svg></div>
+    <div class="clegend">${legend}</div>`;
+}
+
+/** "1 Aug" -- the axis has no room for the year, and every bar shares it. */
+function shortDay(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso) : d.getUTCDate() + " " + MONTHS[d.getUTCMonth()];
+}
+
+/** A JS string literal safe to drop inside a double-quoted HTML attribute.
+ *  JSON.stringify alone quotes with `"`, which closes the attribute early
+ *  and silently truncates the handler, so the quotes are escaped too. */
+function q(v) { return esc(JSON.stringify(String(v))); }
 
 /** Product names run past fifty characters, and the packaging tail is the
  *  least useful part of one: "CHERRIES OTHER CLASS 1 MEDIUM (STANDARD TRAY
@@ -1151,7 +1305,22 @@ function renderTracking() {
   const owedRow = r => `<li>
       <span class="trk-p" title="${esc(r.product || r.reference || "")}">${esc(shortProduct(r.product || r.reference) || "—")}</span>
       <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
-      <span class="trk-n num">R ${fmt(r.owed)}</span></li>`;
+      <span class="trk-n num">R ${fmt(r.owed)}</span>
+      <button class="xbtn" title="Close this one off"
+        onclick="event.stopPropagation(); closeTrackingItem('owed', ${q(r.ref)})">×</button></li>`;
+
+  /** Lines already dealt with. Shown, not hidden: the value stays on screen so
+   *  closing something can never make the exposure look smaller than it is. */
+  const closedList = (rows, kind, what) => !rows.length ? "" : `
+    <p class="trk-note">${fmtInt(rows.length)} closed${kind === "owed"
+      ? ` · R ${fmt(rows.reduce((t, r) => t + (r.owed || 0), 0))} not counted above` : ""}</p>
+    <ul class="trk-list${kind === "slow" ? " trk-sig" : ""}">${rows.map(r => `<li class="done">
+      ${kind === "slow" ? `<span class="wsig t-${esc(r.tier)}">${fmtInt(r.days_on_floor)}d</span>` : ""}
+      <span class="trk-p" title="${esc(r.product || r.reference || "")}">${esc(shortProduct(r.product || r.reference) || "—")}</span>
+      <span class="trk-d">${what(r)}</span>
+      <button class="xbtn undo" title="Put this back on the list"
+        onclick="event.stopPropagation(); closeTrackingItem('${kind}', ${q(r.ref)}, true)">Reopen</button>
+      </li>`).join("")}</ul>`;
 
   const owedFull = `
     <div class="print-head">Outstanding payments · ${esc(niceDate(new Date().toISOString().slice(0, 10)))}
@@ -1159,7 +1328,8 @@ function renderTracking() {
     <ol class="trk-cols">${owed.map(owedRow).join("")}</ol>
     ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((a, r) => a + r.overpaid, 0))}.</p>` : ""}
     ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
-    ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} with no product breakdown, so it can never match.</p>` : ""}`;
+    ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} with no product breakdown, so it can never match.</p>` : ""}
+    ${closedList(p.closed || [], "owed", r => "R " + fmt(r.owed))}`;
 
   const owedBlock = owed.length
     ? block("owed", "Outstanding", owed.length,
@@ -1171,16 +1341,19 @@ function renderTracking() {
 
   // --- slow stock ----------------------------------------------------------
   const slowRow = r => `<li>
-      <span class="wsig ${r.tier === "dead" ? "severe" : "watch"}">${fmtInt(r.days_on_floor)}d</span>
+      <span class="wsig t-${esc(r.tier)}" title="${esc(TIER_WORD[r.tier] || r.tier)}">${fmtInt(r.days_on_floor)}d</span>
       <span class="trk-p" title="${esc(r.product)}">${esc(shortProduct(r.product))}</span>
-      <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span></li>`;
+      <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
+      <button class="xbtn" title="Close this one off"
+        onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></li>`;
 
   const slowBlock = slowItems.length
     ? block("slow", "Taking too long to sell", slowItems.length,
         `${fmtInt(slow.flagged)} line${slow.flagged === 1 ? "" : "s"} · flagged past ${fmtInt(slow.bands.watch)} days`,
         `<ul class="trk-list trk-sig">${slowItems.slice(0, 5).map(slowRow).join("")}</ul>`,
         `<ul class="trk-list trk-sig trk-cols-2">${slowItems.map(slowRow).join("")}</ul>
-         <p class="trk-note">Watch ${fmtInt(slow.bands.watch)}d · Slow ${fmtInt(slow.bands.slow)}d · Dead ${fmtInt(slow.bands.dead)}d, read from ${esc(slow.bands.from || "")}.</p>`)
+         <p class="trk-note">Watch ${fmtInt(slow.bands.watch)}d · Slow ${fmtInt(slow.bands.slow)}d · Dead ${fmtInt(slow.bands.dead)}d, read from ${esc(slow.bands.from || "")}.</p>
+         ${closedList(slow.closed || [], "slow", r => fmtInt(r.cartons_left) + " of " + fmtInt(r.cartons_sent))}`)
     : emptyBlock("Taking too long to sell", "nothing sitting", "Nothing is sitting longer than usual.");
 
   // --- sales per day -------------------------------------------------------
@@ -1213,7 +1386,8 @@ function renderTracking() {
         }).join("")}</tbody>
       </table>
     </div>`;
-  const dayTable = `<div class="sday-list">${days.map(dayBlock).join("")}</div>`;
+  const dayTable = `${dayChart(days, T.chart)}
+      <div class="sday-list">${days.map(dayBlock).join("")}</div>`;
 
   const pickers = `
     <label class="ctl inline"><span>From</span><input type="date" value="${esc(T.from)}" ${bounds}
@@ -1384,6 +1558,9 @@ function renderBusy() {
 // Drop a Payment Details report; it is matched against the accumulated Daily
 // Sales history (by Supplier Ref + Product across its date range) to reveal the
 // Nett and what is still outstanding. See /api/reconcile.
+
+/** What each ageing band means, for the badge tooltip. */
+const TIER_WORD = { watch: "Past the Watch line", slow: "Past Slow", dead: "Past Dead" };
 
 const RECON_STATUS = {
   matched:     { label: "Matched",      cls: "ok"  },

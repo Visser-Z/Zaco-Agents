@@ -36,6 +36,13 @@ def item_ref(row: dict) -> str:
     return f"{row.get('dn')}:{reconcile.normalise_product(row.get('product'))}"
 
 
+# A closed item is named by its kind AND its ref, exactly as the dismissals
+# table keys it. The same consignment can appear on both lists, so without the
+# kind, closing the slow line would close the outstanding one with it.
+def closed_key(kind: str, ref: str) -> str:
+    return f"{kind}:{ref}"
+
+
 def payment_status(sales: list[dict], payments: list[dict],
                    closed: set[str] | frozenset[str] = frozenset(),
                    lo: str | None = None, hi: str | None = None) -> dict:
@@ -96,7 +103,7 @@ def payment_status(sales: list[dict], payments: list[dict],
                 row = {**r, "owed": round(owed, 2), "ref": item_ref(r)}
                 # A closed line stays visible on its own list with its value,
                 # so closing can never quietly shrink the exposure.
-                if row["ref"] in closed:
+                if closed_key("owed", row["ref"]) in closed:
                     closed_rows.append(row)
                 else:
                     outstanding += 1
@@ -323,8 +330,8 @@ def slow_stock(sales: list[dict], today: date | None = None,
     if lo or hi:
         out = [r for r in out
                if not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)]
-    shut = [r for r in out if r["ref"] in closed]
-    out = [r for r in out if r["ref"] not in closed]
+    shut = [r for r in out if closed_key("slow", r["ref"]) in closed]
+    out = [r for r in out if closed_key("slow", r["ref"]) not in closed]
     counts = {t: sum(1 for r in out if r["tier"] == t) for t in ("watch", "slow", "dead")}
     return {"bands": bands, "counts": counts, "items": out[:50], "flagged": len(out),
             "closed": shut, "closed_count": len(shut)}

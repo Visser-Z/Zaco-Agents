@@ -264,3 +264,36 @@ def test_closing_an_owed_line_never_hides_the_money():
     assert shut["still_to_come"] == 0.0
     assert shut["closed_value"] == 1000.0
     assert [r["ref"] for r in shut["closed"]] == [ref]
+
+
+# --- scoping the tab to a period ------------------------------------------
+
+def test_a_period_scopes_the_lists_by_the_day_it_sold():
+    sales = [dict(_sale("GRAPES", 10, 100.0, "2026-07-01"), last_sale="2026-07-01"),
+             dict(_sale("PLUMS", 10, 100.0, "2026-07-01"), last_sale="2026-08-04")]
+    aug = tracking.compute(sales, [], month="2026-08")
+    assert [d["date"] for d in aug["sales_by_day"]["days"]] == ["2026-08-04"]
+    assert aug["periods"]["months"] == ["2026-07", "2026-08"]
+
+
+def test_paid_is_the_money_that_landed_in_the_period():
+    """Read off the payments, not off the match: scoping the match would make
+    an August sale settled in September look unpaid."""
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-01", dn=14584)]
+    pays = [dict(_payment(14584, "GRAPES", 1000.0, 850.0), date="2026-09-03")]
+    assert tracking.compute(sales, pays)["payments"]["total_paid"] == 850.0
+    aug = tracking.compute(sales, pays, month="2026-08")["payments"]
+    assert aug["total_paid"] == 0.0 and aug["payments_in_window"] == 0
+    sep = tracking.compute(sales, pays, month="2026-09")["payments"]
+    assert sep["total_paid"] == 850.0
+
+
+def test_a_scoped_view_still_reports_the_whole_exposure():
+    """Owed is a running position, so the periods do not add up to the whole."""
+    sales = [dict(_sale("GRAPES", 10, 100.0, "2026-07-01"), last_sale="2026-07-01"),
+             dict(_sale("PLUMS", 10, 100.0, "2026-08-01"), last_sale="2026-08-01")]
+    aug = tracking.compute(sales, [], month="2026-08")["payments"]
+    assert aug["still_to_come"] == 1000.0
+    assert aug["still_to_come_all_time"] == 2000.0
+    # unscoped, there is no second figure to confuse it with
+    assert "still_to_come_all_time" not in tracking.compute(sales, [])["payments"]

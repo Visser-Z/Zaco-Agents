@@ -240,6 +240,7 @@
   .toast.bad { background: var(--crit); color: #fff; }
   /* -------- insights ------------------------------------------------- */
   .ins-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .head-sub { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-soft); }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); flex: none; }
   .seg button { border: none; background: none; padding: 8px 14px; font-family: var(--sans); font-size: 12.5px; font-weight: 600; color: var(--ink-soft); cursor: pointer; transition: background .15s, color .15s; }
   .seg button + button { border-left: 1px solid var(--line); }
@@ -671,7 +672,7 @@ const S = {
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
   tracking: { data: null, loading: false, error: null, day: null, from: "", to: "",
-              open: null, chart: "value" },
+              open: null, chart: "value", month: null, week: null },
   recon: { data: null, loading: false, error: null, applied: false },
 };
 
@@ -1055,6 +1056,8 @@ async function loadTracking() {
     const qs = new URLSearchParams();
     if (T.from) qs.set("from", T.from);
     if (T.to) qs.set("to", T.to);
+    if (T.month) qs.set("month", T.month);
+    if (T.week) qs.set("week", T.week);
     const q = qs.toString();
     T.data = S.live ? await (await api(`/api/tracking${q ? "?" + q : ""}`)).json() : null;
     if (!S.live) T.error = "This reads your saved history, so it needs the live app.";
@@ -1090,6 +1093,22 @@ async function closeTrackingItem(kind, ref, reopen) {
     T.error = e.message || String(e);
     render();
   }
+}
+
+/** Scope the whole tab to a month or a week. Week is the finer scope; changing
+ *  the month drops the week with it, because weeks are listed per month. */
+function setTrackingMonth(m) {
+  const T = S.tracking;
+  T.month = m || null;
+  T.week = null;
+  T.from = ""; T.to = "";       // the day pickers are the finer control; reset
+  loadTracking();
+}
+
+function setTrackingWeek(w) {
+  S.tracking.week = w || null;
+  S.tracking.from = ""; S.tracking.to = "";
+  loadTracking();
 }
 
 function setTrackingChart(metric) {
@@ -1253,9 +1272,24 @@ function renderTracking() {
   const T = S.tracking;
   if (T.data === null && !T.loading && T.error === null) loadTracking();
 
+  // Scope the tab to a month or a week. Owed money is scoped by when it was
+  // sold, slow stock by when it arrived, so "August" means the same thing in
+  // both: what August put on the floor and what August is still owed for.
+  const per = (T.data && T.data.periods) || { months: [], weeks: [], weeks_by_month: {} };
+  const monthOpts = `<option value="">All time</option>` + (per.months || [])
+    .map(m => `<option value="${m}"${T.month === m ? " selected" : ""}>${esc(monthLabel(m))}</option>`).join("");
+  const weekList = T.month ? ((per.weeks_by_month || {})[T.month] || []) : (per.weeks || []);
+  const weekOpts = `<option value="">${T.month ? "Whole month" : "All weeks"}</option>` + weekList
+    .map(w => `<option value="${w}"${T.week === w ? " selected" : ""}>${esc(weekLabel(w))}</option>`).join("");
+
   const head = `<div class="head ins-head">
-      <div><h1>Tracking</h1></div>
+      <div><h1>Tracking</h1>${T.month || T.week
+        ? `<p class="head-sub">${esc(T.week ? weekLabel(T.week) : monthLabel(T.month))}</p>` : ""}</div>
       <div class="ins-actions">
+        <label class="ctl"><span>Month</span>
+          <select onchange="setTrackingMonth(this.value)">${monthOpts}</select></label>
+        <label class="ctl"><span>Week</span>
+          <select onchange="setTrackingWeek(this.value)">${weekOpts}</select></label>
         <button class="btn ghost sm refresh" onclick="loadTracking()">↻ Refresh</button>
       </div>
     </div>`;
@@ -1414,7 +1448,9 @@ function renderTracking() {
           `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`)}
         ${kpiCard("Still to come", "R " + fmt(p.still_to_come),
           `${fmtInt(p.batches_outstanding)} outstanding`
-          + (p.oldest_outstanding ? ` · oldest ${ageInDays(p.oldest_outstanding)} days` : ""))}
+          + (p.oldest_outstanding ? ` · oldest ${ageInDays(p.oldest_outstanding)} days` : "")
+          + (p.still_to_come_all_time !== undefined
+             ? ` · R ${fmt(p.still_to_come_all_time)} all time` : ""))}
       </div>
       <div class="trk-grid${open ? " has-open" : ""}">
         ${owedBlock}${slowBlock}${salesBlock}

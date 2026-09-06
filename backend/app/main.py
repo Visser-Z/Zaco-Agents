@@ -915,6 +915,8 @@ async def reopen_tracking_item(
 async def get_tracking(
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
+    month: str | None = Query(None),
+    week: str | None = Query(None),
     user: User | None = Depends(require_user),
 ) -> dict:
     """The Tracking tab: paid vs outstanding, sales per day, slow stock.
@@ -931,7 +933,7 @@ async def get_tracking(
     payments = await _saved_payments(user)
     closed = await _closed_refs(user)
     return tracking.compute(sales, payments, start=date_from, end=date_to,
-                            closed=closed)
+                            closed=closed, month=month, week=week)
 
 
 @app.get("/api/analytics")

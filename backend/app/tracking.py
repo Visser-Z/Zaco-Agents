@@ -37,7 +37,8 @@ def item_ref(row: dict) -> str:
 
 
 def payment_status(sales: list[dict], payments: list[dict],
-                   closed: set[str] | frozenset[str] = frozenset()) -> dict:
+                   closed: set[str] | frozenset[str] = frozenset(),
+                   lo: str | None = None, hi: str | None = None) -> dict:
     """What has been paid, and what is still owed.
 
     Reconciliation is the same match the payment panel does -- on the account
@@ -70,7 +71,18 @@ def payment_status(sales: list[dict], payments: list[dict],
     #   outstanding  the agent paid for MORE than sold -- nothing owed, and worth
     #                a glance (a prepayment, or a sale not captured).
     #   no_sales     paid, with nothing sold to match -- an exception to chase.
-    paid = still_to_come = 0.0
+    # What the agent actually paid in this window, read straight off the
+    # payments rather than off the match: scoping the match to a period would
+    # make an August sale settled in September look unpaid, which is the
+    # opposite of true. Unscoped, this is every payment on record.
+    in_window = [
+        p for p in payments
+        if not ((lo and str(p.get("date") or "")[:10] < lo)
+                or (hi and str(p.get("date") or "")[:10] > hi))
+    ] if (lo or hi) else payments
+    paid_in_window = round(sum(float(p.get("nett") or 0) for p in in_window), 2)
+
+    still_to_come = 0.0
     matched = outstanding = 0
     outstanding_rows: list[dict] = []
     overpaid_rows: list[dict] = []
@@ -78,8 +90,6 @@ def payment_status(sales: list[dict], payments: list[dict],
     for r in rows:
         sold, gross, nett, status = (
             r["daily_total"], r["payment_gross"], r["payment_nett"], r["status"])
-        if status != "unpaid":          # any payment that landed is money received
-            paid += nett
         if status in ("unpaid", "over"):
             owed = sold if status == "unpaid" else round(sold - gross, 2)
             if owed > 0:
@@ -118,7 +128,8 @@ def payment_status(sales: list[dict], payments: list[dict],
     oldest = min(dates).isoformat() if dates else None
 
     return {
-        "total_paid": round(paid, 2),
+        "total_paid": paid_in_window,
+        "payments_in_window": len(in_window),
         "still_to_come": round(still_to_come, 2),
         "batches_paid": matched,
         "batches_outstanding": outstanding,
@@ -264,7 +275,8 @@ def slow_bands(sales: list[dict], today: date | None = None) -> dict:
 
 
 def slow_stock(sales: list[dict], today: date | None = None,
-               closed: set[str] | frozenset[str] = frozenset()) -> dict:
+               closed: set[str] | frozenset[str] = frozenset(),
+               lo: str | None = None, hi: str | None = None) -> dict:
     """Consignments still on the floor, and how long they have been there.
 
     Aging is measured from the delivery date to today, over the cartons that
@@ -305,6 +317,12 @@ def slow_stock(sales: list[dict], today: date | None = None,
         })
     order = {"dead": 0, "slow": 1, "watch": 2}
     out.sort(key=lambda r: (order[r["tier"]], -r["days_on_floor"], -r["cartons_left"]))
+    # Scoped by when the stock arrived, which is what "August's slow stock"
+    # means. The bands themselves still come from the whole history: a
+    # threshold read off one month would move every time the month changed.
+    if lo or hi:
+        out = [r for r in out
+               if not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)]
     shut = [r for r in out if r["ref"] in closed]
     out = [r for r in out if r["ref"] not in closed]
     counts = {t: sum(1 for r in out if r["tier"] == t) for t in ("watch", "slow", "dead")}
@@ -320,9 +338,50 @@ def date_span(sales: list[dict]) -> dict:
     return {"first": days[0] if days else None, "last": days[-1] if days else None}
 
 
+def available_periods(sales: list[dict]) -> dict:
+    """The months and weeks that actually have sales, for the period picker.
+
+    Built from the selling day, not from ``analytics.row_date``: that one reads
+    the consignment's send date first, so the picker would offer months the
+    trading never happened in and miss the ones it did.
+    """
+    months: set[str] = set()
+    weeks: set[str] = set()
+    by_month: dict[str, set[str]] = defaultdict(set)
+    for row in sales:
+        day = selling_day(row)
+        if not day:
+            continue
+        d = analytics._parse_date(day)
+        if d is None:
+            continue
+        iso = d.isocalendar()
+        m, w = d.strftime("%Y-%m"), f"{iso[0]}-W{iso[1]:02d}"
+        months.add(m)
+        weeks.add(w)
+        by_month[m].add(w)
+    return {"months": sorted(months), "weeks": sorted(weeks),
+            "weeks_by_month": {m: sorted(ws) for m, ws in by_month.items()}}
+
+
+def in_period(sales: list[dict], lo: str | None, hi: str | None) -> list[dict]:
+    """Rows that sold inside the window. Undated rows cannot be placed, so they
+    drop out of a scoped view and stay in the all-time one."""
+    if not lo and not hi:
+        return list(sales)
+    out = []
+    for r in sales:
+        day = selling_day(r)
+        if day is None or (lo and day < lo) or (hi and day > hi):
+            continue
+        out.append(r)
+    return out
+
+
 def compute(sales: list[dict], payments: list[dict], today: date | None = None,
             start: str | None = None, end: str | None = None,
-            closed: set[str] | frozenset[str] = frozenset()) -> dict:
+            closed: set[str] | frozenset[str] = frozenset(),
+            month: str | None = None, week: str | None = None) -> dict:
     """Everything the Tracking tab renders.
 
     ``start`` and ``end`` narrow the per-day sales list only. What is owed is a
@@ -331,10 +390,26 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
     understate the exposure. Slow stock is likewise about what is sitting on the
     floor right now.
     """
+    lo, hi = analytics.period_bounds(month, week)
+    # The explicit day pickers are finer than a period, so they win where both
+    # are set; the period fills them in otherwise.
+    d_start, d_end = (start or lo), (end or hi)
+    # Owed money is scoped by when it was SOLD, against every payment ever
+    # recorded -- an August sale settled in September is paid, not outstanding.
+    scoped = in_period(sales, lo, hi)
+    status = payment_status(scoped, payments, closed, lo, hi)
+    # Owed is a running position, not a period figure: narrowing the sales
+    # changes what each group is matched against, so the periods do not add up
+    # to the whole. Carry the all-time figure alongside rather than let a
+    # scoped view quietly read as the total exposure.
+    if lo or hi:
+        status["still_to_come_all_time"] = payment_status(
+            sales, payments, closed)["still_to_come"]
     return {
-        "payments": payment_status(sales, payments, closed),
-        "sales_by_day": sales_by_day(sales, start, end),
-        "slow_stock": slow_stock(sales, today, closed),
+        "payments": status,
+        "sales_by_day": sales_by_day(sales, d_start, d_end),
+        "slow_stock": slow_stock(sales, today, closed, lo, hi),
         "span": date_span(sales),
-        "filter": {"from": start, "to": end},
+        "periods": available_periods(sales),
+        "filter": {"from": d_start, "to": d_end, "month": month, "week": week},
     }

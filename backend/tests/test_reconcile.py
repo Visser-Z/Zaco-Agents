@@ -235,3 +235,33 @@ def test_the_mixed_matcher_survives_it_too():
     ]
     out = reconcile.reconcile_any(rows, [])
     assert sum(r["daily_total"] for r in out) == 150.0
+
+
+def test_a_ref_matches_whichever_type_it_arrives_as():
+    """One export can give 14588 and the other "14588" for the same delivery.
+    Keyed as they came, they were two groups that could never reconcile."""
+    rows = [{"dn": 14588, "product": "GRAPES", "sales_total": 100.0}]
+    pays = [{"accsale": "A", "dn": "14588", "gross": 100.0, "nett": 90.0, "stm_no": 1,
+             "date": "2026-08-05", "lines": [{"product": "GRAPES", "sales_total": 100.0}]}]
+    out = reconcile.reconcile(rows, pays)
+    assert [(r["status"], r["daily_total"], r["payment_gross"]) for r in out] == \
+           [("matched", 100.0, 100.0)]
+
+
+def test_money_that_arrives_as_a_string_still_reconciles():
+    rows = [{"dn": 14588, "product": "GRAPES", "sales_total": "100.00"}]
+    pays = [{"accsale": "A", "dn": 14588, "gross": "100.00", "nett": "90.00", "stm_no": 1,
+             "date": "2026-08-05", "lines": [{"product": "GRAPES", "sales_total": "100.00"}]}]
+    out = reconcile.reconcile(rows, pays)
+    assert out[0]["status"] == "matched"
+    assert reconcile.unattributed(pays)["gross"] == 0.0        # used to raise on the sum
+
+
+def test_refs_of_mixed_types_sort_without_raising():
+    rows = [{"dn": "ABC", "product": "A", "sales_total": 1.0},
+            {"dn": 14588, "product": "B", "sales_total": 2.0},
+            {"dn": None, "product": "C", "sales_total": 3.0},
+            {"dn": "3", "product": "D", "sales_total": 4.0}]
+    out = reconcile.reconcile(rows, [])
+    assert [r["dn"] for r in out] == [3, 14588, "ABC", None]
+    assert sum(r["daily_total"] for r in out) == 10.0

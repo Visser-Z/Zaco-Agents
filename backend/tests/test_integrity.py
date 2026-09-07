@@ -242,3 +242,34 @@ def test_a_period_with_no_market_average_says_so_rather_than_reporting_clean():
 
 def test_the_caveat_is_dropped_once_the_price_can_be_checked():
     assert integrity.summary([_priced(100.0, 100.0)])["price_unverifiable"] is None
+
+
+# --- figures that arrive as strings ---------------------------------------
+
+def test_the_watch_survives_numeric_columns_arriving_as_strings():
+    """PostgREST does not always hand numeric columns back as JSON numbers.
+
+    price_spread compared the raw price to 0, so a price of "100.00" raised
+    TypeError. integrity.summary is called by /api/analytics and by nothing
+    else, so the crash took Insights down while Tracking, which never touches
+    it, went on working -- the history looked present on one page and missing
+    from the other.
+    """
+    rows = [{"market_agent": "Farmers Trust", "product": "CHY", "cartons_sold": str(20 + i),
+             "price": "100.00", "nett_total": "900.00", "group_date": "2026-08-01",
+             "qty_received": "60", "market_avg": "110.00", "cartons_returned": "0",
+             "returns_total": "0.00", "supplier_ref": 14588, "dn": 14588}
+            for i in range(4)]
+    out = integrity.summary(rows)
+    assert isinstance(out, dict)
+
+
+def test_string_figures_give_the_same_answer_as_numbers():
+    def rows(as_text):
+        n = (lambda v: str(v)) if as_text else (lambda v: v)
+        return [{"market_agent": "A", "product": "CHY", "cartons_sold": n(10),
+                 "price": n(100.0), "nett_total": n(900.0), "group_date": "2026-08-01",
+                 "qty_received": n(60), "market_avg": n(110.0),
+                 "cartons_returned": n(0), "returns_total": n(0.0),
+                 "supplier_ref": 14588, "dn": 14588}]
+    assert integrity.summary(rows(True)) == integrity.summary(rows(False))

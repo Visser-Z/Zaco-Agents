@@ -73,7 +73,7 @@ def deduction_rate(row: dict) -> float | None:
     nett = row.get("nett_total")
     if nett is None or gross <= 0:
         return None
-    return 1.0 - (float(nett) / gross)
+    return 1.0 - (analytics._num(nett) / gross)
 
 
 def going_rate(rows: list[dict]) -> float | None:
@@ -95,7 +95,7 @@ def rate_concerns(rows: list[dict]) -> list[dict]:
         r = deduction_rate(row)
         if r is None:
             continue
-        gross, nett = row_gross(row), float(row["nett_total"])
+        gross, nett = row_gross(row), analytics._num(row["nett_total"])
         if nett <= 0 < gross:
             severity, why = "severe", "Nothing came back at all on this sale."
         elif r >= SEVERE_RATE:
@@ -296,12 +296,12 @@ def price_spread(rows: list[dict]) -> list[dict]:
     """
     groups: dict[str, list[dict]] = {}
     for row in rows:
-        if (row.get("price") or 0) > 0 and analytics.row_cartons(row) >= MIN_CARTONS_FOR_SPREAD:
+        if analytics._num(row.get("price")) > 0 and analytics.row_cartons(row) >= MIN_CARTONS_FOR_SPREAD:
             groups.setdefault(analytics.product_label(row), []).append(row)
 
     out: list[dict] = []
     for label, items in groups.items():
-        prices = sorted(float(r["price"]) for r in items)
+        prices = sorted(analytics._num(r["price"]) for r in items)
         if len(prices) < 3 or prices[0] <= 0:
             continue
         out.append({

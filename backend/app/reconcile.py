@@ -21,6 +21,19 @@ from collections import defaultdict
 MATCH_TOL = 0.01  # Rand; sales value should agree to the cent when reconciled.
 
 
+def _num(value) -> float:
+    """A money or carton figure as a float, whatever shape it arrived in.
+
+    Numeric columns do not always come back from PostgREST as JSON numbers, and
+    a payment whose gross is the string "100.00" used to raise out of a sum or a
+    round and take the page with it rather than reconcile.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def normalise_product(product: str | None) -> str:
     """Collapse the two reports' different spellings of the same commodity to a
     common key: drop parentheses, weight/size tokens ("5kg", "5.00 kg"),
@@ -37,14 +50,43 @@ def normalise_product(product: str | None) -> str:
     return re.sub(r"\s+", " ", p).strip()
 
 
-def _key(dn, product) -> tuple:
-    return (dn, normalise_product(product))
+def _norm_dn(dn):
+    """A supplier ref reduced to one canonical value.
+
+    The two sides of a match do not always agree on type: a ref can arrive as
+    14588 from one export and "14588" from the other, and those are the same
+    delivery. Keyed as they came, they were two different groups that could
+    never reconcile with each other.
+    """
+    if dn is None:
+        return None
+    if isinstance(dn, str):
+        text = dn.strip()
+        if not text:
+            return None
+        try:
+            return int(float(text))
+        except ValueError:
+            return text                      # a ref that is genuinely not a number
+    try:
+        return int(dn)
+    except (TypeError, ValueError):
+        return dn
 
 
 def _sort_key(key: tuple) -> tuple:
-    """Order (dn, product) keys with a missing dn last, never comparing None."""
+    """Order (dn, product) keys without ever comparing unlike types.
+
+    Numeric refs first in numeric order, then any non-numeric ref, then the
+    rows carrying no ref at all.
+    """
     dn, product = key
-    return (dn is None, dn if dn is not None else 0, str(product or ""))
+    return (dn is None, not isinstance(dn, int),
+            dn if isinstance(dn, int) else 0, str(dn), str(product or ""))
+
+
+def _key(dn, product) -> tuple:
+    return (_norm_dn(dn), normalise_product(product))
 
 
 def aggregate_daily(rows: list[dict]) -> dict[tuple, dict]:
@@ -53,7 +95,7 @@ def aggregate_daily(rows: list[dict]) -> dict[tuple, dict]:
     agg: dict[tuple, dict] = defaultdict(lambda: {"sales_total": 0.0, "rows": []})
     for r in rows:
         k = _key(r.get("dn"), r.get("product"))
-        agg[k]["sales_total"] += float(r.get("sales_total") or 0)
+        agg[k]["sales_total"] += _num(r.get("sales_total"))
         agg[k]["rows"].append(r)
     return agg
 
@@ -65,12 +107,12 @@ def aggregate_payment(records: list[dict]) -> dict[tuple, dict]:
     agg: dict[tuple, dict] = defaultdict(lambda: {"gross": 0.0, "nett": 0.0})
     for rec in records:
         lines = rec.get("lines") or []
-        line_total = sum(l["sales_total"] for l in lines)
-        base = line_total or rec.get("gross") or 0
+        line_total = sum(_num(l["sales_total"]) for l in lines)
+        base = line_total or _num(rec.get("gross"))
         for l in lines:
             k = _key(rec.get("dn"), l["product"])
-            agg[k]["gross"] += l["sales_total"]
-            agg[k]["nett"] += (rec.get("nett") or 0) * (l["sales_total"] / base) if base else 0
+            agg[k]["gross"] += _num(l["sales_total"])
+            agg[k]["nett"] += _num(rec.get("nett")) * (_num(l["sales_total"]) / base) if base else 0
     return agg
 
 
@@ -111,8 +153,8 @@ def by_payment_reference(daily_rows: list[dict], payment_records: list[dict]) ->
     for ref in sorted(set(sold) | set(payments)):
         pay = payments.get(ref)
         daily_total = round(sold.get(ref, 0.0), 2)
-        gross = round(pay["gross"], 2) if pay else 0.0
-        nett = round(pay["nett"], 2) if pay else 0.0
+        gross = round(_num(pay["gross"]), 2) if pay else 0.0
+        nett = round(_num(pay["nett"]), 2) if pay else 0.0
         out.append(
             {
                 "reference": ref,
@@ -156,9 +198,9 @@ def fill_netts_by_reference(daily_rows: list[dict], payment_records: list[dict])
     shares: dict[int, float] = defaultdict(float)
     for ref, group in members.items():
         pay = payments.get(ref)
-        if pay is None or not pay.get("gross"):
+        if pay is None or not _num(pay.get("gross")):
             continue
-        nett, gross = pay.get("nett") or 0.0, pay["gross"]
+        nett, gross = _num(pay.get("nett")), _num(pay["gross"])
         cents = [round(nett * (value / gross), 2) for _, value in group]
         claimed = round(nett * (sum(v for _, v in group) / gross), 2)
         if (residual := round(claimed - sum(cents), 2)):
@@ -186,8 +228,8 @@ def unattributed(payment_records: list[dict]) -> dict:
     blank = [r for r in payment_records if not r.get("lines")]
     return {
         "count": len(blank),
-        "gross": round(sum(r.get("gross") or 0 for r in blank), 2),
-        "nett": round(sum(r.get("nett") or 0 for r in blank), 2),
+        "gross": round(sum(_num(r.get("gross")) for r in blank), 2),
+        "nett": round(sum(_num(r.get("nett")) for r in blank), 2),
         "accsales": [r.get("stm_no") for r in blank if r.get("stm_no")],
     }
 
@@ -215,9 +257,9 @@ def reconcile(daily_rows: list[dict], payment_records: list[dict]) -> list[dict]
     # raise straight out of the sort and take the whole page with it.
     for k in sorted(set(dagg) | set(pagg), key=_sort_key):
         dn, product = k
-        daily = round(dagg.get(k, {}).get("sales_total", 0.0), 2)
-        gross = round(pagg.get(k, {}).get("gross", 0.0), 2)
-        nett = round(pagg.get(k, {}).get("nett", 0.0), 2)
+        daily = round(_num(dagg.get(k, {}).get("sales_total", 0.0)), 2)
+        gross = round(_num(pagg.get(k, {}).get("gross", 0.0)), 2)
+        nett = round(_num(pagg.get(k, {}).get("nett", 0.0)), 2)
         out.append(
             {
                 "dn": dn,
@@ -246,10 +288,10 @@ def fill_netts(daily_rows: list[dict], payment_records: list[dict]) -> int:
         if not grp:
             continue
         dtot = grp["sales_total"]
-        if dtot <= 0 or abs(dtot - pay["gross"]) > MATCH_TOL:
+        if dtot <= 0 or abs(dtot - _num(pay["gross"])) > MATCH_TOL:
             continue
         for r in grp["rows"]:
-            r["nett_total"] = round(pay["nett"] * (float(r.get("sales_total") or 0) / dtot), 2)
+            r["nett_total"] = round(_num(pay["nett"]) * (_num(r.get("sales_total")) / dtot), 2)
             filled += 1
     return filled
 

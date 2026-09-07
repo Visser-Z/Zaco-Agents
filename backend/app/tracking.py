@@ -194,6 +194,7 @@ def sales_by_day(sales: list[dict], start: str | None = None,
         d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
                                     "value": 0.0, "sources": defaultdict(
                                         lambda: {"rows": 0, "cartons": 0.0}),
+                                    "dated": defaultdict(int),
                                     "products": defaultdict(
                                         lambda: {"cartons": 0.0, "value": 0.0, "returned": 0.0,
                                                  "agents": set(), "market_avg": [], "weight": 0.0})})
@@ -206,6 +207,8 @@ def sales_by_day(sales: list[dict], start: str | None = None,
         src = d["sources"][report_name(row)]
         src["rows"] += 1
         src["cartons"] += analytics.row_cartons(row)
+        if (basis := dated_by(row)):
+            d["dated"][basis] += 1
         p = d["products"][product]
         cartons = analytics.row_cartons(row)
         p["cartons"] += cartons
@@ -247,6 +250,10 @@ def sales_by_day(sales: list[dict], start: str | None = None,
                  for name, v in d["sources"].items()),
                 key=lambda s: (-s["rows"], s["file"]),
             ),
+            # How many rows here were dated by a real sale date, and how many
+            # only by the day their load was sent.
+            "dated": {"sold": d["dated"].get("sold", 0),
+                      "delivered": d["dated"].get("delivered", 0)},
         })
     return {"days": days}
 
@@ -265,6 +272,22 @@ def selling_day(row: dict) -> str | None:
     """
     day = row.get("last_sale") or row.get("group_date")
     return str(day)[:10] if day else None
+
+
+def dated_by(row: dict) -> str | None:
+    """Which field gave this row its selling day.
+
+    ``last_sale`` is the day the report says it sold. ``group_date`` is the
+    consignment's date -- the day the load was sent -- and standing in for a
+    sale date it is an inference, not a reading. A day built on it can look
+    exactly like a day built on real sale dates, which is how a day with no
+    trading behind it becomes impossible to argue with.
+    """
+    if row.get("last_sale"):
+        return "sold"
+    if row.get("group_date"):
+        return "delivered"
+    return None
 
 
 def _clearance_days(sales: list[dict], today: date) -> list[int]:

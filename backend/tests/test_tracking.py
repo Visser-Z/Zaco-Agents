@@ -332,3 +332,27 @@ def test_a_row_with_no_source_says_so_rather_than_vanishing():
     sales = [_sale("GRAPES", 10, 100.0, "2026-08-04")]
     day = tracking.sales_by_day(sales)["days"][0]
     assert [s["file"] for s in day["sources"]] == ["Not recorded"]
+
+
+def test_a_day_says_how_many_of_its_rows_were_dated_by_delivery():
+    """group_date is the day the load was SENT. Standing in for a sale date it
+    is an inference, and a day built on it looks exactly like one built on real
+    sale dates unless it says so."""
+    sales = [
+        dict(_sale("GRAPES", 10, 100.0, "2026-08-04"), last_sale="2026-08-04"),
+        dict(_sale("PLUMS", 5, 50.0, "2026-08-04"), last_sale=None),   # falls back
+    ]
+    day = tracking.sales_by_day(sales)["days"][0]
+    assert day["dated"] == {"sold": 1, "delivered": 1}
+
+
+def test_a_day_read_entirely_from_sale_dates_flags_nothing():
+    sales = [dict(_sale("GRAPES", 10, 100.0, "2026-08-04"), last_sale="2026-08-04")]
+    day = tracking.sales_by_day(sales)["days"][0]
+    assert day["dated"] == {"sold": 1, "delivered": 0}
+
+
+def test_the_basis_is_named_per_row():
+    assert tracking.dated_by({"last_sale": "2026-08-04", "group_date": "2026-08-01"}) == "sold"
+    assert tracking.dated_by({"group_date": "2026-08-01"}) == "delivered"
+    assert tracking.dated_by({}) is None

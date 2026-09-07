@@ -37,13 +37,17 @@ class _DB:
         return [dict(r) for r in self.rows.get(table, [])]
 
     async def delete(self, user, table, params):
-        column = "group_date" if table == "statements" else "paid_on"
         keep, gone = [], []
+        ids = None
+        if "id" in params:                       # id=in.(1,2,3)
+            ids = {x for x in params["id"].removeprefix("in.(").rstrip(")").split(",") if x}
         for r in self.rows[table]:
-            if table == "dismissals":
+            if ids is not None:
+                hit = str(r.get("id")) in ids
+            elif table == "dismissals":
                 hit = all(str(params.get(k, "")) == f"eq.{r.get(k)}" for k in ("kind", "ref"))
             else:
-                hit = self._between(r.get(column), params, column)
+                hit = self._between(r.get("paid_on"), params, "paid_on")
             (gone if hit else keep).append(r)
         self.rows[table] = keep
         return gone
@@ -54,8 +58,13 @@ def _wire(monkeypatch, db):
     monkeypatch.setattr(main, "db_delete", db.delete)
 
 
+_next_id = [0]
+
+
 def _sale(day):
-    return {"market_agent": "Farmers Trust", "dn": 14588, "supplier_ref": 14588,
+    _next_id[0] += 1
+    return {"id": _next_id[0],
+            "market_agent": "Farmers Trust", "dn": 14588, "supplier_ref": 14588,
             "product": "GRAPES", "description": None, "cartons_sold": 10, "price": 100.0,
             "sales_total": 1000.0, "qty_received": 600, "group_date": day,
             "date_received": day, "last_sale": day, "stm_no": 1, "consignment_id": 1,

@@ -2004,6 +2004,14 @@ async function confirmDeleteHistory() {
       // The request succeeded but row-level security removed nothing -- the
       // rows aren't owned by this account (or the delete policy isn't in place).
       toast("Nothing was deleted — your account doesn’t have permission to remove these rows. See the admin note.", true);
+    } else if (res.remaining) {
+      // Some went, some did not. Saying "deleted" here is how a period could
+      // appear to have gone and still be on Tracking a moment later.
+      toast(`Deleted ${res.deleted}, but ${res.remaining} statement${res.remaining === 1 ? "" : "s"} `
+            + `in ${scopeLabel(I)} could not be removed — they belong to another account.`, true);
+      I.data = null;
+      S.tracking.data = null; S.tracking.error = null;
+      loadInsights();
     } else {
       const also = [];
       if (res.payments_deleted) also.push(`${res.payments_deleted} payment${res.payments_deleted === 1 ? "" : "s"}`);

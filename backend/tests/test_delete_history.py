@@ -47,21 +47,61 @@ def test_delete_requires_a_period(monkeypatch):
     assert not called
 
 
-def test_delete_scopes_to_the_period(monkeypatch):
-    """Both tables are scoped to the same window, each by its own date column."""
+def test_delete_takes_the_rows_the_period_actually_shows(monkeypatch):
+    """Statements go by id, chosen the way the pages date them; payments go by
+    their own date column.
+
+    A row with no group_date is still dated -- the pages fall back to the
+    invoice date -- so filtering the delete on group_date alone left rows that
+    August would show again on the next refresh.
+    """
+    store = [
+        {"id": 1, "group_date": "2026-07-04", "invoice_date": None,
+         "date_received": None, "created_at": None},
+        {"id": 2, "group_date": None, "invoice_date": "2026-07-09",   # July, no group_date
+         "date_received": None, "created_at": None},
+        {"id": 3, "group_date": "2026-08-02", "invoice_date": None,   # a different month
+         "date_received": None, "created_at": None},
+    ]
     calls = []
     async def fake_delete(user, path, params):
         calls.append((path, params))
-        return [{"id": 1}, {"id": 2}]
+        if path != "statements":
+            return [{"accsale": "A"}]
+        ids = {x for x in params["id"].removeprefix("in.(").rstrip(")").split(",") if x}
+        gone = [r for r in store if str(r["id"]) in ids]
+        for r in gone:
+            store.remove(r)
+        return gone
     async def fake_get(user, path, params):
-        return []                      # no dismissals to prune
+        return list(store) if path == "statements" else []
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 
     result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
-    assert result == {"deleted": 2, "payments_deleted": 2, "closed_cleared": 0,
-                      "from": "2026-07-01", "to": "2026-07-31"}
+    assert result["deleted"] == 2            # both July rows, group_date or not
+    assert result["remaining"] == 0
+    assert result["from"] == "2026-07-01" and result["to"] == "2026-07-31"
+    assert [r["id"] for r in store] == [3]   # August untouched
 
-    windows = dict(calls)
-    assert windows["statements"]["and"] ==         "(group_date.gte.2026-07-01,group_date.lte.2026-07-31)"
-    assert windows["payments"]["and"] ==         "(paid_on.gte.2026-07-01,paid_on.lte.2026-07-31)"
+    by_table = dict(calls)
+    assert by_table["statements"]["id"].startswith("in.(")
+    assert by_table["payments"]["and"] ==         "(paid_on.gte.2026-07-01,paid_on.lte.2026-07-31)"
+
+
+def test_rows_it_could_not_remove_are_reported(monkeypatch):
+    """Row-level security answers a refused delete with 200 and an empty list.
+    Reported as a success, that is a period which looks deleted and is still
+    on Tracking a moment later."""
+    store = [{"id": 1, "group_date": "2026-07-04", "invoice_date": None,
+              "date_received": None, "created_at": None}]
+    async def fake_delete(user, path, params):
+        return []                       # RLS removes nothing
+    async def fake_get(user, path, params):
+        return list(store) if path == "statements" else []
+    monkeypatch.setattr(main, "db_delete", fake_delete)
+    monkeypatch.setattr(main, "db_get", fake_get)
+
+    result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
+    assert result["deleted"] == 0
+    assert result["remaining"] == 1

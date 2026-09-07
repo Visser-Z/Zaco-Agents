@@ -1050,8 +1050,18 @@ async def delete_history(
     lo, hi = analytics.period_bounds(month, week)
     if not lo:
         raise HTTPException(400, "Choose a month or week to delete.")
-    window = f"(group_date.gte.{lo},group_date.lte.{hi})"
-    deleted = await db_delete(user, "statements", {"and": window})
+    # Delete exactly what the app calls this period, not what one column says.
+    # A row with no group_date is still dated -- Insights and Tracking fall back
+    # to the invoice date, then the received date, then when it was recorded --
+    # so a statement shown under August but carrying no group_date survived a
+    # filter written against group_date alone, and August came back on the next
+    # refresh. Select the rows the same way the pages do, then delete them by id.
+    dated = await db_get(user, "statements", {
+        "select": "id,group_date,invoice_date,date_received,created_at",
+        "limit": "20000",
+    })
+    targets = [r["id"] for r in analytics.filter_rows(dated, month, week) if r.get("id")]
+    deleted = await _delete_by_id(user, "statements", targets)
 
     # Tracking is not built from the statements alone: what is owed comes from
     # the recorded payments, and the closed lines from the dismissals. Deleting
@@ -1063,13 +1073,40 @@ async def delete_history(
     )
     closed = await _prune_dismissals(user)
 
+    # Say plainly what is still there. A delete that removes nothing because the
+    # rows belong to someone else returns 200 and an empty list, which read as
+    # success while the period stayed on screen.
+    left = await db_get(user, "statements", {
+        "select": "id,group_date,invoice_date,date_received,created_at",
+        "limit": "20000",
+    })
+    remaining = len(analytics.filter_rows(left, month, week))
+
     return {
         "deleted": len(deleted),
         "payments_deleted": len(payments),
         "closed_cleared": closed,
+        "remaining": remaining,
         "from": lo,
         "to": hi,
     }
+
+
+async def _delete_by_id(user: User, table: str, ids: list) -> list[dict]:
+    """Delete rows by primary key, in batches a URL can carry.
+
+    PostgREST takes the filter in the query string, so a few thousand ids in one
+    `in.()` would be refused by the server long before the database saw it.
+    """
+    out: list[dict] = []
+    for i in range(0, len(ids), 200):
+        batch = ids[i : i + 200]
+        if not batch:
+            continue
+        out += await db_delete(
+            user, table, {"id": f"in.({','.join(str(x) for x in batch)})"}
+        )
+    return out
 
 
 async def _prune_dismissals(user: User) -> int:

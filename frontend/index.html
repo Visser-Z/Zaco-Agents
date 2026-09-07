@@ -632,9 +632,33 @@
   }
 
   /* -------- Sales & Payments two-column workspace -------------------- */
-  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 18px; align-items: start; }
-  .ws-main { min-width: 0; }               /* let the table scroll instead of stretching the grid */
-  .pm-card { position: sticky; top: 8px; padding: 17px 17px 15px; }
+  /* Two equal halves: what sold on the left, what was paid on the right. They
+     used to be a wide table and a narrow sidebar, which read as one real thing
+     and one afterthought -- and the detail in that table is recorded and
+     available under Reports, so the page does not have to carry it. */
+  .workspace { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: stretch; }
+  .ws-main { min-width: 0; }
+  .ws-col { min-width: 0; display: flex; flex-direction: column; }
+  .ws-col > .card { flex: 1; display: flex; flex-direction: column; transition: box-shadow .12s; }
+  .ws-col.aiming > .card { box-shadow: 0 0 0 2px var(--accent); }
+  .ws-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .ws-head h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+  .ws-head .ws-sub { font-size: 12px; color: var(--ink-faint); }
+  .ws-head .spacer { flex: 1; }
+  /* The dropzone is the point of each half, so it takes the room. */
+  .ws-col .drop { padding: 46px 24px; }
+  .ws-figs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+  .ws-fig { background: var(--surface-2); border-radius: 10px; padding: 11px 13px; }
+  .ws-fig b { display: block; font-size: 19px; font-weight: 700; letter-spacing: -.01em;
+              font-variant-numeric: tabular-nums; }
+  .ws-fig span { font-size: 11.5px; color: var(--ink-faint); }
+  .ws-foot { margin-top: auto; padding-top: 14px; display: flex; align-items: center; gap: 10px; }
+  .ws-foot .spacer { flex: 1; }
+  .ws-rows { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .ws-rows summary { cursor: pointer; font-size: 12.5px; color: var(--ink-soft); }
+  .ws-rows summary:hover { color: var(--ink); }
+  .ws-rows .table-wrap { margin-top: 10px; }
+  .pm-card { padding: 17px 17px 15px; }
   .pm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .pm-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
   .pm-sub { margin: 3px 0 0; font-size: 12px; color: var(--ink-faint); }
@@ -652,7 +676,7 @@
   .pm-row:hover { background: var(--surface-2); }
   .pm-p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 12.5px; }
   .pm-n { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
-  @media (max-width: 1080px) { .workspace { grid-template-columns: 1fr; } .pm-card { position: static; } }
+  @media (max-width: 1080px) { .workspace { grid-template-columns: 1fr; } }
 
   @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(3, 1fr); } .ins-grid { grid-template-columns: 1fr; } }
   @media (max-width: 820px) {
@@ -1951,13 +1975,17 @@ async function onPaymentFiles(files) {
 /** The Payment matching panel. */
 function reconcilePanel() {
   const R = S.recon;
-  return `<aside class="card pm-card">
-    <div class="pm-head">
-      <div><h2>Payment matching</h2></div>
-      ${R.data ? `<button class="btn ghost sm" onclick="browsePayments()">Load another</button>` : ""}
+  return `<div class="ws-col" data-drop="payments">
+    <div class="card pm-card">
+      <div class="ws-head">
+        <h2>Payments</h2>
+        <span class="ws-sub">Payment Details</span>
+        <span class="spacer"></span>
+        ${R.data ? `<button class="btn ghost sm" onclick="browsePayments()">Load another</button>` : ""}
+      </div>
+      ${reconcileBody(R)}
     </div>
-    ${reconcileBody(R)}
-  </aside>`;
+  </div>`;
 }
 
 function reconcileBody(R) {
@@ -1965,9 +1993,10 @@ function reconcileBody(R) {
   if (R.error) return `<div class="banner bad"><span class="bi">!</span><span>${esc(R.error)}</span></div>
     <button class="btn ghost sm" onclick="browsePayments()">Choose a PDF</button>`;
   if (!R.data) return `<div class="drop pm-drop" tabindex="0" role="button" onclick="browsePayments()">
-      <div class="big">⇄</div><div class="t">Drop a Payment Details report</div>
-      <div class="s">PDF or CSV</div></div>
-    <p class="pm-note">Daily sales must be saved first — they accumulate in the history. Then each Supplier Ref + Product is matched by summing daily Sales Totals against the payment’s Gross.</p>`;
+      <div class="big">⇄</div><div class="t">Drop the Payment Details here</div>
+      <div class="s">PDF or CSV · matched against the saved sales</div></div>
+    <p class="pm-note">Save the sales first. Each payment is then matched to the sales it settles,
+      on the account sale where the report names one and on supplier ref plus product otherwise.</p>`;
 
   const d = R.data;
   const rows = [...(d.reconciliation || [])].sort(
@@ -2506,31 +2535,59 @@ function agentVal() { return S.agent; }
 
 // ---------------------------------------------------------------- hub
 function renderHub() {
-    const rows = S.committed;
+  const rows = S.committed;
   const hasRows = rows.length > 0;
   const dnCount = new Set(rows.map(r => r.dn)).size;
+  const cartons = rows.reduce((t, r) => t + (Number(r.cartons_sold) || 0), 0);
+  const value = rows.reduce((t, r) => t + (Number(r.cartons_sold) || 0) * (Number(r.price) || 0), 0);
+  const days = new Set(rows.map(r => r.date).filter(Boolean));
+
   main.innerHTML = `
     <section class="screen">
+      <div class="head"><div>
+        <h1>Sales &amp; Payments</h1>
+        <p class="head-sub">Drop the day's sales on the left and the payment report on the right.
+          Every figure is recorded as it goes in; the detail is on
+          <a href="#" onclick="event.preventDefault(); setModule('reports')">Reports</a>.</p>
+      </div></div>
+
       <div class="workspace">
-        <div class="ws-main">
-          <div class="card wb-bar">
-            <div><div class="fn">Sales</div>
-              <div class="fm num">${rows.length} rows · ${dnCount} DN group${dnCount === 1 ? "" : "s"} · ${esc(S.agent)}${S.saved ? "" : " · <span style='color:var(--warn)'>unsaved</span>"}</div></div>
-            <span class="spacer"></span>
-            <button class="btn primary sm" onclick="startAdd()">＋ Add reports</button>
-          </div>
+        <div class="ws-col" data-drop="sales">
+          <div class="card">
+            <div class="ws-head">
+              <h2>Sales</h2>
+              <span class="ws-sub">Daily Sales Detail</span>
+              <span class="spacer"></span>
+              ${hasRows ? `<button class="btn ghost sm" onclick="startAdd()">Add more</button>` : ""}
+            </div>
 
-          ${hasRows ? tableBlock(rows, { editable: false }) : `
-            <div class="card empty">
-              <div class="big">↑</div>
-              <div style="font-weight:600;color:var(--ink)">No sales recorded yet</div>
-              <div style="font-size:13px;margin-top:3px">Load a daily sales report to get started.</div>
-              <div style="margin-top:18px"><button class="btn primary" onclick="startAdd()">＋ Add reports</button></div>
-            </div>`}
-
-          <div class="actions">
-            <span class="spacer"></span>
-            <button class="btn primary" onclick="saveRows()" ${hasRows && !S.saved ? "" : "disabled"}>Save</button>
+            ${hasRows ? `
+              <div class="ws-figs">
+                <div class="ws-fig"><b>${fmtInt(rows.length)}</b><span>rows read</span></div>
+                <div class="ws-fig"><b>${fmtInt(dnCount)}</b><span>DN group${dnCount === 1 ? "" : "s"}</span></div>
+                <div class="ws-fig"><b>${fmtInt(cartons)}</b><span>cartons</span></div>
+                <div class="ws-fig"><b>R ${fmt(value)}</b><span>sales value</span></div>
+              </div>
+              <div class="drop" tabindex="0" role="button" onclick="startAdd()">
+                <div class="big">＋</div><div class="t">Drop more sales reports</div>
+                <div class="s">${esc(S.agent)}${days.size ? ` · ${fmtInt(days.size)} day${days.size === 1 ? "" : "s"}` : ""}</div>
+              </div>
+              <details class="ws-rows">
+                <summary>Show the ${fmtInt(rows.length)} rows before saving</summary>
+                ${tableBlock(rows, { editable: false })}
+              </details>
+              <div class="ws-foot">
+                <span class="ws-sub">${S.saved ? "Saved to the book"
+                  : `<span style="color:var(--warn);font-weight:600">Not saved yet</span>`}</span>
+                <span class="spacer"></span>
+                <button class="btn primary" onclick="saveRows()" ${S.saved ? "disabled" : ""}>Save to the book</button>
+              </div>`
+            : `<div class="drop" tabindex="0" role="button" onclick="startAdd()">
+                 <div class="big">↑</div><div class="t">Drop the Daily Sales Detail here</div>
+                 <div class="s">PDF or CSV · several at once is fine</div>
+               </div>
+               <p class="pm-note">Each report is checked before anything is recorded, so a bad
+                 read never reaches the book.</p>`}
           </div>
         </div>
 
@@ -3044,8 +3101,16 @@ const isPdf = f => /\.(pdf|csv)$/i.test(f.name) || f.type === "application/pdf" 
 let dragDepth = 0;
 function dropHighlight(on) {
   document.querySelectorAll(".drop").forEach(el => el.classList.toggle("over", on));
+  if (!on) document.querySelectorAll("[data-drop]").forEach(el => el.classList.remove("aiming"));
 }
-document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("dragover", e => {
+  e.preventDefault();
+  // Light up the half under the cursor, so it is obvious which one will take
+  // the file before letting go of it.
+  const half = e.target instanceof Element ? e.target.closest("[data-drop]") : null;
+  document.querySelectorAll("[data-drop]").forEach(el =>
+    el.classList.toggle("aiming", el === half));
+});
 document.addEventListener("dragenter", e => {
   if ([...(e.dataTransfer?.types || [])].includes("Files")) {
     dragDepth++;
@@ -3079,7 +3144,14 @@ document.addEventListener("drop", async e => {
 
   if (pdfs.length) {
     if (S.module !== "sales") { toast("Open Sales & Payments, then drop the reports in"); return; }
-    onPdfFiles(pdfs);
+    // Which half it landed on decides what it is. Everything used to be read as
+    // a sales report wherever it was dropped, so the payment side could only be
+    // reached through its file dialog -- and a payment report dropped on the
+    // page was read as sales and rejected.
+    const half = e.target instanceof Element
+      ? e.target.closest("[data-drop]")?.dataset.drop : null;
+    if (half === "payments") onPaymentFiles(pdfs);
+    else onPdfFiles(pdfs);
     return;
   }
 

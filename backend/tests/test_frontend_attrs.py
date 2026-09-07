@@ -83,3 +83,22 @@ def test_tracking_delete_is_scoped_and_disarms_on_a_period_change(source: str) -
         assert "confirmDelete = false" in fn.group(1), (
             f"{setter} must close an open confirmation, or it stays armed "
             f"against the period the operator just switched away from")
+
+
+def test_a_dropped_report_is_read_as_whatever_half_it_landed_on(source: str) -> None:
+    """Sales and Payments are two halves you drop files into.
+
+    Every PDF used to be read as a sales report wherever it was dropped, so the
+    payment side was reachable only through its file dialog and a payment
+    report dropped on the page was parsed as sales and rejected. The drop
+    handler has to look at which half took it.
+    """
+    assert 'data-drop="sales"' in source and 'data-drop="payments"' in source, (
+        "both halves must declare themselves as drop targets")
+    handler = re.search(r'addEventListener\("drop".*?\n\}\);', source, re.S)
+    assert handler, "the drop handler is gone or was reshaped"
+    body = handler.group(0)
+    assert 'closest("[data-drop]")' in body, (
+        "the drop handler must ask which half the file landed on")
+    assert "onPaymentFiles" in body and "onPdfFiles" in body, (
+        "it must be able to route to either side")

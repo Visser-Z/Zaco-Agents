@@ -1771,8 +1771,16 @@ async function confirmDeleteHistory() {
       // rows aren't owned by this account (or the delete policy isn't in place).
       toast("Nothing was deleted — your account doesn’t have permission to remove these rows. See the admin note.", true);
     } else {
-      toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"} for ${scopeLabel(I)}`);
+      const also = [];
+      if (res.payments_deleted) also.push(`${res.payments_deleted} payment${res.payments_deleted === 1 ? "" : "s"}`);
+      if (res.closed_cleared) also.push(`${res.closed_cleared} closed line${res.closed_cleared === 1 ? "" : "s"}`);
+      toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"} for ${scopeLabel(I)}`
+            + (also.length ? `, and ${also.join(" and ")}` : ""));
       I.data = null;      // period is now empty; refetch
+      // Tracking is computed from the same history and is now stale. Drop it so
+      // reopening the page rebuilds it, rather than showing money owed against
+      // sales that have just been removed.
+      S.tracking.data = null; S.tracking.error = null;
       loadInsights();
     }
   } catch (e) {
@@ -1907,7 +1915,7 @@ function renderInsights() {
 
       ${(I.month || I.week) && !scopedEmpty ? `<div class="ins-danger">
         ${I.confirmDelete ? `
-          <span class="dwarn"><b>Delete all ${fmtInt(k.statement_count)} statement${k.statement_count === 1 ? "" : "s"} for ${esc(scopeLabel(I))}?</b> This can’t be undone, and reconciliation for this period will no longer be possible.</span>
+          <span class="dwarn"><b>Delete all ${fmtInt(k.statement_count)} statement${k.statement_count === 1 ? "" : "s"} for ${esc(scopeLabel(I))}?</b> The payments recorded for this period and any lines closed on Tracking go with them, so the period disappears from Tracking as well as from here. This can’t be undone, and reconciliation for this period will no longer be possible.</span>
           <span class="dact">
             <button class="btn ghost sm" onclick="cancelDeleteHistory()">Cancel</button>
             <button class="btn danger sm" onclick="confirmDeleteHistory()">Delete permanently</button>

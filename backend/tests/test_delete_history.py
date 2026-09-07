@@ -48,12 +48,20 @@ def test_delete_requires_a_period(monkeypatch):
 
 
 def test_delete_scopes_to_the_period(monkeypatch):
-    captured = {}
+    """Both tables are scoped to the same window, each by its own date column."""
+    calls = []
     async def fake_delete(user, path, params):
-        captured["path"] = path; captured["params"] = params
+        calls.append((path, params))
         return [{"id": 1}, {"id": 2}]
+    async def fake_get(user, path, params):
+        return []                      # no dismissals to prune
     monkeypatch.setattr(main, "db_delete", fake_delete)
+    monkeypatch.setattr(main, "db_get", fake_get)
+
     result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
-    assert result == {"deleted": 2, "from": "2026-07-01", "to": "2026-07-31"}
-    assert captured["path"] == "statements"
-    assert captured["params"]["and"] == "(group_date.gte.2026-07-01,group_date.lte.2026-07-31)"
+    assert result == {"deleted": 2, "payments_deleted": 2, "closed_cleared": 0,
+                      "from": "2026-07-01", "to": "2026-07-31"}
+
+    windows = dict(calls)
+    assert windows["statements"]["and"] ==         "(group_date.gte.2026-07-01,group_date.lte.2026-07-31)"
+    assert windows["payments"]["and"] ==         "(paid_on.gte.2026-07-01,paid_on.lte.2026-07-31)"

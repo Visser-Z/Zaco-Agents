@@ -988,10 +988,61 @@ async def delete_history(
     lo, hi = analytics.period_bounds(month, week)
     if not lo:
         raise HTTPException(400, "Choose a month or week to delete.")
-    deleted = await db_delete(
-        user, "statements", {"and": f"(group_date.gte.{lo},group_date.lte.{hi})"}
+    window = f"(group_date.gte.{lo},group_date.lte.{hi})"
+    deleted = await db_delete(user, "statements", {"and": window})
+
+    # Tracking is not built from the statements alone: what is owed comes from
+    # the recorded payments, and the closed lines from the dismissals. Deleting
+    # only the sales left Tracking still reporting the period -- outstanding
+    # money against sales that no longer existed. A period is one thing to the
+    # operator, so all three go together.
+    payments = await db_delete(
+        user, "payments", {"and": f"(paid_on.gte.{lo},paid_on.lte.{hi})"}
     )
-    return {"deleted": len(deleted), "from": lo, "to": hi}
+    closed = await _prune_dismissals(user)
+
+    return {
+        "deleted": len(deleted),
+        "payments_deleted": len(payments),
+        "closed_cleared": closed,
+        "from": lo,
+        "to": hi,
+    }
+
+
+async def _prune_dismissals(user: User) -> int:
+    """Drop closed-item records whose line no longer exists anywhere.
+
+    A dismissal is named by what the line is (kind + ref), not by a row id, so
+    deleting the history behind one leaves the record orphaned. Harmless while
+    it sits there, but it would silently re-close the line if that delivery and
+    commodity were ever imported again, so it is cleared with its period.
+
+    Refs still backed by remaining history are kept, whichever period they fall
+    in: a dismissal is not scoped to the period being deleted.
+    """
+    try:
+        rows = await db_get(user, "dismissals", {"select": "kind,ref", "limit": "10000"})
+    except Exception:  # noqa: BLE001 -- before migration 0016 there are none
+        return 0
+    if not rows:
+        return 0
+
+    live: set[str] = set()
+    for r in await _history_rows(user):
+        live.add(tracking.item_ref({"dn": r.get("supplier_ref"), "product": r.get("product")}))
+    for p in await _saved_payments(user):
+        if p.get("accsale"):
+            live.add(f"ref:{p['accsale']}")
+
+    gone = 0
+    for row in rows:
+        if row.get("ref") in live:
+            continue
+        await db_delete(user, "dismissals",
+                        {"kind": f"eq.{row.get('kind')}", "ref": f"eq.{row.get('ref')}"})
+        gone += 1
+    return gone
 
 
 # --- assistant ------------------------------------------------------------

@@ -716,7 +716,7 @@ const S = {
   demoPtr: 0,
   insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
   tracking: { data: null, loading: false, error: null, day: null, from: "", to: "",
-              open: null, chart: "value", month: null, week: null },
+              open: null, chart: "value", month: null, week: null, confirmDelete: false },
   recon: { data: null, loading: false, error: null, applied: false },
   // Reports answer "what did these dates look like". The range is the whole
   // question, so it lives in the state and nothing loads until both ends are set.
@@ -1152,17 +1152,82 @@ async function closeTrackingItem(kind, ref, reopen) {
 
 /** Scope the whole tab to a month or a week. Week is the finer scope; changing
  *  the month drops the week with it, because weeks are listed per month. */
+/** What the Tracking page is currently scoped to, in words. */
+function trackingScope(T) {
+  return T.week ? weekLabel(T.week) : T.month ? monthLabel(T.month) : "all time";
+}
+
+function askDeleteTracking() { S.tracking.confirmDelete = true; render(); }
+function cancelDeleteTracking() { S.tracking.confirmDelete = false; render(); }
+
+/** Delete the period Tracking is showing.
+ *
+ *  The same endpoint Insights deletes through, because it is the same thing
+ *  being removed: a period is the sales, the payments recorded against them and
+ *  the lines closed on them. Offered here as well because this is the page the
+ *  period is usually being read on, and having to go to Insights to remove what
+ *  you are looking at is a detour.
+ */
+async function confirmDeleteTracking() {
+  const T = S.tracking;
+  if (!S.live) { toast("Deleting history needs the live app", true); return; }
+  if (!T.month && !T.week) { toast("Choose a month or week to delete", true); return; }
+  const scope = trackingScope(T);
+  const body = new URLSearchParams();
+  if (T.month) body.set("month", T.month);
+  if (T.week) body.set("week", T.week);
+  try {
+    const res = await (await api("/api/history/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    })).json();
+    T.confirmDelete = false;
+    // Whatever happened, both pages are now out of date.
+    T.data = null; T.error = null;
+    S.insights.data = null; S.insights.error = null;
+
+    if (res.deleted === 0 && res.remaining) {
+      toast(`Nothing was deleted — the database refused it. Your account is staff, and the `
+            + `delete policies still require admin. Run migration 0018 in Supabase, then try again.`, true);
+    } else if (res.payments_remaining) {
+      toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"}, but `
+            + `${res.payments_remaining} payment${res.payments_remaining === 1 ? "" : "s"} stayed, so `
+            + `${scope} will still show here. Run migration 0018 in Supabase, then delete again.`, true);
+    } else if (res.remaining) {
+      toast(`Deleted ${res.deleted}, but ${res.remaining} statement${res.remaining === 1 ? "" : "s"} `
+            + `in ${scope} could not be removed.`, true);
+    } else {
+      const also = [];
+      if (res.payments_deleted) also.push(`${res.payments_deleted} payment${res.payments_deleted === 1 ? "" : "s"}`);
+      if (res.closed_cleared) also.push(`${res.closed_cleared} closed line${res.closed_cleared === 1 ? "" : "s"}`);
+      toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"} for ${scope}`
+            + (also.length ? `, and ${also.join(" and ")}` : ""));
+      // The period is gone, so the picker that selected it is gone too.
+      T.month = null; T.week = null;
+    }
+    loadTracking();
+  } catch (e) {
+    T.confirmDelete = false;
+    toast(e.message || String(e), true);
+  }
+}
+
 function setTrackingMonth(m) {
   const T = S.tracking;
   T.month = m || null;
   T.week = null;
   T.from = ""; T.to = "";       // the day pickers are the finer control; reset
+  // An open confirmation names the period it was opened for. Leaving it up
+  // through a change of period would arm it against the new one.
+  T.confirmDelete = false;
   loadTracking();
 }
 
 function setTrackingWeek(w) {
   S.tracking.week = w || null;
   S.tracking.from = ""; S.tracking.to = "";
+  S.tracking.confirmDelete = false;
   loadTracking();
 }
 
@@ -1352,7 +1417,18 @@ function renderTracking() {
           <select onchange="setTrackingWeek(this.value)">${weekOpts}</select></label>
         <button class="btn ghost sm refresh" onclick="loadTracking()">↻ Refresh</button>
       </div>
-    </div>`;
+    </div>
+    ${T.month || T.week ? `<div class="ins-danger">
+      ${T.confirmDelete ? `
+        <span class="dwarn"><b>Delete ${esc(trackingScope(T))} from the book?</b>
+          The sales, the payments recorded against them and any lines closed here
+          all go. Insights loses the period too. This can’t be undone.</span>
+        <span class="dact">
+          <button class="btn ghost sm" onclick="cancelDeleteTracking()">Cancel</button>
+          <button class="btn danger sm" onclick="confirmDeleteTracking()">Delete permanently</button>
+        </span>`
+      : `<button class="btn ghost sm dtrigger" onclick="askDeleteTracking()">🗑 Delete ${esc(trackingScope(T))}…</button>`}
+    </div>` : ""}`;
 
   if (T.loading && !T.data) {
     main.innerHTML = `<section class="screen">${head}

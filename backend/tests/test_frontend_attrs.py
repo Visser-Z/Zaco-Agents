@@ -61,3 +61,24 @@ def test_switching_pages_clears_the_error_with_the_data(source: str) -> None:
         "setModule must clear the error alongside the data, or a page that "
         "failed once can never auto-load again"
     )
+
+
+def test_tracking_delete_is_scoped_and_disarms_on_a_period_change(source: str) -> None:
+    """Tracking can delete the period it is showing.
+
+    Two things must hold. There is no delete-everything path, so the action
+    refuses when nothing is scoped. And an open confirmation names the period
+    it was opened for, so changing month or week has to close it rather than
+    leave it armed against the new one.
+    """
+    body = re.search(r"async function confirmDeleteTracking\(\) \{(.*?)\n\}", source, re.S)
+    assert body, "confirmDeleteTracking is gone or was reshaped"
+    assert "if (!T.month && !T.week)" in body.group(1), (
+        "the delete must refuse when no month or week is scoped")
+
+    for setter in ("setTrackingMonth", "setTrackingWeek"):
+        fn = re.search(rf"function {setter}\(\w\) \{{(.*?)\n\}}", source, re.S)
+        assert fn, f"{setter} is gone or was reshaped"
+        assert "confirmDelete = false" in fn.group(1), (
+            f"{setter} must close an open confirmation, or it stays armed "
+            f"against the period the operator just switched away from")

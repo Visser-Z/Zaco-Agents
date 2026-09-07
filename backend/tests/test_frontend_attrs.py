@@ -102,3 +102,32 @@ def test_a_dropped_report_is_read_as_whatever_half_it_landed_on(source: str) -> 
         "the drop handler must ask which half the file landed on")
     assert "onPaymentFiles" in body and "onPdfFiles" in body, (
         "it must be able to route to either side")
+
+
+def test_a_clean_drop_commits_without_a_review_stop(source: str) -> None:
+    """Dropping a report landed on the review screen every time, even when
+    there was nothing to review.
+
+    Clean rows now go straight onto the book. The check that matters is kept:
+    a row needing a decision still stops, and committing is not saving, so
+    nothing reaches the database until Save.
+    """
+    fn = re.search(r"function commitClean\(\) \{(.*?)\n\}", source, re.S)
+    assert fn, "commitClean is gone or was reshaped"
+    body = fn.group(1)
+    assert "needsAttention" in body, (
+        "rows needing a decision must still be held back for review")
+    assert "isDuplicate" in body, (
+        "rows already on the book must not be added a second time")
+    assert "S.saved = false" in body, (
+        "committed rows are unsaved until Save writes them")
+    assert "commitClean()" in source.split("async function onPdfFiles")[1], (
+        "the drop path must commit rather than always stopping at review")
+
+
+def test_the_row_helpers_are_declared_once(source: str) -> None:
+    """Two `const` declarations of the same name is a syntax error that stops
+    the whole page from running, and the page is one script."""
+    for name in ("needsAttention", "isDuplicate", "errFlags", "commitClean"):
+        declarations = len(re.findall(rf"^(?:const|function) {name}\b", source, re.M))
+        assert declarations == 1, f"{name} is declared {declarations} times"

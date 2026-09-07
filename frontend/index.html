@@ -2623,7 +2623,7 @@ async function onPdfFiles(files) {
     const batch = DEMO_BATCHES[S.demoPtr % DEMO_BATCHES.length].map(r => ({ ...r, flags: (r.flags||[]).map(f=>({...f})) }));
     S.demoPtr++;
     S.pending = S.screen === "review" ? S.pending.concat(batch) : batch;
-    if (S.screen !== "review") go("review"); else renderReview();
+    commitClean();
     return;
   }
   await withBusy(`Reading ${files.length} statement${files.length === 1 ? "" : "s"}…`, async () => {
@@ -2646,6 +2646,8 @@ async function onPdfFiles(files) {
     if (data.nett_match) S.nettReports += data.nett_match.reports;
     applyNetts();
   });
+  // Netts are folded in first, so a row is only judged once it is complete.
+  commitClean();
 }
 
 /** Split one figure across the rows it covers, in the ratio of their gross, so
@@ -2843,6 +2845,44 @@ function removeDuplicates() {
   toast(`Removed ${removed} already-saved row${removed === 1 ? "" : "s"}`);
   if (!S.pending.length) return go("hub");
   render();
+}
+
+/** Take everything that read cleanly straight onto the book, and stop only for
+ *  what needs a decision.
+ *
+ *  Dropping a report used to land on the review screen every time, even when
+ *  there was nothing to review. Committing is not saving: these rows sit
+ *  unsaved on Sales & Payments, where the whole table is still one click away
+ *  under "Show the rows", and nothing reaches the database until Save. So the
+ *  check that matters is kept -- a row with an error still stops -- while a
+ *  clean read no longer asks for a confirmation it has nothing to confirm.
+ */
+function commitClean() {
+  const already = S.pending.filter(isDuplicate).length;
+  const fresh = S.pending.filter(r => !isDuplicate(r));
+  const clean = fresh.filter(r => !needsAttention(r));
+  const stopped = fresh.filter(needsAttention);
+
+  if (clean.length) {
+    S.committed = S.committed.concat(clean.map(r => ({ ...r, isNew: true })));
+    S.saved = false;
+  }
+  S.pending = stopped;
+
+  const note = [];
+  if (clean.length) note.push(`${clean.length} row${clean.length === 1 ? "" : "s"} added`);
+  if (already) note.push(`${already} already on the book`);
+
+  if (stopped.length) {
+    // Something needs a person. Say what went in, then show only the rest.
+    S.screen = "review";
+    toast(`${note.join(" · ") || "Nothing added"} · ${stopped.length} need${stopped.length === 1 ? "s" : ""} a look`, true);
+    render(); main.scrollTo(0, 0);
+    return;
+  }
+  S.nettMap = {}; S.nettReports = 0; S.newCodeFor = null; S.importWarnings = [];
+  toast(`${note.join(" · ") || "Nothing to add"} · unsaved`);
+  go("hub");
 }
 
 function appendRows() {

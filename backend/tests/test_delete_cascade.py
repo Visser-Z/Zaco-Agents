@@ -15,43 +15,35 @@ USER = User(id="u-1", email="op@example.com", token="tok")
 
 
 class _DB:
-    """A PostgREST-shaped stub: filtered reads and filtered deletes."""
+    """Just enough PostgREST: filtered reads, filtered deletes, keyed upserts."""
 
-    def __init__(self, statements, payments, dismissals):
+    def __init__(self, statements=(), payments=(), dismissals=()):
         self.rows = {"statements": list(statements), "payments": list(payments),
                      "dismissals": list(dismissals)}
+        self.posts = []
 
     @staticmethod
-    def _between(value, params, column):
+    def _window(row, params):
+        """`and=(col.gte.X,col.lte.Y)` -- whichever column it names."""
         window = params.get("and") or ""
-        if f"{column}.gte." not in window:
+        if ".gte." not in window:
             return True
-        lo = window.split(f"{column}.gte.")[1].split(",")[0]
-        hi = window.split(f"{column}.lte.")[1].rstrip(")")
+        column = window.lstrip("(").split(".gte.")[0]
+        lo = window.split(".gte.")[1].split(",")[0]
+        hi = window.split(".lte.")[1].rstrip(")")
+        value = row.get(column)
         return value is not None and lo <= str(value) <= hi
 
-    async def get(self, user, table, params):
-        # Deep copies, as a real read does: _saved_payments renames paid_on to
-        # date on the rows it hands back, and sharing the dicts would rewrite
-        # the stored table.
-        rows = self.rows.get(table, [])
-        if table == "statements":
-            if params.get("group_date") == "is.null":
-                rows = [r for r in rows if r.get("group_date") is None]
-            elif params.get("and"):
-                rows = [r for r in rows if self._between(r.get("group_date"), params, "group_date")]
-        return [dict(r) for r in rows]
-
     @staticmethod
-    def _matches(row, column, expr):
-        """The PostgREST operators these endpoints actually use."""
+    def _op(row, column, expr):
+        """The operators these endpoints use, on one column."""
         value = row.get(column)
-        if expr.startswith("in.("):
-            return str(value) in {x for x in expr[4:].rstrip(")").split(",") if x}
-        if expr == "not.is.null":
-            return value is not None
         if expr == "is.null":
             return value is None
+        if expr == "not.is.null":
+            return value is not None
+        if expr.startswith("in.("):
+            return str(value) in {x for x in expr[4:].rstrip(")").split(",") if x}
         if expr.startswith("eq."):
             return str(value) == expr[3:]
         if expr.startswith("gt."):
@@ -61,18 +53,37 @@ class _DB:
                 return False
         raise AssertionError(f"stub does not model filter {expr!r}")
 
+    @classmethod
+    def _selects(cls, row, params):
+        """Every filter ANDed together, as PostgREST does."""
+        for key, expr in params.items():
+            if key in ("select", "limit", "and", "order"):
+                continue
+            if not cls._op(row, key, expr):
+                return False
+        return cls._window(row, params)
+
+    async def get(self, user, table, params):
+        # Deep copies, as a real read does: _saved_payments renames paid_on to
+        # date on the rows it hands back, and sharing the dicts would rewrite
+        # the stored table.
+        return [dict(r) for r in self.rows.get(table, []) if self._selects(r, params)]
+
+    async def post(self, user, table, records, **kw):
+        self.posts.append({"table": table, "records": records, **kw})
+        for r in records:
+            key = (r.get("kind"), r.get("ref"))
+            if not any((x.get("kind"), x.get("ref")) == key for x in self.rows[table]):
+                self.rows[table].append(r)
+        return records
+
     async def delete(self, user, table, params):
-        column = "group_date" if table == "statements" else "paid_on"
         keep, gone = [], []
         for r in self.rows[table]:
-            cols = [k for k in params if k != "and"]
-            if cols:
-                hit = all(self._matches(r, k, params[k]) for k in cols)
-            else:
-                hit = self._between(r.get(column), params, column)
-            (gone if hit else keep).append(r)
+            (gone if self._selects(r, params) else keep).append(r)
         self.rows[table] = keep
         return gone
+
 
 
 def _wire(monkeypatch, db):
@@ -237,3 +248,35 @@ def test_a_blank_period_is_still_an_error_not_a_delete_all(monkeypatch):
     else:
         raise AssertionError("a blank period must be refused")
     assert db.rows["statements"], "nothing may have been deleted"
+
+
+def test_a_sale_off_a_load_sent_the_previous_month_is_deleted_with_its_own_month(monkeypatch):
+    """A row's period is the day it SOLD. group_date is the day its load was
+    sent, and a load sent on 31 July sells into August, so a delete written on
+    group_date alone left August rows behind that August had just counted."""
+    august_sale = {**_sale("2026-07-31"), "last_sale": "2026-08-03"}
+    july_sale = {**_sale("2026-07-20"), "last_sale": "2026-07-20"}
+    db = _DB([august_sale, july_sale], [], [])
+    _wire(monkeypatch, db)
+
+    out = asyncio.run(main.delete_history(scope=None, month="2026-08", week=None, user=USER))
+    assert out["deleted"] == 1, "the August sale must go even though its load left in July"
+    assert out["remaining"] == 0
+    assert [r["last_sale"] for r in db.rows["statements"]] == ["2026-07-20"]
+
+
+def test_a_row_with_no_sale_date_falls_back_down_the_chain(monkeypatch):
+    """History recorded before the sale date was captured is still placed, by
+    the consignment date and then the invoice date, and must delete with it."""
+    by_group = {k: v for k, v in _sale("2026-08-02").items()}
+    by_group["last_sale"] = None
+    by_invoice = {k: v for k, v in _sale("2026-08-02").items()}
+    by_invoice.update(last_sale=None, group_date=None, invoice_date="2026-08-05")
+    other = {**_sale("2026-09-01"), "last_sale": "2026-09-01"}
+    db = _DB([by_group, by_invoice, other], [], [])
+    _wire(monkeypatch, db)
+
+    out = asyncio.run(main.delete_history(scope=None, month="2026-08", week=None, user=USER))
+    assert out["deleted"] == 2
+    assert out["remaining"] == 0
+    assert len(db.rows["statements"]) == 1

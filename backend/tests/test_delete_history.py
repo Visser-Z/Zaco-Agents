@@ -119,11 +119,25 @@ def test_rows_it_could_not_remove_are_reported(monkeypatch):
     async def fake_delete(user, path, params):
         return []                       # RLS removes nothing
     async def fake_get(user, path, params):
+        """The delete walks the date chain, so a read only returns rows whose
+        is.null narrowing holds and whose window matches."""
         if path != "statements":
             return []
-        if params.get("group_date") == "is.null":
-            return [r for r in store if r["group_date"] is None]
-        return list(store)              # the dated-window read
+        out = []
+        for r in store:
+            if any(params.get(c) == "is.null" and r.get(c) is not None
+                   for c in ("last_sale", "group_date", "invoice_date", "date_received")):
+                continue
+            w = params.get("and") or ""
+            if ".gte." in w:
+                col = w.lstrip("(").split(".gte.")[0]
+                lo = w.split(".gte.")[1].split(",")[0]
+                hi = w.split(".lte.")[1].rstrip(")")
+                v = r.get(col)
+                if v is None or not (lo <= str(v) <= hi):
+                    continue
+            out.append(r)
+        return out
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 

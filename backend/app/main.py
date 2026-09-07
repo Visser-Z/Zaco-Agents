@@ -1074,8 +1074,24 @@ async def delete_history(
     # server's row limit and comes back in no particular order, so on a history
     # larger than that cap the rows to delete may simply not be in the page that
     # comes back, and the delete quietly does nothing.
+    # A row's period is decided by the first date it actually has: the day it
+    # sold, then the consignment's date, then the invoice, then when it was
+    # received. The delete has to walk the same chain or it removes a different
+    # set than the page just counted -- a sale on 1 August off a load sent on
+    # 31 July is August everywhere except in a filter written on group_date.
+    windows = [
+        {"and": f"(last_sale.gte.{lo},last_sale.lte.{hi})"},
+        {"last_sale": "is.null", "and": f"(group_date.gte.{lo},group_date.lte.{hi})"},
+        {"last_sale": "is.null", "group_date": "is.null",
+         "and": f"(invoice_date.gte.{lo},invoice_date.lte.{hi})"},
+        {"last_sale": "is.null", "group_date": "is.null", "invoice_date": "is.null",
+         "and": f"(date_received.gte.{lo},date_received.lte.{hi})"},
+    ]
+    deleted: list[dict] = []
+    for where in windows:
+        deleted += await db_delete(user, "statements", where)
+
     window = f"(group_date.gte.{lo},group_date.lte.{hi})"
-    deleted = await db_delete(user, "statements", {"and": window})
 
     # Then the rows carrying no group_date at all. They are still dated, because
     # the pages fall back to the invoice date, then the received date, then when
@@ -1115,14 +1131,16 @@ async def delete_history(
     # Say plainly what is still there. A delete that removes nothing because the
     # rows belong to someone else returns 200 and an empty list, which read as
     # success while the period stayed on screen.
-    still_dated = await db_get(user, "statements",
-                               {"select": "id", "and": window, "limit": "20000"})
-    still_undated = await db_get(user, "statements", {
-        "select": "id,group_date,invoice_date,date_received,created_at",
-        "group_date": "is.null",
+    left = []
+    for where in windows:
+        left += await db_get(user, "statements", {**where, "select": "id", "limit": "20000"})
+    undated = await db_get(user, "statements", {
+        "select": "id,last_sale,group_date,invoice_date,date_received,created_at",
+        "last_sale": "is.null", "group_date": "is.null",
+        "invoice_date": "is.null", "date_received": "is.null",
         "limit": "20000",
     })
-    remaining = len(still_dated) + len(analytics.filter_rows(still_undated, month, week))
+    remaining = len(left) + len(analytics.filter_rows(undated, month, week))
 
     return {
         "deleted": len(deleted),

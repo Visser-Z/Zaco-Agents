@@ -95,9 +95,22 @@ def _parse_date(value) -> date | None:
 
 
 def row_date(row: dict) -> date | None:
-    """The date a row is bucketed under for trends: the delivery/group date if
-    present, else the invoice date, else when it was received."""
-    for key in ("group_date", "invoice_date", "date_received", "created_at"):
+    """The date a row is bucketed under: the day it sold.
+
+    ``last_sale`` is that day, taken from the report the row was read out of.
+    ``group_date`` is the consignment's date -- the earliest across its
+    delivery-note group -- so it answers "when was this load sent", and rows
+    from a whole week of reports collapse onto the few days the loads arrived.
+    Bucketing by it put 46 of 60 rows of one real week onto a single day, and
+    made Insights disagree with Tracking, which had already been moved onto the
+    sale date, about 41 of those rows.
+
+    The remaining fallbacks are for history recorded before the sale date was
+    captured: something dated is better than a row that cannot be placed at all.
+    Kept in step with ``tracking.selling_day``, which must answer the same
+    question the same way.
+    """
+    for key in ("last_sale", "group_date", "invoice_date", "date_received", "created_at"):
         if (d := _parse_date(row.get(key))) is not None:
             return d
     return None

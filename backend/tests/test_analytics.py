@@ -5,6 +5,8 @@ database is needed. The important business rule under test: value is GROSS
 (cartons_sold x price), because the Daily Sales format leaves Nett blank.
 """
 
+from datetime import date
+
 from app import analytics
 
 
@@ -258,3 +260,36 @@ def test_product_performance_without_dates_or_quantities():
                                             date_received=None, last_sale=None)])[0]
     assert p["sell_through"] is None
     assert p["avg_days_to_sell"] is None and p["slowest_days"] is None
+
+
+# --- which date a row is bucketed under ------------------------------------
+
+def test_a_row_is_bucketed_on_the_day_it_sold():
+    """The report a row is read from states the day it sold, and that lands on
+    last_sale. group_date is the consignment's date -- the day the load was
+    sent -- so a week of reports collapses onto the few days loads arrived."""
+    row = {"last_sale": "2026-08-07", "group_date": "2026-08-01",
+           "invoice_date": "2026-08-02", "date_received": "2026-07-28"}
+    assert analytics.row_date(row) == date(2026, 8, 7)
+
+
+def test_insights_and_tracking_date_a_row_the_same_way():
+    """The two pages answering "when did this sell" differently is what made a
+    week look like three days on one page and seven on the other."""
+    from app import tracking
+    rows = [
+        {"last_sale": "2026-08-07", "group_date": "2026-08-01"},
+        {"last_sale": None, "group_date": "2026-08-04"},
+        {"last_sale": "2026-08-08", "group_date": None},
+    ]
+    for row in rows:
+        assert str(analytics.row_date(row)) == tracking.selling_day(row)
+
+
+def test_history_without_a_sale_date_still_places_itself():
+    """Rows recorded before the sale date was captured must stay dated, or a
+    period filter would drop them entirely."""
+    assert analytics.row_date({"group_date": "2026-08-01"}) == date(2026, 8, 1)
+    assert analytics.row_date({"invoice_date": "2026-08-02"}) == date(2026, 8, 2)
+    assert analytics.row_date({"date_received": "2026-07-28"}) == date(2026, 7, 28)
+    assert analytics.row_date({}) is None

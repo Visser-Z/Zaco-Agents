@@ -369,6 +369,7 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 # like a broken app rather than one pending setup step.
 _MIGRATIONS = {
     "dismissals": "0016_dismissals.sql",
+    "period_month": "0017_period_blocks.sql",
     "payments": "0015_payments.sql",
     "statements_unique_per_agent": "0014_statements_per_day.sql",
     "market_avg": "0013_statements_market_avg.sql",

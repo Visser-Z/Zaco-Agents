@@ -23,10 +23,18 @@
 
 alter table public.statements
   add column if not exists period_month text
-  generated always as (to_char(group_date, 'YYYY-MM')) stored;
+  -- Built from extract() rather than to_char(): to_char reads the session's
+  -- date style, so Postgres calls it merely stable and refuses it in a stored
+  -- generated column. extract() is immutable, which is what a stored column
+  -- needs, and the padding keeps the value sortable as text.
+  generated always as (
+    lpad(extract(year  from coalesce(last_sale, group_date, invoice_date, date_received))::text, 4, '0')
+    || '-' ||
+    lpad(extract(month from coalesce(last_sale, group_date, invoice_date, date_received))::text, 2, '0')
+  ) stored;
 
 comment on column public.statements.period_month is
-  'The month this sale belongs to (YYYY-MM), derived from group_date. The workbook''s sheet name, as an indexed column.';
+  'The month this sale belongs to (YYYY-MM). Derived down the same chain the app dates a row by: the day it sold, then the consignment date, then the invoice, then when it was received. group_date alone is the day the LOAD was sent, which puts a sale into the wrong month whenever a consignment spans one.';
 
 create index if not exists statements_period_month_idx
   on public.statements (period_month);
@@ -37,7 +45,10 @@ create index if not exists statements_group_date_idx
 
 alter table public.payments
   add column if not exists period_month text
-  generated always as (to_char(paid_on, 'YYYY-MM')) stored;
+  generated always as (
+    lpad(extract(year  from paid_on)::text, 4, '0') || '-' ||
+    lpad(extract(month from paid_on)::text, 2, '0')
+  ) stored;
 
 comment on column public.payments.period_month is
   'The month this payment belongs to (YYYY-MM), derived from paid_on.';
@@ -50,8 +61,8 @@ create or replace view public.period_index
 with (security_invoker = on) as
 select
   s.period_month                                        as period_month,
-  min(s.group_date)                                     as first_sale,
-  max(s.group_date)                                     as last_sale,
+  min(coalesce(s.last_sale, s.group_date))              as first_sale,
+  max(coalesce(s.last_sale, s.group_date))              as last_sale,
   count(*)                                              as statement_count,
   count(distinct s.consignment_id)                      as consignment_count,
   count(distinct s.product)                             as product_count,

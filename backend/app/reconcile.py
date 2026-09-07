@@ -41,6 +41,12 @@ def _key(dn, product) -> tuple:
     return (dn, normalise_product(product))
 
 
+def _sort_key(key: tuple) -> tuple:
+    """Order (dn, product) keys with a missing dn last, never comparing None."""
+    dn, product = key
+    return (dn is None, dn if dn is not None else 0, str(product or ""))
+
+
 def aggregate_daily(rows: list[dict]) -> dict[tuple, dict]:
     """Sum daily Sales Total per Supplier Ref + Product, keeping the source rows
     so Nett can later be distributed back onto them."""
@@ -204,7 +210,10 @@ def reconcile(daily_rows: list[dict], payment_records: list[dict]) -> list[dict]
     dagg = aggregate_daily(daily_rows)
     pagg = aggregate_payment(payment_records)
     out: list[dict] = []
-    for k in sorted(set(dagg) | set(pagg)):
+    # A supplier ref is nullable, and Python will not order None against an
+    # int, so a history holding one row without a ref and one with it used to
+    # raise straight out of the sort and take the whole page with it.
+    for k in sorted(set(dagg) | set(pagg), key=_sort_key):
         dn, product = k
         daily = round(dagg.get(k, {}).get("sales_total", 0.0), 2)
         gross = round(pagg.get(k, {}).get("gross", 0.0), 2)

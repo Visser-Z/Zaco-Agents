@@ -207,3 +207,31 @@ def test_a_history_with_no_references_still_matches_on_product():
     rows = [_pdf_row(14584, "GRAPES", 1000.0, 1)]
     pays = [_pay(14584, "PRE*BT*1", "GRAPES", 1000.0, 850.0)]
     assert [r["status"] for r in reconcile.reconcile_any(rows, pays)] == ["matched"]
+
+
+# --- rows without a supplier ref ------------------------------------------
+
+def test_a_history_mixing_rows_with_and_without_a_ref_still_reconciles():
+    """supplier_ref is nullable. Ordering the match keys compared None against
+    an int and raised, which took the whole Tracking page down rather than
+    losing one row. Found by fuzzing, not by a real file."""
+    rows = [
+        {"dn": 14588, "product": "GRAPES", "sales_total": 100.0},
+        {"dn": None, "product": "PLUMS", "sales_total": 50.0},
+        {"dn": 3, "product": "CHERRIES", "sales_total": 25.0},
+    ]
+    out = reconcile.reconcile(rows, [])
+    assert [r["dn"] for r in out] == [3, 14588, None]      # missing ref sorts last
+    assert {r["status"] for r in out} == {"unpaid"}
+    assert sum(r["daily_total"] for r in out) == 175.0
+
+
+def test_the_mixed_matcher_survives_it_too():
+    """reconcile_any routes the ref-less rows through reconcile, so the same
+    history must not raise there either."""
+    rows = [
+        {"dn": 14588, "product": "GRAPES", "sales_total": 100.0, "payment_refs": "A=100.00"},
+        {"dn": None, "product": "PLUMS", "sales_total": 50.0, "payment_refs": None},
+    ]
+    out = reconcile.reconcile_any(rows, [])
+    assert sum(r["daily_total"] for r in out) == 150.0

@@ -1028,10 +1028,16 @@ function syncModuleNav() {
 function setModule(m) {
   if (S.module === m) return;
   S.module = m;
-  // Insights reads the saved history; re-fetch on entry so it reflects any
-  // statements saved since it was last opened, rather than a stale snapshot.
-  if (m === "insights") S.insights.data = null;
-  if (m === "tracking") S.tracking.data = null;
+  // Both pages read the saved history; re-fetch on entry so they reflect any
+  // statements saved since they were last opened, rather than a stale snapshot.
+  // The error has to be cleared with the data: the auto-load guard on each page
+  // is `data === null && !loading && error === null`, so a page left holding an
+  // error from one bad response would never load again, however many times it
+  // was reopened. Insights would sit on "Could not load analytics" while
+  // Tracking, which had not failed, kept working -- and the history looked
+  // missing from one page and present on the other.
+  const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking : null;
+  if (view) { view.data = null; view.error = null; view.loading = false; }
   render();
   main.scrollTo(0, 0);
 }

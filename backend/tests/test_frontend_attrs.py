@@ -44,3 +44,20 @@ def test_any_js_string_helper_escapes_for_the_attribute(source: str) -> None:
         "q() must wrap its JSON literal in esc(), or every handler built "
         f"with it is truncated at the first quote; found: {match.group(1)}"
     )
+
+
+def test_switching_pages_clears_the_error_with_the_data(source: str) -> None:
+    """Each page auto-loads on `data === null && !loading && error === null`.
+
+    Clearing only `data` on a page switch left a page that had failed once
+    unable to ever load again: Insights sat on "Could not load analytics"
+    while Tracking, which had not failed, kept showing the same history.
+    """
+    body = re.search(r"function setModule\(m\) \{(.*?)\n\}", source, re.S)
+    assert body, "setModule is gone or was reshaped"
+    body = body.group(1)
+    assert ".data = null" in body, "a page switch must still force a re-fetch"
+    assert ".error = null" in body, (
+        "setModule must clear the error alongside the data, or a page that "
+        "failed once can never auto-load again"
+    )

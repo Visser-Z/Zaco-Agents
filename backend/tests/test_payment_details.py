@@ -206,3 +206,50 @@ def test_an_adjustments_report_is_still_recognised():
         text = fh.read()
     assert na.is_nett_adjustments(text) is True
     assert pd.is_payment_details(text) is False
+
+
+def test_a_payment_whose_ref_is_a_date_is_still_read():
+    """Some account sales carry a date in the Supplier Ref instead of a
+    delivery number. The header pattern allowed no slash, so the record did not
+    match at all: its money vanished and its commodity lines were absorbed into
+    the record above it, pushing that record's lines past its own gross. One
+    real August file lost R7 200,00 of a R57 470,00 run this way.
+    """
+    text = """
+     FMS ID  Supplier Ref AccSale Number Date
+                                        Payments Deductions Vat  Payments Ref
+     203465   20026*14586 PRE*BT*393300 2026-08-07 R 2149.93 R 347.88 R 52.19 R 2550.00 EFT
+     Line No              Commodity                Delivered Sold     Sales Total
+    3     NECTARINES OTHER CLASS 1 LARGE MULTI LAYER TRAYER 5.00 kg 30 18 R 2550.00
+     FMS ID  Supplier Ref AccSale Number Date
+                                        Payments Deductions Vat  Payments Ref
+     203467  20026*03/8/2026 PRE*BT*393302 2026-08-07 R 6052.97 R 997.37 R 149.66 R 7200.00 EFT
+     Line No              Commodity                Delivered Sold     Sales Total
+    1     CHERRIES OTHER CLASS 1 LARGE HALF TRAY    171      31        R 5200.00
+    3     NECTARINES OTHER CLASS 1 LARGE DOMPEL JUMBLE 40    40        R 2000.00
+"""
+    recs = pdd.parse_payment_details([text], "pay.pdf")
+    by_acc = {r["accsale"]: r for r in recs}
+    assert "PRE*BT*393302" in by_acc, "the date-ref payment was dropped"
+    assert by_acc["PRE*BT*393302"]["gross"] == 7200.00
+    assert by_acc["PRE*BT*393302"]["supplier_ref"] == "20026*03/8/2026"
+    assert sum(r["gross"] for r in recs) == 9750.00
+
+    # and the record above it keeps only its own line
+    above = by_acc["PRE*BT*393300"]
+    assert sum(l["sales_total"] for l in above["lines"]) == above["gross"] == 2550.00
+
+
+def test_every_record_accounts_for_its_own_gross():
+    """A record whose commodity lines do not add up to its gross means lines
+    have been attached to the wrong payment, which then misallocates the nett."""
+    text = """
+     FMS ID  Supplier Ref AccSale Number Date
+                                        Payments Deductions Vat  Payments Ref
+     203467  20026*03/8/2026 PRE*BT*393302 2026-08-07 R 6052.97 R 997.37 R 149.66 R 7200.00 EFT
+     Line No              Commodity                Delivered Sold     Sales Total
+    1     CHERRIES OTHER CLASS 1 LARGE HALF TRAY    171      31        R 5200.00
+    3     NECTARINES OTHER CLASS 1 LARGE DOMPEL JUMBLE 40    40        R 2000.00
+"""
+    rec = pdd.parse_payment_details([text], "pay.pdf")[0]
+    assert sum(l["sales_total"] for l in rec["lines"]) == rec["gross"] == 7200.00

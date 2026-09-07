@@ -83,7 +83,12 @@ _HEADER = re.compile(
     # of another producer carries theirs (e.g. 14013*30559). Hardcoding 20026
     # made those headers invisible, so the account sale was never recognised
     # and its commodity lines were absorbed into the record above it.
-    r"(?P<ref>\d{3,8}\*[\d &]+?)\s+"
+    # The ref is not always a delivery number. Some account sales carry a date
+    # there instead ("20026*03/8/2026"), and without the slash this header did
+    # not match at all: the whole payment was dropped and its commodity lines
+    # were absorbed into the record above, inflating that record's lines well
+    # past its own gross. One real August file lost R7 200 this way.
+    r"(?P<ref>\d{3,8}\*[\d &/]+?)\s+"
     r"(?P<acc>[A-Z]{2,}\*[A-Z0-9]+\*[A-Z0-9/]+)\s+"
     r"(?P<date>\d{4}-\d{2}-\d{2})\s+"
     r"R\s*(?P<nett>-?[\d,]+\.\d{2})\s+"

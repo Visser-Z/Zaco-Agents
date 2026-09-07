@@ -6,6 +6,7 @@ round of statements, and append those rows back into the workbook.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -25,6 +26,7 @@ from . import (
     delivery,
     integrity,
     reconcile,
+    reports,
     stock,
     tracking,
 )
@@ -935,6 +937,66 @@ async def get_tracking(
     closed = await _closed_refs(user)
     return tracking.compute(sales, payments, start=date_from, end=date_to,
                             closed=closed, month=month, week=week)
+
+
+@app.get("/api/reports/periods")
+async def get_report_periods(user: User | None = Depends(require_user)) -> dict:
+    """The months the history holds, newest first.
+
+    Read from the period_index view where migration 0017 has been run, which
+    answers from the month column rather than by reading every statement.
+    Falls back to counting the history in the app, so the picker still works
+    before the migration.
+    """
+    if user is None:
+        return {"periods": [], "source": "local"}
+    try:
+        rows = await db_get(user, "period_index",
+                            {"select": "*", "order": "period_month.desc", "limit": "500"})
+        return {"periods": rows, "source": "period_index"}
+    except Exception:  # noqa: BLE001 -- before migration 0017 the view is absent
+        periods: dict[str, dict] = {}
+        for row in await _history_rows(user):
+            day = str(row.get("group_date") or "")[:10]
+            if len(day) < 7:
+                continue
+            p = periods.setdefault(day[:7], {
+                "period_month": day[:7], "first_sale": day, "last_sale": day,
+                "statement_count": 0, "cartons_sold": 0.0, "sales_value": 0.0})
+            p["first_sale"] = min(p["first_sale"], day)
+            p["last_sale"] = max(p["last_sale"], day)
+            p["statement_count"] += 1
+            p["cartons_sold"] += analytics.row_cartons(row)
+            p["sales_value"] += analytics.row_value(row)
+        for p in periods.values():
+            p["cartons_sold"] = round(p["cartons_sold"], 2)
+            p["sales_value"] = round(p["sales_value"], 2)
+        return {"periods": sorted(periods.values(), key=lambda p: p["period_month"],
+                                  reverse=True), "source": "history"}
+
+
+@app.get("/api/reports/period")
+async def get_period_report(
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """A report for one date range: what sold, what came in, what it is worth.
+
+    Sales are taken on the day they sold, payments on the day they were
+    received. Both ends are inclusive, so a single day is from == to.
+    """
+    for label, value in (("from", date_from), ("to", date_to)):
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(400, f"“{value}” is not a date (expected YYYY-MM-DD in “{label}”).")
+    if date_from > date_to:
+        raise HTTPException(400, "The start of the range falls after its end.")
+
+    sales = await _history_rows(user)
+    payments = await _saved_payments(user)
+    return reports.build(sales, payments, date_from, date_to)
 
 
 @app.get("/api/analytics")

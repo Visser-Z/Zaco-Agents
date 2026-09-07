@@ -588,6 +588,49 @@
   .dtrigger { color: var(--ink-faint); }
   .dtrigger:hover { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 40%, var(--line)); }
 
+  /* -------- Reports ------------------------------------------------- */
+  .rep-controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .rep-months { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+  .rep-ml { font-size: 11.5px; color: var(--ink-faint); margin-right: 2px; }
+  .rep-title { display: flex; align-items: baseline; gap: 12px; margin: 4px 0 14px; flex-wrap: wrap; }
+  .rep-title h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+  .rep-title span { font-size: 12.5px; color: var(--ink-soft); }
+  .rep-note { font-size: 11.5px; color: var(--ink-faint); margin: -6px 0 18px; max-width: 78ch; line-height: 1.55; }
+  .rep-c { font-size: 11.5px; color: var(--ink-faint); }
+  .rep-scroll { overflow-x: auto; }
+  /* min-width:0 defeats the global `table { min-width: 1560px }` meant for the
+     wide review grid; without it the Value column is pushed off the card. */
+  table.rep-table { width: 100%; min-width: 0; table-layout: fixed;
+                    border-collapse: collapse; font-size: 12.5px; }
+  /* table-layout:fixed splits the width evenly unless told otherwise, which
+     left the numbers swimming and squeezed the names. The name is the column
+     that needs the room. */
+  table.rep-table th:first-child, table.rep-table td:first-child { width: 42%; }
+  table.rep-table th { text-align: right; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+                       color: var(--ink-faint); font-weight: 700; padding: 0 0 6px; border-bottom: 1px solid var(--line-strong); }
+  table.rep-table th:first-child { text-align: left; }
+  table.rep-table td { padding: 6px 0; border-bottom: 1px solid var(--line); text-align: right;
+                       font-variant-numeric: tabular-nums; }
+  table.rep-table td:first-child { text-align: left; color: var(--ink); }
+  table.rep-table td.rp-p { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.rep-table tfoot td { font-weight: 700; border-top: 1px solid var(--line-strong); border-bottom: 0; }
+  .kpis.kpis-4 { grid-template-columns: repeat(4, 1fr); }
+  .ins-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .kpis.kpis-4 { grid-template-columns: repeat(2, 1fr); }
+                               .ins-grid-2 { grid-template-columns: 1fr; } }
+  /* Printing a report: just the report, and let the tables break across pages. */
+  @media print {
+    body.printing-report .topbar,
+    body.printing-report .tabs,
+    body.printing-report .rep-controls,
+    body.printing-report .rep-months,
+    body.printing-report .ins-actions { display: none !important; }
+    body.printing-report .card { border: 0; box-shadow: none; padding: 0; margin-bottom: 14px; }
+    body.printing-report .ins-grid-2 { display: block; }
+    body.printing-report table.rep-table { font-size: 10.5px; }
+    body.printing-report table.rep-table tr { break-inside: avoid; }
+  }
+
   /* -------- Sales & Payments two-column workspace -------------------- */
   .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 18px; align-items: start; }
   .ws-main { min-width: 0; }               /* let the table scroll instead of stretching the grid */
@@ -639,6 +682,7 @@
     <button class="tab" data-module="sales" onclick="setModule('sales')">Sales &amp; Payments</button>
     <button class="tab" data-module="tracking" onclick="setModule('tracking')">Tracking</button>
     <button class="tab" data-module="insights" onclick="setModule('insights')">Insights</button>
+    <button class="tab" data-module="reports" onclick="setModule('reports')">Reports</button>
   </nav>
 
   <div class="body">
@@ -674,6 +718,9 @@ const S = {
   tracking: { data: null, loading: false, error: null, day: null, from: "", to: "",
               open: null, chart: "value", month: null, week: null },
   recon: { data: null, loading: false, error: null, applied: false },
+  // Reports answer "what did these dates look like". The range is the whole
+  // question, so it lives in the state and nothing loads until both ends are set.
+  reports: { data: null, loading: false, error: null, from: "", to: "", periods: [] },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -1036,7 +1083,8 @@ function setModule(m) {
   // was reopened. Insights would sit on "Could not load analytics" while
   // Tracking, which had not failed, kept working -- and the history looked
   // missing from one page and present on the other.
-  const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking : null;
+  const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking
+             : m === "reports" ? S.reports : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
   render();
   main.scrollTo(0, 0);
@@ -1046,6 +1094,7 @@ function render() {
   syncModuleNav();
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
+  if (S.module === "reports") return renderReports();
   if (S.busy) return renderBusy();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
@@ -1270,6 +1319,11 @@ function q(v) { return esc(JSON.stringify(String(v))); }
  *  4.5kg)" truncates to "CHERRIES OTHER CLASS 1 MED..." in a narrow column,
  *  hiding the MEDIUM that tells it apart from the LARGE below it. Drop the
  *  bracket, keep the grade. The full name stays on the title attribute. */
+/** A JS string literal safe inside a double-quoted inline handler. Escaped as
+ *  well as quoted: JSON.stringify alone closes the attribute at its own first
+ *  quote and the handler is silently truncated. */
+function q(v) { return esc(JSON.stringify(String(v))); }
+
 function shortProduct(name) {
   return String(name || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
 }
@@ -1461,6 +1515,186 @@ function renderTracking() {
       <div class="trk-grid${open ? " has-open" : ""}">
         ${owedBlock}${slowBlock}${salesBlock}
       </div>
+    </section>`;
+}
+
+
+// -------------------------------------------------------------- reports
+// "What did these dates look like." The workbook answered that by being a
+// sheet you opened; the history answers it by being asked. Deliberately a
+// statement rather than a dashboard: flat, totalled and printable, because
+// the point is to file it or hand it to someone.
+
+async function loadReportPeriods() {
+  if (!S.live) return;
+  try {
+    const r = await (await api("/api/reports/periods")).json();
+    S.reports.periods = r.periods || [];
+    render();
+  } catch (e) { /* the date pickers still work without the month shortcuts */ }
+}
+
+async function loadReport() {
+  const R = S.reports;
+  if (!R.from || !R.to) return;
+  if (!S.live) { R.error = "Reports read your saved history, so they need the live app."; render(); return; }
+  R.loading = true; R.error = null; render();
+  try {
+    const qs = new URLSearchParams({ from: R.from, to: R.to });
+    R.data = await (await api("/api/reports/period?" + qs)).json();
+  } catch (e) {
+    R.error = e.message || String(e);
+  } finally {
+    R.loading = false; render();
+  }
+}
+
+function setReportRange(which, value) {
+  S.reports[which] = value || "";
+  S.reports.data = null;
+  if (S.reports.from && S.reports.to) loadReport(); else render();
+}
+
+/** Jump the range to one whole month from the index. */
+function setReportMonth(month) {
+  const p = (S.reports.periods || []).find(x => x.period_month === month);
+  if (!p) return;
+  S.reports.from = String(p.first_sale).slice(0, 10);
+  S.reports.to = String(p.last_sale).slice(0, 10);
+  S.reports.data = null;
+  loadReport();
+}
+
+function printReport() {
+  document.body.classList.add("printing-report");
+  const done = () => { document.body.classList.remove("printing-report");
+                       window.removeEventListener("afterprint", done); };
+  window.addEventListener("afterprint", done);
+  window.print();
+  setTimeout(done, 1000);   // afterprint does not fire everywhere
+}
+
+function renderReports() {
+  const R = S.reports;
+  if (!R.periods.length && S.live) loadReportPeriods();
+
+  const months = (R.periods || []).map(p =>
+    `<button class="btn ghost sm" onclick="setReportMonth(${q(p.period_month)})">${esc(monthLabel(p.period_month))}</button>`
+  ).join("");
+
+  const controls = `
+    <div class="rep-controls">
+      <label class="ctl inline"><span>From</span>
+        <input type="date" value="${esc(R.from)}" onchange="setReportRange('from', this.value)"></label>
+      <label class="ctl inline"><span>To</span>
+        <input type="date" value="${esc(R.to)}" onchange="setReportRange('to', this.value)"></label>
+      ${R.data ? `<button class="btn ghost sm" onclick="printReport()">Print</button>` : ""}
+    </div>
+    ${months ? `<div class="rep-months"><span class="rep-ml">Whole month</span>${months}</div>` : ""}`;
+
+  const head = `
+    <div class="head ins-head">
+      <div><h1>Reports</h1>
+        <p>Pick any two dates. Sales are counted on the day they sold, payments on the day they came in.</p></div>
+      <div class="ins-actions">${R.data ? `<button class="btn ghost sm refresh" onclick="loadReport()">↻ Refresh</button>` : ""}</div>
+    </div>`;
+
+  if (R.error) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="banner bad"><span class="bi">!</span><span><b>Could not build the report.</b> ${esc(R.error)}</span></div>
+      ${controls}</section>`;
+    return;
+  }
+  if (!R.from || !R.to) {
+    main.innerHTML = `<section class="screen">${head}${controls}
+      <div class="card placeholder"><div class="pi">▤</div>
+        <h2>Choose a date range</h2>
+        <p>Set a start and an end date, or pick a whole month, and the report is built from your saved history.</p>
+      </div></section>`;
+    return;
+  }
+  if (R.loading || !R.data) {
+    main.innerHTML = `<section class="screen">${head}${controls}
+      <div class="card"><div class="busy"><span class="spin"></span> Building the report…</div></div></section>`;
+    return;
+  }
+
+  const d = R.data, t = d.totals, m = d.money, rg = d.range;
+  const money = v => "R " + fmt(v || 0);
+  const empty = t.statements === 0;
+
+  const productRows = d.by_product.map(p => `<tr>
+      <td class="rp-p" title="${esc(p.product)}">${esc(shortProduct(p.product))}</td>
+      <td class="num">${fmtInt(p.cartons)}</td>
+      <td class="num">${p.returned ? fmtInt(p.returned) : "—"}</td>
+      <td class="num">${fmtInt(p.days_sold)}</td>
+      <td class="num">${money(p.price)}</td>
+      <td class="num">${money(p.value)}</td></tr>`).join("");
+
+  const dayRows = d.by_day.map(x => `<tr>
+      <td>${esc(niceDate(x.date) || x.date)}</td>
+      <td class="num">${fmtInt(x.cartons)}</td>
+      <td class="num">${x.returned ? fmtInt(x.returned) : "—"}</td>
+      <td class="num">${money(x.value)}</td></tr>`).join("");
+
+  const agentRows = d.by_agent.map(a => `<tr>
+      <td>${esc(a.agent)}</td><td class="num">${fmtInt(a.cartons)}</td>
+      <td class="num">${money(a.value)}</td></tr>`).join("");
+
+  main.innerHTML = `
+    <section class="screen ins">
+      ${head}
+      ${controls}
+      <div class="rep-title">
+        <h2>${esc(niceDate(rg.from))} to ${esc(niceDate(rg.to))}</h2>
+        <span>${t.statements ? `${fmtInt(t.statements)} account sale${t.statements === 1 ? "" : "s"} over ${fmtInt(t.days_traded)} trading day${t.days_traded === 1 ? "" : "s"}` : "Nothing sold in this range"}</span>
+      </div>
+      ${empty ? `<div class="banner"><span class="bi">◔</span><span>No sales recorded between these dates.</span></div>` : `
+      <div class="kpis kpis-4">
+        ${kpiCard("Sales value", money(m.sold),
+          `${fmtInt(t.cartons_sold)} cartons, net of ${fmtInt(t.cartons_returned)} returned`)}
+        ${kpiCard("Payments received", money(m.payments_received),
+          `${fmtInt(m.payment_count)} account sale${m.payment_count === 1 ? "" : "s"} paid in this range`)}
+        ${kpiCard("Nett to Zaco", money(m.payments_nett),
+          m.deduction_rate != null ? `agent kept ${(m.deduction_rate * 100).toFixed(1)}% · ${money(m.deductions)}` : "no payments in range")}
+        ${kpiCard("Reconciled", money(m.reconciled),
+          `${fmtInt(m.reconciled_lines)} line${m.reconciled_lines === 1 ? "" : "s"} matched to a payment`)}
+      </div>
+      <p class="rep-note">A payment settles sales that happened earlier, often weeks earlier, so the money in
+        will not equal the sales value for the same dates. Both are shown rather than netted into one figure
+        that would mean neither.</p>
+
+      <div class="card ins-card">
+        <div class="ins-card-head"><h2>By product</h2>
+          <span class="rep-c">${fmtInt(d.by_product.length)} product${d.by_product.length === 1 ? "" : "s"}</span></div>
+        <div class="rep-scroll"><table class="rep-table">
+          <thead><tr><th>Product</th><th class="num">Cartons</th><th class="num">Back</th>
+            <th class="num">Days</th><th class="num">Per carton</th><th class="num">Value</th></tr></thead>
+          <tbody>${productRows}</tbody>
+          <tfoot><tr><td>Total</td><td class="num">${fmtInt(t.cartons_sold)}</td>
+            <td class="num">${fmtInt(t.cartons_returned)}</td><td class="num">${fmtInt(t.days_traded)}</td>
+            <td class="num">—</td><td class="num">${money(m.sold)}</td></tr></tfoot>
+        </table></div>
+      </div>
+
+      <div class="ins-grid-2">
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>By day</h2></div>
+          <div class="rep-scroll"><table class="rep-table">
+            <thead><tr><th>Day</th><th class="num">Cartons</th><th class="num">Back</th><th class="num">Value</th></tr></thead>
+            <tbody>${dayRows}</tbody>
+            <tfoot><tr><td>Total</td><td class="num">${fmtInt(t.cartons_sold)}</td>
+              <td class="num">${fmtInt(t.cartons_returned)}</td><td class="num">${money(m.sold)}</td></tr></tfoot>
+          </table></div>
+        </div>
+        <div class="card ins-card">
+          <div class="ins-card-head"><h2>By agent</h2></div>
+          <div class="rep-scroll"><table class="rep-table">
+            <thead><tr><th>Agent</th><th class="num">Cartons</th><th class="num">Value</th></tr></thead>
+            <tbody>${agentRows}</tbody>
+          </table></div>
+        </div>
+      </div>`}
     </section>`;
 }
 

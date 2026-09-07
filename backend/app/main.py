@@ -1050,18 +1050,29 @@ async def delete_history(
     lo, hi = analytics.period_bounds(month, week)
     if not lo:
         raise HTTPException(400, "Choose a month or week to delete.")
-    # Delete exactly what the app calls this period, not what one column says.
-    # A row with no group_date is still dated -- Insights and Tracking fall back
-    # to the invoice date, then the received date, then when it was recorded --
-    # so a statement shown under August but carrying no group_date survived a
-    # filter written against group_date alone, and August came back on the next
-    # refresh. Select the rows the same way the pages do, then delete them by id.
-    dated = await db_get(user, "statements", {
+    # Two passes, because the period is not one column.
+    #
+    # First the dated rows, by a filter the database applies itself. This must
+    # not be done by reading the ids and deleting those: a read is capped by the
+    # server's row limit and comes back in no particular order, so on a history
+    # larger than that cap the rows to delete may simply not be in the page that
+    # comes back, and the delete quietly does nothing.
+    window = f"(group_date.gte.{lo},group_date.lte.{hi})"
+    deleted = await db_delete(user, "statements", {"and": window})
+
+    # Then the rows carrying no group_date at all. They are still dated, because
+    # the pages fall back to the invoice date, then the received date, then when
+    # the row was recorded -- so a statement shown under August with no
+    # group_date survived a filter written against group_date and brought the
+    # period back on the next refresh. Only null-dated rows are read here, which
+    # is a small set, and they are removed by id.
+    undated = await db_get(user, "statements", {
         "select": "id,group_date,invoice_date,date_received,created_at",
+        "group_date": "is.null",
         "limit": "20000",
     })
-    targets = [r["id"] for r in analytics.filter_rows(dated, month, week) if r.get("id")]
-    deleted = await _delete_by_id(user, "statements", targets)
+    strays = [r["id"] for r in analytics.filter_rows(undated, month, week) if r.get("id")]
+    deleted += await _delete_by_id(user, "statements", strays)
 
     # Tracking is not built from the statements alone: what is owed comes from
     # the recorded payments, and the closed lines from the dismissals. Deleting
@@ -1076,11 +1087,14 @@ async def delete_history(
     # Say plainly what is still there. A delete that removes nothing because the
     # rows belong to someone else returns 200 and an empty list, which read as
     # success while the period stayed on screen.
-    left = await db_get(user, "statements", {
+    still_dated = await db_get(user, "statements",
+                               {"select": "id", "and": window, "limit": "20000"})
+    still_undated = await db_get(user, "statements", {
         "select": "id,group_date,invoice_date,date_received,created_at",
+        "group_date": "is.null",
         "limit": "20000",
     })
-    remaining = len(analytics.filter_rows(left, month, week))
+    remaining = len(still_dated) + len(analytics.filter_rows(still_undated, month, week))
 
     return {
         "deleted": len(deleted),

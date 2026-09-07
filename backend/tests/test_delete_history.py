@@ -64,17 +64,36 @@ def test_delete_takes_the_rows_the_period_actually_shows(monkeypatch):
          "date_received": None, "created_at": None},
     ]
     calls = []
+    def _in_window(r, params):
+        w = params.get("and") or ""
+        if "group_date.gte." not in w:
+            return False
+        lo = w.split("group_date.gte.")[1].split(",")[0]
+        hi = w.split("group_date.lte.")[1].rstrip(")")
+        return r["group_date"] is not None and lo <= r["group_date"] <= hi
+
     async def fake_delete(user, path, params):
         calls.append((path, params))
         if path != "statements":
             return [{"accsale": "A"}]
-        ids = {x for x in params["id"].removeprefix("in.(").rstrip(")").split(",") if x}
-        gone = [r for r in store if str(r["id"]) in ids]
+        if "id" in params:
+            ids = {x for x in params["id"].removeprefix("in.(").rstrip(")").split(",") if x}
+            gone = [r for r in store if str(r["id"]) in ids]
+        else:
+            gone = [r for r in store if _in_window(r, params)]
         for r in gone:
             store.remove(r)
         return gone
+
     async def fake_get(user, path, params):
-        return list(store) if path == "statements" else []
+        if path != "statements":
+            return []
+        rows = store
+        if params.get("group_date") == "is.null":
+            rows = [r for r in rows if r["group_date"] is None]
+        elif params.get("and"):
+            rows = [r for r in rows if _in_window(r, params)]
+        return list(rows)
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 
@@ -85,7 +104,9 @@ def test_delete_takes_the_rows_the_period_actually_shows(monkeypatch):
     assert [r["id"] for r in store] == [3]   # August untouched
 
     by_table = dict(calls)
-    assert by_table["statements"]["id"].startswith("in.(")
+    stmt_calls = [p for t, p in calls if t == "statements"]
+    assert any("group_date.gte.2026-07-01" in (p.get("and") or "") for p in stmt_calls)
+    assert any("id" in p for p in stmt_calls)   # the undated stray, by id
     assert by_table["payments"]["and"] ==         "(paid_on.gte.2026-07-01,paid_on.lte.2026-07-31)"
 
 
@@ -98,10 +119,64 @@ def test_rows_it_could_not_remove_are_reported(monkeypatch):
     async def fake_delete(user, path, params):
         return []                       # RLS removes nothing
     async def fake_get(user, path, params):
-        return list(store) if path == "statements" else []
+        if path != "statements":
+            return []
+        if params.get("group_date") == "is.null":
+            return [r for r in store if r["group_date"] is None]
+        return list(store)              # the dated-window read
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 
     result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
     assert result["deleted"] == 0
     assert result["remaining"] == 1
+
+
+def test_a_history_larger_than_the_read_cap_still_deletes(monkeypatch):
+    """The dated rows must go by a filter the database applies, never by
+    reading their ids first.
+
+    PostgREST caps how many rows a read returns and gives no order unless one
+    is asked for. Selecting ids and deleting those means that on a history
+    bigger than the cap the rows to delete may not be in the page that comes
+    back, and the delete removes nothing while reporting success.
+    """
+    CAP = 100
+    store = [{"id": i, "group_date": "2026-07-04", "invoice_date": None,
+              "date_received": None, "created_at": None} for i in range(1, 501)]
+
+    def _in_window(r, params):
+        w = params.get("and") or ""
+        if "group_date.gte." not in w or r["group_date"] is None:
+            return False
+        lo = w.split("group_date.gte.")[1].split(",")[0]
+        hi = w.split("group_date.lte.")[1].rstrip(")")
+        return lo <= r["group_date"] <= hi
+
+    async def fake_delete(user, path, params):
+        if path != "statements":
+            return []
+        gone = ([r for r in store if str(r["id"]) in
+                 set(params["id"].removeprefix("in.(").rstrip(")").split(","))]
+                if "id" in params else [r for r in store if _in_window(r, params)])
+        for r in gone:
+            store.remove(r)
+        return gone
+
+    async def fake_get(user, path, params):
+        if path != "statements":
+            return []
+        rows = store
+        if params.get("group_date") == "is.null":
+            rows = [r for r in rows if r["group_date"] is None]
+        elif params.get("and"):
+            rows = [r for r in rows if _in_window(r, params)]
+        return list(rows[:CAP])          # the server's row cap
+
+    monkeypatch.setattr(main, "db_delete", fake_delete)
+    monkeypatch.setattr(main, "db_get", fake_get)
+
+    result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
+    assert result["deleted"] == 500, "the whole period must go, not one page of it"
+    assert result["remaining"] == 0
+    assert store == []

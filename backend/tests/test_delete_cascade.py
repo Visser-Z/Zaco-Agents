@@ -34,20 +34,27 @@ class _DB:
         # Deep copies, as a real read does: _saved_payments renames paid_on to
         # date on the rows it hands back, and sharing the dicts would rewrite
         # the stored table.
-        return [dict(r) for r in self.rows.get(table, [])]
+        rows = self.rows.get(table, [])
+        if table == "statements":
+            if params.get("group_date") == "is.null":
+                rows = [r for r in rows if r.get("group_date") is None]
+            elif params.get("and"):
+                rows = [r for r in rows if self._between(r.get("group_date"), params, "group_date")]
+        return [dict(r) for r in rows]
 
     async def delete(self, user, table, params):
         keep, gone = [], []
         ids = None
         if "id" in params:                       # id=in.(1,2,3)
             ids = {x for x in params["id"].removeprefix("in.(").rstrip(")").split(",") if x}
+        column = "group_date" if table == "statements" else "paid_on"
         for r in self.rows[table]:
             if ids is not None:
                 hit = str(r.get("id")) in ids
             elif table == "dismissals":
                 hit = all(str(params.get(k, "")) == f"eq.{r.get(k)}" for k in ("kind", "ref"))
             else:
-                hit = self._between(r.get("paid_on"), params, "paid_on")
+                hit = self._between(r.get(column), params, column)
             (gone if hit else keep).append(r)
         self.rows[table] = keep
         return gone

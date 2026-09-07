@@ -2004,6 +2004,16 @@ async function confirmDeleteHistory() {
       // The request succeeded but row-level security removed nothing -- the
       // rows aren't owned by this account (or the delete policy isn't in place).
       toast("Nothing was deleted — your account doesn’t have permission to remove these rows. See the admin note.", true);
+    } else if (res.payments_remaining) {
+      // The sales went but the payments did not, so Tracking will still report
+      // the period's money. Name the migration rather than leave it a mystery.
+      toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"}, but `
+            + `${res.payments_remaining} payment${res.payments_remaining === 1 ? "" : "s"} for `
+            + `${scopeLabel(I)} could not be removed, so Tracking will still show this period. `
+            + `Run migration 0018 in Supabase, then delete again.`, true);
+      I.data = null;
+      S.tracking.data = null; S.tracking.error = null;
+      loadInsights();
     } else if (res.remaining) {
       // Some went, some did not. Saying "deleted" here is how a period could
       // appear to have gone and still be on Tracking a moment later.

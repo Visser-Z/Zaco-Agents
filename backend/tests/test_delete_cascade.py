@@ -133,3 +133,32 @@ def test_a_closed_line_still_backed_by_history_is_kept(monkeypatch):
     _wire(monkeypatch, db)
     asyncio.run(main.delete_history(month="2026-08", week=None, user=USER))
     assert db.rows["dismissals"] == [{"kind": "slow", "ref": "14588:GRAPES"}]
+
+
+def test_payments_that_survive_the_delete_are_reported(monkeypatch):
+    """Row-level security refused the payments delete and answered 200 with an
+    empty list, so the sales went and the money stayed. Tracking then reported
+    the period from payments alone, which is what "I deleted it and can still
+    see it" looked like."""
+    db = _DB([_sale("2026-08-01")], [_payment("2026-08-05")], [])
+    real_delete = db.delete
+
+    async def refuse_payments(user, table, params):
+        if table == "payments":
+            return []                      # what an admin-only policy returns
+        return await real_delete(user, table, params)
+
+    monkeypatch.setattr(main, "db_get", db.get)
+    monkeypatch.setattr(main, "db_delete", refuse_payments)
+
+    out = asyncio.run(main.delete_history(month="2026-08", week=None, user=USER))
+    assert out["deleted"] == 1
+    assert out["payments_deleted"] == 0
+    assert out["payments_remaining"] == 1      # said out loud, not swallowed
+
+
+def test_a_clean_delete_reports_nothing_left_behind(monkeypatch):
+    db = _DB([_sale("2026-08-01")], [_payment("2026-08-05")], [])
+    _wire(monkeypatch, db)
+    out = asyncio.run(main.delete_history(month="2026-08", week=None, user=USER))
+    assert (out["remaining"], out["payments_remaining"]) == (0, 0)

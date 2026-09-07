@@ -1079,9 +1079,13 @@ async def delete_history(
     # only the sales left Tracking still reporting the period -- outstanding
     # money against sales that no longer existed. A period is one thing to the
     # operator, so all three go together.
-    payments = await db_delete(
-        user, "payments", {"and": f"(paid_on.gte.{lo},paid_on.lte.{hi})"}
-    )
+    pay_window = f"(paid_on.gte.{lo},paid_on.lte.{hi})"
+    payments = await db_delete(user, "payments", {"and": pay_window})
+    # What the period still holds. A refused delete answers 200 with an empty
+    # list, so "removed nothing" and "there was nothing to remove" look
+    # identical from here unless we go back and count.
+    payments_left = len(await db_get(
+        user, "payments", {"select": "accsale", "and": pay_window, "limit": "20000"}))
     closed = await _prune_dismissals(user)
 
     # Say plainly what is still there. A delete that removes nothing because the
@@ -1099,6 +1103,7 @@ async def delete_history(
     return {
         "deleted": len(deleted),
         "payments_deleted": len(payments),
+        "payments_remaining": payments_left,
         "closed_cleared": closed,
         "remaining": remaining,
         "from": lo,

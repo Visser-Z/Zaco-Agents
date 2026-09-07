@@ -732,6 +732,8 @@ _ANALYTICS_COLUMNS = (
     "group_date,invoice_date,date_received,status,created_at,"
     # supplier_ref and dn are how a row finds its recorded purchase cost.
     "qty_received,last_sale,payment_refs,supplier_ref,dn,"
+    # Which report a row came from, so a day can say where it was read.
+    "source_file,"
     # Rows are account sales; this is how several of them are recognised as one
     # delivery, so what was SENT is not counted once per account sale.
     "consignment_id,"

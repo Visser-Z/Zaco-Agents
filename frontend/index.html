@@ -373,6 +373,15 @@
   .sday-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
                padding: 0 0 6px; border-bottom: 1px solid var(--line-strong); }
   .sday-date { font-weight: 650; font-size: 13.5px; }
+  /* Where the day came from. A day turning up when no trading happened is
+     answered by naming the report it was read out of. */
+  .sday-src { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+              margin: 6px 0 2px; font-size: 10.5px; color: var(--ink-faint); }
+  .sday-src .src { display: inline-flex; align-items: center; gap: 5px; max-width: 340px;
+                   padding: 2px 7px; border-radius: 5px; background: var(--surface-2);
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sday-src .src em { font-style: normal; font-weight: 700; color: var(--ink-soft);
+                      font-variant-numeric: tabular-nums; }
   .sday-tot { font-size: 12px; color: var(--ink-soft); }
   table.sday-items { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; }
   table.sday-items col.c-n { width: 18%; }
@@ -1575,6 +1584,9 @@ function renderTracking() {
         <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
         <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)}</span>
       </div>
+      ${(d.sources || []).length ? `<div class="sday-src">Read from ${(d.sources || []).map(s =>
+          `<span class="src" title="${esc(s.file)} — ${fmtInt(s.rows)} row${s.rows === 1 ? "" : "s"}, ${fmtInt(s.cartons)} cartons">${esc(s.file)}<em>${fmtInt(s.rows)}</em></span>`
+        ).join("")}</div>` : ""}
       <table class="sday-items">
         <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
         <thead><tr><th>Product</th><th>Cartons</th><th>Per carton</th><th>Value</th></tr></thead>

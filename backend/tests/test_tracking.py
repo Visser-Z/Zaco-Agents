@@ -298,3 +298,37 @@ def test_a_scoped_view_still_reports_the_whole_exposure():
     assert aug["still_to_come_all_time"] == 2000.0
     # unscoped, there is no second figure to confuse it with
     assert "still_to_come_all_time" not in tracking.compute(sales, [])["payments"]
+
+
+# --- where a day came from -------------------------------------------------
+
+def test_a_day_names_the_reports_it_was_read_from():
+    """A day turning up when no trading happened is answered by naming the file
+    it came out of, rather than by trusting or doubting the date on its own."""
+    sales = [
+        dict(_sale("GRAPES", 10, 100.0, "2026-08-27"), source_file="late-august.pdf"),
+        dict(_sale("PLUMS", 5, 50.0, "2026-08-27"), source_file="late-august.pdf"),
+        dict(_sale("CHERRIES", 2, 20.0, "2026-08-27"), source_file="another.pdf"),
+    ]
+    day = tracking.sales_by_day(sales)["days"][0]
+    assert [s["file"] for s in day["sources"]] == ["late-august.pdf", "another.pdf"]
+    assert day["sources"][0] == {"file": "late-august.pdf", "rows": 2, "cartons": 15.0}
+
+
+def test_the_per_row_suffix_is_stripped_from_the_report_name():
+    """A source is recorded per block -- "export.pdf · consignment 4" -- which names
+    the row, not the report. Grouping on that gives one source per row."""
+    sales = [
+        dict(_sale("GRAPES", 10, 100.0, "2026-08-04"), source_file="export.pdf · consignment 1"),
+        dict(_sale("PLUMS", 5, 50.0, "2026-08-04"), source_file="export.pdf · consignment 2"),
+        dict(_sale("CHERRIES", 1, 10.0, "2026-08-04"), source_file="export.pdf · product 2 of 3"),
+    ]
+    day = tracking.sales_by_day(sales)["days"][0]
+    assert len(day["sources"]) == 1, day["sources"]
+    assert day["sources"][0] == {"file": "export.pdf", "rows": 3, "cartons": 16.0}
+
+
+def test_a_row_with_no_source_says_so_rather_than_vanishing():
+    sales = [_sale("GRAPES", 10, 100.0, "2026-08-04")]
+    day = tracking.sales_by_day(sales)["days"][0]
+    assert [s["file"] for s in day["sources"]] == ["Not recorded"]

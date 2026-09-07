@@ -163,6 +163,17 @@ def payment_status(sales: list[dict], payments: list[dict],
 
 # --- sales per day, per product ------------------------------------------
 
+def report_name(row: dict) -> str:
+    """The file a row was read from, without the part identifying the row.
+
+    A statement's source is recorded per block -- "the-export.pdf · consignment 4",
+    "· product 2 of 3" -- which names the row rather than the report. Grouping on
+    that gives one source per row and answers nothing, so the suffix comes off.
+    """
+    name = str(row.get("source_file") or "").split(" · ")[0].strip()
+    return name or "Not recorded"
+
+
 def sales_by_day(sales: list[dict], start: str | None = None,
                  end: str | None = None) -> dict:
     """How much sold each trading day, broken down by product.
@@ -181,12 +192,20 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             continue
         product = analytics.product_label(row)
         d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
-                                    "value": 0.0, "products": defaultdict(
+                                    "value": 0.0, "sources": defaultdict(
+                                        lambda: {"rows": 0, "cartons": 0.0}),
+                                    "products": defaultdict(
                                         lambda: {"cartons": 0.0, "value": 0.0, "returned": 0.0,
                                                  "agents": set(), "market_avg": [], "weight": 0.0})})
         d["cartons"] += analytics.row_cartons(row)
         d["returned"] += analytics.row_returned(row)
         d["value"] += analytics.row_value(row)
+        # Which report this row was read from. A day that turns up where no
+        # trading happened is answered by naming the file it came out of, rather
+        # than by trusting or doubting the date on its own.
+        src = d["sources"][report_name(row)]
+        src["rows"] += 1
+        src["cartons"] += analytics.row_cartons(row)
         p = d["products"][product]
         cartons = analytics.row_cartons(row)
         p["cartons"] += cartons
@@ -223,6 +242,11 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             "returned": round(d["returned"], 2),
             "value": round(d["value"], 2),
             "products": products,
+            "sources": sorted(
+                ({"file": name, "rows": v["rows"], "cartons": round(v["cartons"], 2)}
+                 for name, v in d["sources"].items()),
+                key=lambda s: (-s["rows"], s["file"]),
+            ),
         })
     return {"days": days}
 

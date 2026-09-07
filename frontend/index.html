@@ -1171,11 +1171,14 @@ function cancelDeleteTracking() { S.tracking.confirmDelete = false; render(); }
 async function confirmDeleteTracking() {
   const T = S.tracking;
   if (!S.live) { toast("Deleting history needs the live app", true); return; }
-  if (!T.month && !T.week) { toast("Choose a month or week to delete", true); return; }
-  const scope = trackingScope(T);
+  const everything = !T.month && !T.week;
+  const scope = everything ? "the whole book" : trackingScope(T);
   const body = new URLSearchParams();
   if (T.month) body.set("month", T.month);
   if (T.week) body.set("week", T.week);
+  // A blank period is an error on the server, never a silent delete-all, so
+  // clearing the book has to ask for it by name.
+  if (everything) body.set("scope", "all");
   try {
     const res = await (await api("/api/history/delete", {
       method: "POST",
@@ -1418,16 +1421,21 @@ function renderTracking() {
         <button class="btn ghost sm refresh" onclick="loadTracking()">↻ Refresh</button>
       </div>
     </div>
-    ${T.month || T.week ? `<div class="ins-danger">
+    ${T.data ? `<div class="ins-danger">
       ${T.confirmDelete ? `
-        <span class="dwarn"><b>Delete ${esc(trackingScope(T))} from the book?</b>
+        <span class="dwarn"><b>${T.month || T.week
+            ? `Delete ${esc(trackingScope(T))} from the book?`
+            : `Delete the entire book — every month on record?`}</b>
           The sales, the payments recorded against them and any lines closed here
-          all go. Insights loses the period too. This can’t be undone.</span>
+          all go. Insights ${T.month || T.week ? "loses the period" : "is emptied"} too.
+          This can’t be undone.</span>
         <span class="dact">
           <button class="btn ghost sm" onclick="cancelDeleteTracking()">Cancel</button>
-          <button class="btn danger sm" onclick="confirmDeleteTracking()">Delete permanently</button>
+          <button class="btn danger sm" onclick="confirmDeleteTracking()">${
+            T.month || T.week ? "Delete permanently" : "Delete everything permanently"}</button>
         </span>`
-      : `<button class="btn ghost sm dtrigger" onclick="askDeleteTracking()">🗑 Delete ${esc(trackingScope(T))}…</button>`}
+      : `<button class="btn ghost sm dtrigger" onclick="askDeleteTracking()">🗑 ${T.month || T.week
+          ? `Delete ${esc(trackingScope(T))}…` : "Delete all history…"}</button>`}
     </div>` : ""}`;
 
   if (T.loading && !T.data) {

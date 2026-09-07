@@ -73,8 +73,9 @@ def test_tracking_delete_is_scoped_and_disarms_on_a_period_change(source: str) -
     """
     body = re.search(r"async function confirmDeleteTracking\(\) \{(.*?)\n\}", source, re.S)
     assert body, "confirmDeleteTracking is gone or was reshaped"
-    assert "if (!T.month && !T.week)" in body.group(1), (
-        "the delete must refuse when no month or week is scoped")
+    assert 'body.set("scope", "all")' in body.group(1), (
+        "clearing the whole book must ask for it by name; a blank period is an "
+        "error on the server, never a silent delete-all")
 
     for setter in ("setTrackingMonth", "setTrackingWeek"):
         fn = re.search(rf"function {setter}\(\w\) \{{(.*?)\n\}}", source, re.S)

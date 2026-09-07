@@ -43,7 +43,7 @@ def test_delete_requires_a_period(monkeypatch):
     monkeypatch.setattr(main, "db_delete", fake_delete)
     import pytest
     with pytest.raises(Exception):
-        asyncio.run(main.delete_history(month=None, week=None, user=USER))
+        asyncio.run(main.delete_history(scope=None, month=None, week=None, user=USER))
     assert not called
 
 
@@ -97,7 +97,7 @@ def test_delete_takes_the_rows_the_period_actually_shows(monkeypatch):
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 
-    result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
+    result = asyncio.run(main.delete_history(scope=None, month="2026-07", week=None, user=USER))
     assert result["deleted"] == 2            # both July rows, group_date or not
     assert result["remaining"] == 0
     assert result["from"] == "2026-07-01" and result["to"] == "2026-07-31"
@@ -127,7 +127,7 @@ def test_rows_it_could_not_remove_are_reported(monkeypatch):
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 
-    result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
+    result = asyncio.run(main.delete_history(scope=None, month="2026-07", week=None, user=USER))
     assert result["deleted"] == 0
     assert result["remaining"] == 1
 
@@ -176,7 +176,7 @@ def test_a_history_larger_than_the_read_cap_still_deletes(monkeypatch):
     monkeypatch.setattr(main, "db_delete", fake_delete)
     monkeypatch.setattr(main, "db_get", fake_get)
 
-    result = asyncio.run(main.delete_history(month="2026-07", week=None, user=USER))
+    result = asyncio.run(main.delete_history(scope=None, month="2026-07", week=None, user=USER))
     assert result["deleted"] == 500, "the whole period must go, not one page of it"
     assert result["remaining"] == 0
     assert store == []

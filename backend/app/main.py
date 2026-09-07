@@ -1037,19 +1037,30 @@ async def get_analytics(
 async def delete_history(
     month: str | None = Form(None),
     week: str | None = Form(None),
+    scope: str | None = Form(None),
     user: User | None = Depends(require_user),
 ) -> dict:
-    """Delete the recorded statements for one month or week.
+    """Delete a period of the book, or all of it.
 
-    Scoped to a period on purpose -- there is no "delete everything" path. This
-    removes the sales history behind Insights and reconciliation for that
-    period, so it should only be run once the period's payments are reconciled.
-    Governed by RLS (a user may delete their own statements; admins any)."""
+    A period is not just the sales. Tracking answers from the sales, the
+    payments recorded against them and the lines closed on them, so removing
+    one and leaving the others is what left a deleted month still on screen.
+    All three go together here.
+
+    `scope="all"` clears the whole book. It is a separate word rather than an
+    empty month so that it can only ever be asked for deliberately -- a missing
+    filter must stay an error, not a way to empty the table by accident.
+    """
     if user is None:
         raise HTTPException(400, "History deletion is not available in local mode.")
+
+    everything = (scope or "").lower() == "all"
     lo, hi = analytics.period_bounds(month, week)
-    if not lo:
+    if not everything and not lo:
         raise HTTPException(400, "Choose a month or week to delete.")
+
+    if everything:
+        return await _delete_everything(user)
     # Two passes, because the period is not one column.
     #
     # First the dated rows, by a filter the database applies itself. This must
@@ -1086,6 +1097,13 @@ async def delete_history(
     # identical from here unless we go back and count.
     payments_left = len(await db_get(
         user, "payments", {"select": "accsale", "and": pay_window, "limit": "20000"}))
+    # Payments whose sales have just gone. A sale made in August and settled in
+    # September has a September paid_on, so deleting August left it behind to be
+    # reported as money paid against nothing, for ever. Cleared by what it
+    # matches rather than by its own date, which is the only thing that ties it
+    # to the period being removed.
+    orphan_payments = await _prune_payments(user)
+    payments += orphan_payments
     closed = await _prune_dismissals(user)
 
     # Say plainly what is still there. A delete that removes nothing because the
@@ -1108,6 +1126,70 @@ async def delete_history(
         "remaining": remaining,
         "from": lo,
         "to": hi,
+    }
+
+
+async def _prune_payments(user: User) -> list[dict]:
+    """Recorded payments that no longer match any sale on the book.
+
+    A payment is tied to the period by what it settles, not by the day it was
+    received: an August sale paid in September carries a September date, so a
+    delete scoped to August never touched it and Tracking went on reporting it
+    as money paid, with nothing left to have paid for.
+
+    Only payments matching nothing at all are removed. One that still settles a
+    surviving sale is left alone, whichever period that sale falls in.
+    """
+    payments = await _saved_payments(user)
+    if not payments:
+        return []
+    sales = await _history_rows(user)
+    live_refs = {r.get("payment_refs") for r in sales if r.get("payment_refs")}
+    live_keys = {
+        (str(r.get("supplier_ref")), reconcile.normalise_product(r.get("product")))
+        for r in sales
+    }
+
+    gone: list[dict] = []
+    for pay in payments:
+        accsale = pay.get("accsale")
+        if accsale and any(accsale in (refs or "") for refs in live_refs):
+            continue
+        # Otherwise it is kept only if one of its commodity lines still has a
+        # sale under the same supplier ref -- the fallback the matcher uses.
+        keyed = {(str(pay.get("dn")), reconcile.normalise_product(l.get("product")))
+                 for l in (pay.get("lines") or [])}
+        if keyed & live_keys:
+            continue
+        if not accsale:
+            continue
+        gone += await db_delete(user, "payments", {"accsale": f"eq.{accsale}"})
+    return gone
+
+
+async def _delete_everything(user: User) -> dict:
+    """Clear the whole book: every statement, every payment, every closed line.
+
+    Deliberately not reachable by leaving the period blank. db_delete refuses an
+    unfiltered request precisely so a missing filter cannot empty a table, so
+    each of these carries a filter that is true of every row and is written out
+    rather than defaulted into.
+    """
+    statements = await db_delete(user, "statements", {"id": "gt.0"})
+    payments = await db_delete(user, "payments", {"accsale": "not.is.null"})
+    closed = await db_delete(user, "dismissals", {"ref": "not.is.null"})
+
+    left = await db_get(user, "statements", {"select": "id", "limit": "20000"})
+    pay_left = await db_get(user, "payments", {"select": "accsale", "limit": "20000"})
+    return {
+        "deleted": len(statements),
+        "payments_deleted": len(payments),
+        "closed_cleared": len(closed),
+        "remaining": len(left),
+        "payments_remaining": len(pay_left),
+        "from": None,
+        "to": None,
+        "scope": "all",
     }
 
 

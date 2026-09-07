@@ -74,3 +74,22 @@ def is_allowed(client_ip: str | None) -> bool:
     except ValueError:
         return False
     return any(addr in net for net in ALLOWED_NETWORKS)
+
+
+# --- market agent API -----------------------------------------------------
+# The agent's own system, where it offers one. Reading sales and payments from
+# it removes the guesswork the PDF exports force: a transaction carries its own
+# date instead of one inferred from the consignment, and nothing has to be
+# recovered from a report's layout.
+#
+# MARKET_API_KEY is a secret and must never reach the browser. It is read here
+# and used only in server-to-server calls; /api/health deliberately reports
+# whether it is set, never what it is.
+
+MARKET_API_BASE = os.getenv("MARKET_API_BASE", "").rstrip("/")
+MARKET_API_KEY = os.getenv("MARKET_API_KEY", "")
+
+
+def market_api_ready() -> bool:
+    """Whether the agent's API is configured, without revealing the key."""
+    return bool(MARKET_API_BASE and MARKET_API_KEY)

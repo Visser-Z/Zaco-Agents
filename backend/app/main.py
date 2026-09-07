@@ -70,6 +70,9 @@ def health() -> dict[str, object]:
         "auth_required": config.AUTH_REQUIRED and config.auth_configured(),
         "supabase_url": config.SUPABASE_URL,
         "supabase_anon_key": config.SUPABASE_ANON_KEY,
+        # Whether the agent's API is configured -- never the key itself. This
+        # endpoint is open, so anything added here is public by definition.
+        "market_api": config.market_api_ready(),
     }
 
 

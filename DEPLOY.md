@@ -272,3 +272,33 @@ actions ever need an audit trail. Add authentication before widening access.
 **HTTPS:** traffic inside a tailnet is already encrypted end to end, so plain
 HTTP over the tailnet is acceptable here. If you later expose it any other way,
 put TLS in front of it.
+
+## Market agent API
+
+Where the agent offers its own API, the app can read sales and payments from it
+instead of from the PDF exports. That removes the inference the PDFs force: a
+transaction carries its own sale date rather than one derived from the
+consignment, and nothing has to be recovered from a report's layout.
+
+Two settings, both required before anything is read over the API. With either
+one blank the app keeps reading the PDF exports, which stay supported for
+historical reports and as the fallback if the API is unavailable.
+
+| Variable | What it is |
+| --- | --- |
+| `MARKET_API_BASE` | Base URL of the agent's API, no trailing slash |
+| `MARKET_API_KEY` | **Secret.** The credential the agent issued |
+
+`MARKET_API_KEY` is a secret and is treated as one:
+
+- Set it as an environment variable in the deployment (Vercel → Settings →
+  Environment Variables), not in a file in the repository. `.env` is ignored by
+  git, but an environment variable is the safer habit.
+- Never paste it into a chat, an issue or a commit message. A key that reaches
+  a transcript or the git history has to be rotated.
+- It is used only in server-to-server calls. `/api/health` is an open endpoint
+  the login screen reads before sign-in, so it reports `market_api: true|false`
+  to say whether the API is configured, and never the key itself. A test pins
+  that.
+- Rotating it is a change to the environment variable and a redeploy. Nothing
+  in the database or the recorded history refers to it.

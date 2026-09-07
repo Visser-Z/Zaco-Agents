@@ -73,6 +73,9 @@ def health() -> dict[str, object]:
         # Whether the agent's API is configured -- never the key itself. This
         # endpoint is open, so anything added here is public by definition.
         "market_api": config.market_api_ready(),
+        # The commit actually serving, so a stale deploy can be spotted from
+        # outside instead of being taken on trust.
+        "build": config.BUILD_SHA or "unknown",
     }
 
 

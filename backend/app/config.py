@@ -93,3 +93,12 @@ MARKET_API_KEY = os.getenv("MARKET_API_KEY", "")
 def market_api_ready() -> bool:
     """Whether the agent's API is configured, without revealing the key."""
     return bool(MARKET_API_BASE and MARKET_API_KEY)
+
+
+# --- build identity -------------------------------------------------------
+# Which commit is actually serving. Deploys have gone stale silently before --
+# the push lands on the remote and the served build stays older -- and from
+# outside there was no way to tell a deployed fix from an undeployed one.
+# Vercel sets this; empty anywhere else, which reads as "unknown", not as a lie.
+
+BUILD_SHA = (os.getenv("VERCEL_GIT_COMMIT_SHA", "") or os.getenv("ZACON_BUILD_SHA", ""))[:7]

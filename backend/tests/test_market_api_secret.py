@@ -50,3 +50,18 @@ def test_the_key_is_not_in_the_repo():
             if line.startswith("MARKET_API_KEY"):
                 assert line.strip() in ("MARKET_API_KEY=", "MARKET_API_KEY="), (
                     f".env.example must not carry a real key: {line!r}")
+
+
+def test_health_reports_which_commit_is_serving(monkeypatch):
+    """A push landing on the remote is not the same as a build serving it.
+    Twice now a fix was reported as deployed while the old build was still
+    being served, so the commit is published and can be checked."""
+    import app.config as cfg
+    monkeypatch.setattr(cfg, "BUILD_SHA", "abc1234")
+    assert main.health()["build"] == "abc1234"
+
+
+def test_an_unknown_build_says_so_rather_than_guessing(monkeypatch):
+    import app.config as cfg
+    monkeypatch.setattr(cfg, "BUILD_SHA", "")
+    assert main.health()["build"] == "unknown"

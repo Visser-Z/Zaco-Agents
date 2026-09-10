@@ -451,6 +451,11 @@
   .bv { font-size: 13px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   .chart-wrap { width: 100%; overflow-x: auto; }
+  .repchart { width: 100%; height: auto; display: block; }
+  .repchart .gl { stroke: var(--line); stroke-width: 1; }
+  .repchart .bar { fill: var(--accent); }
+  .repchart .bar:hover { fill: var(--accent-strong); }
+  .repchart .tx { fill: var(--ink-faint); font-size: 10px; font-family: var(--sans); }
   .trend { width: 100%; height: auto; display: block; }
   .trend .area { fill: var(--accent-tint); }
   .trend .stroke { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
@@ -594,6 +599,7 @@
   .ins-danger .dwarn { font-size: 13px; color: var(--ink-soft); flex: 1; min-width: 220px; }
   .ins-danger .dact { display: flex; gap: 8px; flex: none; }
   /* Icons sit on the text baseline at the text's own colour and weight. */
+  .mode.api::after { content: "· API"; margin-left: 5px; opacity: .75; font-weight: 600; }
   .ic { vertical-align: -2px; flex: none; }
   .btn .ic { margin-right: 5px; margin-left: -2px; }
   .btn.sm { padding: 7px 13px; font-size: 13px; }
@@ -653,7 +659,10 @@
   .workspace { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: stretch; }
   .ws-main { min-width: 0; }
   .ws-col { min-width: 0; display: flex; flex-direction: column; }
-  .ws-col > .card { flex: 1; display: flex; flex-direction: column; transition: box-shadow .12s; }
+  /* One padding for both halves. The payments panel carried its own, so its
+     heading and dropzone sat 17px lower than the sales half beside it. */
+  .ws-col > .card { flex: 1; display: flex; flex-direction: column; padding: 18px;
+                    transition: box-shadow .12s; }
   .ws-col.aiming > .card { box-shadow: 0 0 0 2px var(--accent); }
   .ws-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
   .ws-head h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
@@ -672,12 +681,14 @@
   .ws-rows summary { cursor: pointer; font-size: 13px; color: var(--ink-soft); }
   .ws-rows summary:hover { color: var(--ink); }
   .ws-rows .table-wrap { margin-top: 10px; }
-  .pm-card { padding: 17px 17px 15px; }
+  .pm-card { padding: 0; }   /* padding comes from .ws-col > .card */
   .pm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .pm-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
   .pm-sub { margin: 3px 0 0; font-size: 12px; color: var(--ink-faint); }
   .pm-meta { font-size: 12px; color: var(--ink-faint); margin: 12px 0 10px; }
-  .pm-drop { padding: 30px 16px; margin-top: 14px; }
+  /* No margin of its own: the heading below already sets the gap, and this
+     pushed the payments dropzone 14px below the sales one beside it. */
+  .pm-drop { margin-top: 0; }
   .pm-note { font-size: 12px; color: var(--ink-faint); margin-top: 12px; line-height: 1.55; }
   .pm-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
   .pm-k { background: var(--surface-2); border-radius: 10px; padding: 8px 11px; }
@@ -740,6 +751,8 @@ const S = {
   module: "sales",      // "sales" | "tracking" | "insights"
   screen: "hub",
   live: false,          // true once /api/health answers
+  marketApi: false,     // the agent's own API is configured
+  build: "",            // the commit actually serving
   authRequired: false,  // true when the server has Supabase auth configured
   agent: AGENTS[0],
   committed: [],        // rows in the sheet (existing + appended-not-yet-saved)
@@ -812,6 +825,9 @@ const ICON = {
   swap:    '<path d="M4 7h10M11.5 4.5 14 7l-2.5 2.5M14 11H4M6.5 8.5 4 11l2.5 2.5"/>',
   plus:    '<path d="M9 4.5v9M4.5 9h9"/>',
   clock:   '<circle cx="9" cy="9" r="5.5"/><path d="M9 5.8V9l2.2 1.6"/>',
+  download:'<path d="M9 3.5v8M5.5 8 9 11.5 12.5 8M3.5 14.5h11"/>',
+  print:   '<path d="M5.5 7V3.5h7V7M5.5 13H4a.5.5 0 0 1-.5-.5v-4A1.5 1.5 0 0 1 5 7h8a1.5 1.5 0 0 1 1.5 1.5v4a.5.5 0 0 1-.5.5h-1.5"/><path d="M5.5 11h7v3.5h-7z"/>',
+  table:   '<path d="M3.5 4.5h11v9h-11z"/><path d="M3.5 8h11M7.5 8v5.5"/>',
   alert:   '<path d="M9 3.5 15 14H3z"/><path d="M9 7.5v3M9 12.2v.4"/>',
 };
 function icon(name, size) {
@@ -1107,13 +1123,19 @@ async function checkHealth() {
     const data = await (await fetch(API + "/api/health")).json();
     S.live = true;
     S.authRequired = !!data.auth_required;
+    S.marketApi = !!data.market_api;      // the agent's API, once its key is set
+    S.build = data.build || "";
     Auth.cfg = { url: data.supabase_url || "", key: data.supabase_anon_key || "" };
   } catch { S.live = false; S.authRequired = false; }
   modeBadge.className = "mode " + (S.live ? "live" : "demo");
   modeBadge.textContent = S.live ? "Connected" : "Demo data";
+  // The badge says what is actually connected, so setting the market API key
+  // confirms itself here rather than having to be checked against the server.
   modeBadge.title = S.live
-    ? "Connected to the ZacoAgents API. Real PDFs and workbooks are processed."
+    ? `Connected${S.marketApi ? ", reading from the market agent's API" : ". Reports are read from the PDF exports."}`
+      + (S.build ? ` · build ${S.build}` : "")
     : "The API is not reachable, so the app is showing built-in example data.";
+  modeBadge.classList.toggle("api", S.live && S.marketApi);
 }
 
 async function loadCodes() {
@@ -1722,6 +1744,132 @@ function printReport() {
   setTimeout(done, 1000);   // afterprint does not fire everywhere
 }
 
+/** The range as columns, one per trading day.
+ *
+ *  A table of thirty days answers "what was the 14th" but not "which week
+ *  carried the month", which is the question a range is usually opened for.
+ *  Bars are labelled only where there is room, and every bar carries its own
+ *  title, so nothing depends on a tooltip that a printout will not have.
+ */
+function reportChart(days) {
+  if (!days || days.length < 2) return "";
+  const W = 980, H = 210, PADL = 62, PADR = 12, PADB = 34, PADT = 18;
+  const max = Math.max(...days.map(d => d.value), 0) || 1;
+  const plotW = W - PADL - PADR, plotH = H - PADT - PADB;
+  const step = plotW / days.length;
+  const barW = Math.max(3, Math.min(38, step * 0.62));
+  const y = v => PADT + plotH - (v / max) * plotH;
+
+  // Four gridlines, at values a person would round to.
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * max);
+  const grid = ticks.map(v => `<line x1="${PADL}" x2="${W - PADR}" y1="${y(v).toFixed(1)}"
+      y2="${y(v).toFixed(1)}" class="gl"/>
+    <text x="${PADL - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="tx" text-anchor="end">R ${fmtInt(v)}</text>`).join("");
+
+  // Label every nth day, so labels never collide however long the range is.
+  const every = Math.ceil(days.length / 12);
+  const bars = days.map((d, i) => {
+    const x = PADL + i * step + (step - barW) / 2;
+    const h = Math.max(1, PADT + plotH - y(d.value));
+    const label = i % every === 0
+      ? `<text x="${(x + barW / 2).toFixed(1)}" y="${H - 12}" class="tx" text-anchor="middle">${esc(shortDay(d.date))}</text>`
+      : "";
+    return `<rect x="${x.toFixed(1)}" y="${y(d.value).toFixed(1)}" width="${barW.toFixed(1)}"
+        height="${h.toFixed(1)}" rx="2" class="bar"><title>${esc(niceDate(d.date))} · ${fmtInt(d.cartons)} cartons · R ${fmt(d.value)}</title></rect>${label}`;
+  }).join("");
+
+  return `<div class="card ins-card">
+    <div class="ins-card-head"><h2>Day by day</h2>
+      <span class="rep-c">peak R ${fmt(max)}</span></div>
+    <div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" class="repchart"
+      preserveAspectRatio="xMidYMid meet" role="img"
+      aria-label="Sales value for each trading day in the range">
+      ${grid}${bars}
+    </svg></div>
+  </div>`;
+}
+
+/** "4 Aug" -- short enough to sit under a bar. */
+function shortDay(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso) : `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** One CSV cell, quoted only when it has to be. */
+function csvCell(v) {
+  const s = v === null || v === undefined ? "" : String(v);
+  // Quote only when the cell would otherwise break the row or the column.
+  const needs = s.indexOf('"') >= 0 || s.indexOf(",") >= 0 || s.indexOf(String.fromCharCode(10)) >= 0 || s.indexOf(String.fromCharCode(13)) >= 0;
+  return needs ? '"' + s.split('"').join('""') + '"' : s;
+}
+const csvRow = cells => cells.map(csvCell).join(",");
+
+/** The open report as a spreadsheet.
+ *
+ *  This app replaced a workbook, and an operator who has always had the figures
+ *  in Excel needs a way to get them back out -- to send to an accountant, or to
+ *  do the one sum the app does not do.
+ *
+ *  Two concessions to Excel, which is where this will be opened: a byte order
+ *  mark, without which it reads UTF-8 product names as mojibake, and a `sep=`
+ *  line, which it honours regardless of the machine's list separator. Numbers
+ *  are written unformatted with a full stop, so they arrive as numbers rather
+ *  than as text that has to be converted before it can be summed.
+ */
+function reportCsv(d) {
+  const t = d.totals, m = d.money, rg = d.range;
+  const n = v => (v === null || v === undefined ? "" : Number(v));
+  const out = [
+    ["ZacoAgents report"],
+    ["From", rg.from, "To", rg.to],
+    ["Generated", new Date().toISOString().slice(0, 16).replace("T", " ")],
+    [],
+    ["Summary"],
+    ["Account sales", n(t.statements)],
+    ["Trading days", n(t.days_traded)],
+    ["Cartons sold (net)", n(t.cartons_sold)],
+    ["Cartons returned", n(t.cartons_returned)],
+    ["Sales value", n(m.sold)],
+    ["Payments received", n(m.payments_received)],
+    ["Nett to Zaco", n(m.payments_nett)],
+    ["Deductions", n(m.deductions)],
+    ["Reconciled", n(m.reconciled)],
+    [],
+    ["By product"],
+    ["Product", "Cartons", "Returned", "Days sold", "Per carton", "Value"],
+    ...d.by_product.map(p => [p.product, n(p.cartons), n(p.returned), n(p.days_sold), n(p.price), n(p.value)]),
+    [],
+    ["By day"],
+    ["Date", "Cartons", "Returned", "Value"],
+    ...d.by_day.map(x => [x.date, n(x.cartons), n(x.returned), n(x.value)]),
+    [],
+    ["By agent"],
+    ["Agent", "Cartons", "Value"],
+    ...d.by_agent.map(a => [a.agent, n(a.cartons), n(a.value)]),
+  ];
+  // A byte order mark so Excel reads the product names as UTF-8, and CRLF
+  // line endings, which is what the CSV convention specifies.
+  const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+  const BOM = String.fromCharCode(65279);
+  // The separator directive goes in raw. Run through the quoter it becomes
+  // "sep=," -- quoted because it contains a comma -- and Excel then reads it as
+  // an ordinary first cell rather than as an instruction.
+  return BOM + "sep=," + CRLF + out.map(csvRow).join(CRLF) + CRLF;
+}
+
+function downloadReportCsv() {
+  const d = S.reports.data;
+  if (!d) { toast("Build a report first", true); return; }
+  const name = `zaco-${d.range.from}-to-${d.range.to}.csv`;
+  const url = URL.createObjectURL(new Blob([reportCsv(d)], {type: "text/csv;charset=utf-8"}));
+  const a = Object.assign(document.createElement("a"), {href: url, download: name});
+  document.body.appendChild(a); a.click(); a.remove();
+  // Revoked on the next turn of the loop: revoking synchronously can cancel the
+  // download before the browser has read the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  toast(`Saved ${name}`);
+}
+
 function renderReports() {
   const R = S.reports;
   if (!R.periods.length && S.live) loadReportPeriods();
@@ -1736,7 +1884,8 @@ function renderReports() {
         <input type="date" value="${esc(R.from)}" onchange="setReportRange('from', this.value)"></label>
       <label class="ctl inline"><span>To</span>
         <input type="date" value="${esc(R.to)}" onchange="setReportRange('to', this.value)"></label>
-      ${R.data ? `<button class="btn ghost sm" onclick="printReport()">Print</button>` : ""}
+      ${R.data ? `<button class="btn ghost sm" onclick="downloadReportCsv()">${icon("download")}Excel</button>
+                  <button class="btn ghost sm" onclick="printReport()">${icon("print")}Print</button>` : ""}
     </div>
     ${months ? `<div class="rep-months"><span class="rep-ml">Whole month</span>${months}</div>` : ""}`;
 
@@ -1755,7 +1904,7 @@ function renderReports() {
   }
   if (!R.from || !R.to) {
     main.innerHTML = `<section class="screen">${head}${controls}
-      <div class="card placeholder"><div class="pi">▤</div>
+      <div class="card placeholder"><div class="pi">${icon("table", 22)}</div>
         <h2>Choose a date range</h2>
         <p>Set a start and an end date, or pick a whole month, and the report is built from your saved history.</p>
       </div></section>`;
@@ -1811,6 +1960,8 @@ function renderReports() {
       <p class="rep-note">A payment settles sales that happened earlier, often weeks earlier, so the money in
         will not equal the sales value for the same dates. Both are shown rather than netted into one figure
         that would mean neither.</p>
+
+      ${reportChart(d.by_day)}
 
       <div class="card ins-card">
         <div class="ins-card-head"><h2>By product</h2>
@@ -3180,6 +3331,17 @@ function dropHighlight(on) {
   document.querySelectorAll(".drop").forEach(el => el.classList.toggle("over", on));
   if (!on) document.querySelectorAll("[data-drop]").forEach(el => el.classList.remove("aiming"));
 }
+// Escape backs out of a confirmation. A destructive step that can only be
+// dismissed by finding the Cancel button is a step people click through.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  const open = (S.insights && S.insights.confirmDelete) || (S.tracking && S.tracking.confirmDelete);
+  if (!open) return;
+  if (S.insights) S.insights.confirmDelete = false;
+  if (S.tracking) S.tracking.confirmDelete = false;
+  render();
+});
+
 document.addEventListener("dragover", e => {
   e.preventDefault();
   // Light up the half under the cursor, so it is obvious which one will take

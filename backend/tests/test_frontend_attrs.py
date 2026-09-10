@@ -131,3 +131,32 @@ def test_the_row_helpers_are_declared_once(source: str) -> None:
     for name in ("needsAttention", "isDuplicate", "errFlags", "commitClean"):
         declarations = len(re.findall(rf"^(?:const|function) {name}\b", source, re.M))
         assert declarations == 1, f"{name} is declared {declarations} times"
+
+
+def test_the_page_script_actually_parses(source: str) -> None:
+    """The page is one script, so a single syntax error stops all of it.
+
+    Nothing else here catches that: the Python suite reads the file as text and
+    a browser only complains at runtime. Twice an escape sequence written into
+    a string became a real newline and split a regex literal across two lines,
+    which took the whole app down while every test still passed.
+    """
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not available to parse the script")
+
+    match = re.search(r"<script>(.*)</script>", source, re.S)
+    assert match, "the page has no script block"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        js = Path(tmp) / "app.js"
+        js.write_text(match.group(1), encoding="utf-8")
+        done = subprocess.run([node, "--check", str(js)],
+                              capture_output=True, text=True)
+    assert done.returncode == 0, f"the page script does not parse:\n{done.stderr}"

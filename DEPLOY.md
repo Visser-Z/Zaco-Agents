@@ -273,32 +273,39 @@ actions ever need an audit trail. Add authentication before widening access.
 HTTP over the tailnet is acceptable here. If you later expose it any other way,
 put TLS in front of it.
 
-## Market agent API
+## Claude assistant
 
-Where the agent offers its own API, the app can read sales and payments from it
-instead of from the PDF exports. That removes the inference the PDFs force: a
-transaction carries its own sale date rather than one derived from the
-consignment, and nothing has to be recovered from a report's layout.
+The Assistant tab answers questions about the sales history, and can run a
+panel of four specialists who read the book from different angles before one
+pass weighs them into a buying recommendation. It uses Anthropic's Claude, on
+Claude Haiku 4.5 by default.
 
-Two settings, both required before anything is read over the API. With either
-one blank the app keeps reading the PDF exports, which stay supported for
-historical reports and as the fallback if the API is unavailable.
+The model does no arithmetic on money. Every total, ranking and trend is
+computed by the same code behind Insights and handed to Claude as fact; its job
+is reading the question and explaining the answer. It is read-only and cannot
+change the book.
 
 | Variable | What it is |
 | --- | --- |
-| `MARKET_API_BASE` | Base URL of the agent's API, no trailing slash |
-| `MARKET_API_KEY` | **Secret.** The credential the agent issued |
+| `ANTHROPIC_API_KEY` | **Secret.** The Anthropic API key the usage is billed to |
+| `ZACON_ASSISTANT_MODEL` | Optional. Defaults to `claude-haiku-4-5`. `claude-sonnet-5` gives stronger answers at a higher price |
 
-`MARKET_API_KEY` is a secret and is treated as one:
+Without `ANTHROPIC_API_KEY` the tab says it is not set up, and everything else
+works exactly as before.
 
-- Set it as an environment variable in the deployment (Vercel → Settings →
-  Environment Variables), not in a file in the repository. `.env` is ignored by
-  git, but an environment variable is the safer habit.
+`ANTHROPIC_API_KEY` is a secret and is treated as one:
+
+- Set it in Vercel under Settings, Environment Variables, then redeploy. For
+  local development put it in `backend/.env`, which git ignores.
 - Never paste it into a chat, an issue or a commit message. A key that reaches
-  a transcript or the git history has to be rotated.
-- It is used only in server-to-server calls. `/api/health` is an open endpoint
-  the login screen reads before sign-in, so it reports `market_api: true|false`
-  to say whether the API is configured, and never the key itself. A test pins
-  that.
-- Rotating it is a change to the environment variable and a redeploy. Nothing
-  in the database or the recorded history refers to it.
+  a transcript or the git history has to be rotated in the Anthropic Console.
+- It is used only in server-to-server calls. `/api/health` is open, so it
+  reports `assistant: true|false` and never the key. A test pins that, and a
+  second fails if anything shaped like an Anthropic key is ever committed.
+- Usage is billed to the account that owns the key. A question is one request;
+  a buying recommendation is five. Setting a monthly spend limit in the
+  Anthropic Console means a busy month cannot surprise anyone.
+
+The model can be changed without touching code. The request is shaped for
+whichever family is named: Haiku takes a fixed thinking budget where the newer
+models take adaptive thinking, and each rejects the other's form outright.

@@ -22,26 +22,58 @@ import os
 
 from . import analytics
 
-MODEL = "claude-opus-5"
+# Claude Haiku 4.5, the operator's choice: they hold the key and pay for what it
+# uses. Overridable per deployment with ZACON_ASSISTANT_MODEL -- to try Sonnet if
+# answers read thin, say -- and the request below is shaped for whichever family
+# is named, so changing it cannot break the call.
+DEFAULT_MODEL = "claude-haiku-4-5"
 
 # Rows sent verbatim for detail questions. The whole history is far inside the
 # context window, but this bounds cost and latency on a serverless request.
 MAX_ROWS = 2000
 
-# Medium effort, not the `high` default: this runs inside a 60s serverless
-# function, and Claude Opus 5 is unusually strong at the lower effort levels.
-# Raise it if answers start feeling shallow on harder questions.
-EFFORT = "medium"
-
-# Adaptive thinking counts toward max_tokens, so leave headroom above the
-# answer's own length.
+# Thinking counts toward max_tokens, so leave headroom above the answer's length.
 MAX_TOKENS = 16000
 
+# How much Claude may reason before answering a question or weighing the panel.
+# Modest on purpose: this runs inside a 60s serverless function.
+THINKING_BUDGET = 4000
+
 # Panel analysts each have one narrow brief and are asked to be brief, so they
-# run leaner and, crucially, concurrently -- the panel has to finish inside the
-# same 60s budget as a single answer. Raise if their findings read thin.
-ANALYST_EFFORT = "low"
+# run without thinking and, crucially, concurrently -- the panel has to finish
+# inside the same 60s budget as a single answer.
 ANALYST_MAX_TOKENS = 8000
+
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+def model() -> str:
+    return (os.getenv("ZACON_ASSISTANT_MODEL") or DEFAULT_MODEL).strip()
+
+
+def _thinking(model_id: str, budget: int | None) -> dict:
+    """Request fields for thinking, in the shape this model accepts.
+
+    The families disagree, and each rejects the other's form with a 400. Haiku
+    4.5 takes a fixed budget and errors on `effort`; the 4.6-and-later models
+    take adaptive thinking with an effort level, and Opus 5, Sonnet 5 and Opus
+    4.7/4.8 reject a budget outright. The assistant used to send the adaptive
+    form unconditionally, which on Haiku failed every single question.
+
+    `budget` None means no thinking: the narrow analyst briefs do not need it.
+    """
+    if "haiku" in model_id:
+        return {"thinking": {"type": "enabled", "budget_tokens": budget}} if budget else {}
+    return {"thinking": {"type": "adaptive"},
+            "output_config": {"effort": "medium" if budget else "low"}}
+
+
+def _uses_fallbacks(model_id: str) -> bool:
+    """Server-side refusal fallbacks exist for the models whose safety
+    classifiers can decline a request (Opus 5 and the Fable tier). Haiku has
+    nothing to fall back from, so it is asked plainly rather than sent a beta
+    it would reject and then asked twice."""
+    return "haiku" not in model_id
 
 
 def api_key() -> str | None:
@@ -371,27 +403,35 @@ def ask(question: str, rows: list[dict]) -> str:
             "cache_control": {"type": "ephemeral"},
         },
     ]
+    model_id = model()
     request = {
-        "model": MODEL,
+        "model": model_id,
         "max_tokens": MAX_TOKENS,
         "system": system,
-        "thinking": {"type": "adaptive"},
-        "output_config": {"effort": EFFORT},
         "messages": [{"role": "user", "content": question}],
+        **_thinking(model_id, THINKING_BUDGET),
     }
 
     try:
-        # Server-side fallback: if a safety classifier ever declines a request,
-        # the API answers on a fallback model instead of returning nothing.
-        # Harmless here, so it is opt-in insurance rather than a dependency --
-        # if the beta is unavailable to this account we retry plainly below.
-        response = client.beta.messages.create(
-            **request, betas=["server-side-fallback-2026-07-01"], fallbacks="default"
-        )
-    except anthropic.BadRequestError:
-        response = client.messages.create(**request)
+        if _uses_fallbacks(model_id):
+            # Opt-in insurance: if a safety classifier declines, the API answers
+            # on a fallback model. If this account lacks the beta, ask plainly --
+            # inside its own try, so a failure there is still handled below
+            # rather than escaping as a raw 500, which is what it used to do.
+            try:
+                response = client.beta.messages.create(
+                    **request, betas=[FALLBACK_BETA], fallbacks="default")
+            except anthropic.BadRequestError:
+                response = client.messages.create(**request)
+        else:
+            response = client.messages.create(**request)
     except anthropic.AuthenticationError as exc:
         raise AssistantError("The server's ANTHROPIC_API_KEY was rejected.") from exc
+    except anthropic.NotFoundError as exc:
+        raise AssistantError(
+            f"The model {model_id!r} is not available to this API key.") from exc
+    except anthropic.BadRequestError as exc:
+        raise AssistantError(f"The assistant could not take that request: {exc.message}") from exc
     except anthropic.RateLimitError as exc:
         raise AssistantError("The assistant is busy right now. Try again shortly.") from exc
     except anthropic.APIConnectionError as exc:
@@ -412,20 +452,22 @@ def _text_of(response) -> str:
     return "\n".join(b.text for b in response.content if b.type == "text").strip()
 
 
-async def _one_call(client, system: list[dict], prompt: str, effort: str, max_tokens: int):
-    """A single call, retried without the fallback beta if it isn't available."""
+async def _one_call(client, system: list[dict], prompt: str, max_tokens: int,
+                    budget: int | None):
+    """A single call, shaped for the configured model."""
+    model_id = model()
     request = {
-        "model": MODEL,
+        "model": model_id,
         "max_tokens": max_tokens,
         "system": system,
-        "thinking": {"type": "adaptive"},
-        "output_config": {"effort": effort},
         "messages": [{"role": "user", "content": prompt}],
+        **_thinking(model_id, budget),
     }
+    if not _uses_fallbacks(model_id):
+        return await client.messages.create(**request)
     try:
         return await client.beta.messages.create(
-            **request, betas=["server-side-fallback-2026-07-01"], fallbacks="default"
-        )
+            **request, betas=[FALLBACK_BETA], fallbacks="default")
     except Exception as exc:  # noqa: BLE001 -- narrowed by the retry below
         import anthropic
 
@@ -471,8 +513,8 @@ async def analyse(rows: list[dict]) -> dict:
                         [{"type": "text", "text": SYSTEM}, data_block,
                          {"type": "text", "text": ANALYST_SYSTEM}],
                         a["brief"],
-                        ANALYST_EFFORT,
                         ANALYST_MAX_TOKENS,
+                        None,        # a narrow brief: no thinking, so all four stay fast
                     )
                     for a in ANALYSTS
                 ),
@@ -503,8 +545,8 @@ async def analyse(rows: list[dict]) -> dict:
                  {"type": "text", "text": SYNTHESIS_SYSTEM}],
                 f"The specialists reported the following.\n\n{briefing}\n\n"
                 "Weigh these and give the buying recommendation.",
-                EFFORT,
                 MAX_TOKENS,
+                THINKING_BUDGET,
             )
     except anthropic.AuthenticationError as exc:
         raise AssistantError("The server's ANTHROPIC_API_KEY was rejected.") from exc

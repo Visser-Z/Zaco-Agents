@@ -155,3 +155,63 @@ def test_panel_needs_a_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(assistant.AssistantError, match="ANTHROPIC_API_KEY"):
         asyncio.run(assistant.analyse([_row()]))
+
+
+# --- the request each model is sent ---------------------------------------
+# Haiku 4.5 and the newer families take thinking in different, mutually
+# exclusive forms. The assistant used to send the adaptive form with an effort
+# level unconditionally, which Haiku rejects, so every question failed the
+# moment the model was switched. Nothing pinned the request shape until now.
+
+def test_haiku_is_sent_a_request_it_accepts(stub, monkeypatch):
+    monkeypatch.delenv("ZACON_ASSISTANT_MODEL", raising=False)
+    client = stub()
+    asyncio.run(assistant.analyse([_row()]))
+    assert client.calls
+    for kw in client.calls:
+        assert kw["model"] == "claude-haiku-4-5"
+        assert "output_config" not in kw, "Haiku 4.5 rejects an effort level"
+        assert "betas" not in kw and "fallbacks" not in kw
+        thinking = kw.get("thinking")
+        assert thinking in (None, {"type": "enabled",
+                                   "budget_tokens": assistant.THINKING_BUDGET})
+        if thinking:
+            assert thinking["budget_tokens"] < kw["max_tokens"]
+    # The four narrow analysts run without thinking; only the synthesis thinks.
+    assert sum(1 for kw in client.calls if kw.get("thinking")) == 1
+
+
+def test_switching_the_model_reshapes_the_request(stub, monkeypatch):
+    """Changing ZACON_ASSISTANT_MODEL must not break the call: Opus 5 rejects a
+    fixed budget as firmly as Haiku rejects adaptive thinking."""
+    monkeypatch.setenv("ZACON_ASSISTANT_MODEL", "claude-opus-5")
+    client = stub()
+    asyncio.run(assistant.analyse([_row()]))
+    for kw in client.calls:
+        assert kw["model"] == "claude-opus-5"
+        assert kw["thinking"] == {"type": "adaptive"}
+        assert kw["output_config"]["effort"] in ("low", "medium")
+
+
+def test_a_rejected_request_is_an_assistant_error_not_a_crash(monkeypatch):
+    """A 400 used to escape the handler as a raw 500, because the retry after
+    it re-sent the identical request from inside the except block."""
+    import anthropic
+    import httpx
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("ZACON_ASSISTANT_MODEL", raising=False)
+
+    class _Rejecting:
+        def __init__(self, **kw):
+            self.messages = types.SimpleNamespace(create=self._create)
+            self.beta = types.SimpleNamespace(messages=types.SimpleNamespace(create=self._create))
+
+        def _create(self, **kw):
+            req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+            raise anthropic.BadRequestError(
+                "thinking is not supported", response=httpx.Response(400, request=req), body=None)
+
+    monkeypatch.setattr(anthropic, "Anthropic", _Rejecting)
+    with pytest.raises(assistant.AssistantError):
+        assistant.ask("What sold best?", [_row()])

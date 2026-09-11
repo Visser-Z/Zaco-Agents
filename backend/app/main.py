@@ -70,9 +70,9 @@ def health() -> dict[str, object]:
         "auth_required": config.AUTH_REQUIRED and config.auth_configured(),
         "supabase_url": config.SUPABASE_URL,
         "supabase_anon_key": config.SUPABASE_ANON_KEY,
-        # Whether the agent's API is configured -- never the key itself. This
+        # Whether the Claude assistant has a key -- never the key itself. This
         # endpoint is open, so anything added here is public by definition.
-        "market_api": config.market_api_ready(),
+        "assistant": assistant.configured(),
         # The commit actually serving, so a stale deploy can be spotted from
         # outside instead of being taken on trust.
         "build": config.BUILD_SHA or "unknown",

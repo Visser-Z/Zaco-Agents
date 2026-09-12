@@ -63,3 +63,44 @@ def test_row_without_agent_or_stm_no_is_skipped():
 def test_persist_skipped_without_user():
     # No signed-in user (local dev, no Supabase) -> no write attempted, no error.
     assert asyncio.run(persist_statements(None, [_row()])) is None
+
+
+# --- the grain of the book -------------------------------------------------
+
+def test_a_consignment_selling_on_several_days_is_several_rows(monkeypatch):
+    """Keyed on group_date, a week of reports dropped together kept only the
+    first day of each consignment: apply_group_dates collapses group_date to
+    one value per consignment across a batch, so every later day collided and
+    the ignore-duplicates insert dropped it without a word. R78 591,95 of one
+    real month went that way. The key is the day it SOLD."""
+    import asyncio
+    from datetime import date
+
+    import app.main as main
+    from app.schemas import StatementRow
+    from app.supabase_auth import User
+
+    sent = {}
+
+    async def fake_post(user, table, records, **kw):
+        sent["on_conflict"] = kw.get("on_conflict")
+        sent["records"] = records
+        return records
+
+    monkeypatch.setattr(main, "db_post", fake_post)
+    monkeypatch.setattr(main, "remember_delivery_notes",
+                        lambda *a, **k: asyncio.sleep(0))
+
+    # One consignment, one collapsed group_date, four different selling days.
+    rows = [
+        StatementRow(source_file="week.pdf", market_agent="Growfresh Port Natal",
+                     stm_no=185549102, consignment_id=185549102,
+                     date=date(2026, 9, 3), last_sale=date(2026, 9, day))
+        for day in (3, 4, 5, 7)
+    ]
+    asyncio.run(main.persist_statements(User(id="u", email="o@e.com", token="t"), rows))
+
+    assert sent["on_conflict"] == "market_agent,stm_no,consignment_id,sale_day"
+    # Every row still carries its own selling day for the key to separate them.
+    assert [r["last_sale"] for r in sent["records"]] == [
+        "2026-09-03", "2026-09-04", "2026-09-05", "2026-09-07"]

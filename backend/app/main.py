@@ -162,13 +162,13 @@ async def flag_duplicates(user: User | None, rows: list[StatementRow]) -> None:
     where = {"stm_no": f"in.({','.join(str(n) for n in stm_nos)})"}
     try:
         existing = await db_get(
-            user, "statements", {"select": "stm_no,consignment_id,market_agent,created_at,group_date", **where}
+            user, "statements", {"select": "stm_no,consignment_id,market_agent,created_at,sale_day", **where}
         )
     except Exception:  # noqa: BLE001 -- before migration 0010 there is no such column
         try:
             existing = await db_get(
                 user, "statements",
-                {"select": "stm_no,market_agent,created_at,group_date", **where}
+                {"select": "stm_no,market_agent,created_at,sale_day", **where}
             )
         except Exception:  # noqa: BLE001 -- a duplicate warning is not worth failing an import
             return
@@ -179,11 +179,14 @@ async def flag_duplicates(user: User | None, rows: list[StatementRow]) -> None:
     # Monday and on Wednesday is two rows, not one recorded twice.
     seen: dict[tuple, dict] = {}
     for rec in existing:
-        day = (rec.get("group_date") or "")[:10] or None
+        day = (rec.get("sale_day") or "")[:10] or None
         seen[(rec["stm_no"], rec.get("consignment_id") or 0, day)] = rec
         seen.setdefault((rec["stm_no"], None, day), rec)
     for row in rows:
-        day = row.date.isoformat() if row.date else None
+        # The day it sold, matching the table's own grain -- row.date is the
+        # consignment's date, shared by every day that consignment traded.
+        sold = row.last_sale or row.date
+        day = sold.isoformat() if sold else None
         rec = seen.get((row.stm_no, row.consignment_id or 0, day))
         if rec is None and row.consignment_id is None:
             rec = seen.get((row.stm_no, None, day))
@@ -371,6 +374,7 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 # ("column statements.consignment_id does not exist") or a bare 404, which reads
 # like a broken app rather than one pending setup step.
 _MIGRATIONS = {
+    "sale_day": "0020_unique_per_sale_day.sql",
     "dismissals": "0016_dismissals.sql",
     "period_month": "0017_period_blocks.sql",
     "payments": "0015_payments.sql",
@@ -668,9 +672,14 @@ async def persist_statements(user: User | None, rows: list[StatementRow]) -> str
             "statements",
             records,
             upsert=True,
-            # One account sale settles several consignments, each of which is its
-            # own row, so the statement number alone is no longer unique.
-            on_conflict="market_agent,stm_no,consignment_id,group_date",
+            # One account sale settles several consignments, each its own row,
+            # and a consignment sells over several days, each its own row too.
+            # The day here must be the day it SOLD. group_date is the
+            # consignment's date, and apply_group_dates collapses it to one
+            # value per consignment across a batch, so keyed on that a week of
+            # reports dropped together kept only the first day of each
+            # consignment and the insert discarded the rest in silence.
+            on_conflict="market_agent,stm_no,consignment_id,sale_day",
             resolution="ignore-duplicates",
         )
     except Exception as exc:  # noqa: BLE001 -- save must succeed regardless

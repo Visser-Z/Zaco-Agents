@@ -43,20 +43,63 @@ def closed_key(kind: str, ref: str) -> str:
     return f"{kind}:{ref}"
 
 
+def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
+    """Work out what each individual sale still has owing on it.
+
+    A payment is for a consignment, not for a month. One delivery sells down
+    over weeks and the agent pays as it goes, so a payment settles the sales
+    that had already happened when it was made. Each consignment's payments are
+    therefore applied to that consignment's own sales oldest first, and what a
+    sale still has owing is its own value less the share that reached it.
+
+    That is what lets a month answer for itself. Comparing a month's sales
+    against a consignment's entire payment history made a July payment cancel a
+    September sale of the same delivery: September read as over-paid while the
+    delivery was, across the whole book, tens of thousands short. Settled this
+    way the months add up to the all-time figure instead of fighting it.
+
+    A sale that names its payment reference is settled here the same way as any
+    other, because that payment is already in its consignment's pool.
+
+    Returns (owed per sale by id, leftover credit per consignment, a label for
+    each consignment) -- keyed the way ``reconcile`` matches, so a consignment
+    means the same thing here as it does on the payment panel.
+    """
+    pool = {k: v["gross"] for k, v in reconcile.aggregate_payment(payments).items()}
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    label: dict[tuple, dict] = {}
+    for row in sales:
+        key = reconcile._key(row.get("dn"), row.get("product"))
+        groups[key].append(row)
+        label.setdefault(key, {"dn": row.get("dn"), "product": row.get("product")})
+
+    owed: dict[int, float] = {}
+    for key, rows in groups.items():
+        left = pool.get(key, 0.0)
+        # Oldest first. A sale with no date cannot be placed in the order, so it
+        # settles last rather than taking credit from a sale known to be older.
+        for row in sorted(rows, key=lambda r: (selling_day(r) is None, selling_day(r) or "")):
+            value = reconcile._num(row.get("sales_total"))
+            take = min(left, value) if value > 0 and left > 0 else 0.0
+            left -= take
+            owed[id(row)] = round(value - take, 2)
+        pool[key] = left
+
+    credit = {k: round(v, 2) for k, v in pool.items() if v > 0.01}
+    for key, rec in reconcile.aggregate_payment(payments).items():
+        label.setdefault(key, {"dn": key[0], "product": key[1]})
+    return owed, credit, label
+
+
 def payment_status(sales: list[dict], payments: list[dict],
                    closed: set[str] | frozenset[str] = frozenset(),
                    lo: str | None = None, hi: str | None = None) -> dict:
     """What has been paid, and what is still owed.
 
-    Reconciliation is the same match the payment panel does -- on the account
-    sale each docket names where the export gives it, otherwise on supplier ref
-    plus product -- run over ALL saved sales and ALL saved payments, so the
-    answer is the whole period's position rather than one file's.
-
-    "Still to come" is the sold value not yet covered by a payment: an unpaid
-    group in full, and the shortfall on a group only partly paid. A group paid
-    for more than sold contributes nothing to it (that is the agent's side to
-    explain, surfaced separately as an over-payment).
+    Every sale on the book is settled against its consignment's payments (see
+    ``settle``); the window then decides which sales are reported, never how
+    they were settled. So a month shows what is still owed on that month's own
+    sales, and the months sum to the whole.
     """
     # Reconcile matches on each row's sold VALUE. The history read does not carry
     # the exact docket total, so fill it with the gross the app trusts
@@ -66,22 +109,12 @@ def payment_status(sales: list[dict], payments: list[dict],
               if r.get("sales_total") is not None else analytics.row_value(r)}
              for r in sales]
 
-    # Row by row, never one strategy for the whole history: a single row
-    # carrying a payment reference used to send every PDF-sourced row down the
-    # reference path, where it has nothing to match on and reports as unsold.
-    rows = reconcile.reconcile_any(sales, payments)
+    owed_by_row, credit, label = settle(sales, payments)
+    paid = reconcile.aggregate_payment(payments)
 
-    # reconcile's statuses, in this view's terms:
-    #   matched      sold and paid agree -- paid in full.
-    #   unpaid       a payment run has not reached this sale yet -- all owed.
-    #   over         sold MORE than the payment covered -- the shortfall is owed.
-    #   outstanding  the agent paid for MORE than sold -- nothing owed, and worth
-    #                a glance (a prepayment, or a sale not captured).
-    #   no_sales     paid, with nothing sold to match -- an exception to chase.
     # What the agent actually paid in this window, read straight off the
-    # payments rather than off the match: scoping the match to a period would
-    # make an August sale settled in September look unpaid, which is the
-    # opposite of true. Unscoped, this is every payment on record.
+    # payments rather than off the match: a payment settles sales that happened
+    # earlier, so this is money received, not money accounted for.
     in_window = [
         p for p in payments
         if not ((lo and str(p.get("date") or "")[:10] < lo)
@@ -89,50 +122,71 @@ def payment_status(sales: list[dict], payments: list[dict],
     ] if (lo or hi) else payments
     paid_in_window = round(sum(float(p.get("nett") or 0) for p in in_window), 2)
 
+    # The sales this view reports, grouped the way payments match them.
+    scoped: dict[tuple, list[dict]] = defaultdict(list)
+    for row in sales:
+        day = selling_day(row)
+        if (lo or hi) and day is None:
+            continue
+        if (lo and day < lo) or (hi and day > hi):
+            continue
+        scoped[reconcile._key(row.get("dn"), row.get("product"))].append(row)
+
     still_to_come = 0.0
     matched = outstanding = 0
     outstanding_rows: list[dict] = []
-    overpaid_rows: list[dict] = []
     closed_rows: list[dict] = []
-    for r in rows:
-        sold, gross, nett, status = (
-            r["daily_total"], r["payment_gross"], r["payment_nett"], r["status"])
-        if status in ("unpaid", "over"):
-            owed = sold if status == "unpaid" else round(sold - gross, 2)
-            if owed > 0:
-                row = {**r, "owed": round(owed, 2), "ref": item_ref(r)}
-                # A closed line stays visible on its own list with its value,
-                # so closing can never quietly shrink the exposure.
-                if closed_key("owed", row["ref"]) in closed:
-                    closed_rows.append(row)
-                else:
-                    outstanding += 1
-                    still_to_come += owed
-                    outstanding_rows.append(row)
-        elif status == "matched":
+    for key, rows in scoped.items():
+        owed = round(sum(owed_by_row[id(r)] for r in rows), 2)
+        days = [d for r in rows if (d := selling_day(r))]
+        entry = {
+            "dn": label[key]["dn"],
+            "product": label[key]["product"],
+            "daily_total": round(sum(reconcile._num(r.get("sales_total")) for r in rows), 2),
+            "payment_gross": round(paid.get(key, {}).get("gross", 0.0), 2),
+            "payment_nett": round(paid.get(key, {}).get("nett", 0.0), 2),
+            "date": min(days) if days else None,
+        }
+        entry["ref"] = item_ref(entry)
+        if owed <= 0:
             matched += 1
-        elif status == "outstanding":
-            overpaid_rows.append({**r, "overpaid": round(gross - sold, 2)})
+            continue
+        entry["owed"] = owed
+        entry["status"] = "over" if entry["payment_gross"] else "unpaid"
+        # A closed line stays visible on its own list with its value, so closing
+        # can never quietly shrink the exposure.
+        if closed_key("owed", entry["ref"]) in closed:
+            closed_rows.append(entry)
+        else:
+            outstanding += 1
+            still_to_come += owed
+            outstanding_rows.append(entry)
+
+    # Paid for more than the whole book ever sold on that consignment. A
+    # position across all of it, not a property of any one month, so it is
+    # reported whichever window is open.
+    overpaid_rows = [
+        {"dn": label[k]["dn"], "product": label[k]["product"], "overpaid": v}
+        for k, v in credit.items() if k in label
+    ]
 
     # Payments the sales side cannot account for. Never dropped -- either a sale
     # not imported yet, or a mismatch to chase.
-    unmatched = [r for r in rows if r["status"] == "no_sales"]
+    sold_keys = {reconcile._key(r.get("dn"), r.get("product")) for r in sales}
+    unmatched = [
+        {
+            "dn": label[k]["dn"],
+            "product": label[k]["product"],
+            "paid": round(v["gross"], 2),
+            "reason": "paid, nothing sold matches",
+        }
+        for k, v in paid.items() if k not in sold_keys
+    ]
     unattributed = reconcile.unattributed(payments)
 
     outstanding_rows.sort(key=lambda r: r["owed"], reverse=True)
-    # How old the oldest unpaid sale is. The reference match carries its own
-    # date; the PDF match (dn + product) does not, so there it comes from the
-    # sold rows themselves -- the earliest day anything still owed was sold.
-    own = [d for r in outstanding_rows if (d := analytics._parse_date(r.get("date")))]
-    owed_keys = {(r.get("dn"), reconcile.normalise_product(r.get("product")))
-                 for r in outstanding_rows}
-    from_sales = [
-        d for row in sales
-        if (row.get("dn"), reconcile.normalise_product(row.get("product"))) in owed_keys
-        and (d := analytics._parse_date(row.get("group_date"))) is not None
-    ]
-    dates = own or from_sales
-    oldest = min(dates).isoformat() if dates else None
+    dates = [r["date"] for r in outstanding_rows if r["date"]]
+    oldest = min(dates) if dates else None
 
     return {
         "total_paid": paid_in_window,
@@ -144,15 +198,7 @@ def payment_status(sales: list[dict], payments: list[dict],
         # Not truncated: this is the list the operator prints and works down.
         "outstanding": outstanding_rows,
         "overpaid": sorted(overpaid_rows, key=lambda r: r["overpaid"], reverse=True)[:20],
-        "unmatched": [
-            {
-                "dn": r.get("dn"),
-                "product": r.get("product"),
-                "paid": r.get("payment_gross") or r.get("payment_nett") or 0.0,
-                "reason": "paid, nothing sold matches",
-            }
-            for r in unmatched
-        ],
+        "unmatched": unmatched,
         "unattributed": unattributed,
         "payments_recorded": len(payments),
         # Closed lines and what they were worth, reported rather than dropped.
@@ -438,24 +484,24 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
             month: str | None = None, week: str | None = None) -> dict:
     """Everything the Tracking tab renders.
 
-    ``start`` and ``end`` narrow the per-day sales list only. What is owed is a
-    running position rather than a period figure -- money owed from March is
-    still owed in August -- so filtering it to a date window would quietly
-    understate the exposure. Slow stock is likewise about what is sitting on the
-    floor right now.
+    A month answers for its own sales. Every sale on the book is settled
+    against its consignment's payments oldest first, and the window then only
+    decides which sales are reported, so the months add up to the whole instead
+    of one month's payment cancelling another month's sale. The all-time figure
+    rides alongside regardless. Slow stock is about what is sitting on the floor
+    right now, so no window applies to it.
     """
     lo, hi = analytics.period_bounds(month, week)
     # The explicit day pickers are finer than a period, so they win where both
     # are set; the period fills them in otherwise.
     d_start, d_end = (start or lo), (end or hi)
-    # Owed money is scoped by when it was SOLD, against every payment ever
-    # recorded -- an August sale settled in September is paid, not outstanding.
-    scoped = in_period(sales, lo, hi)
-    status = payment_status(scoped, payments, closed, lo, hi)
-    # Owed is a running position, not a period figure: narrowing the sales
-    # changes what each group is matched against, so the periods do not add up
-    # to the whole. Carry the all-time figure alongside rather than let a
-    # scoped view quietly read as the total exposure.
+    # The whole book is settled, then the window decides which sales are
+    # reported. Handing it only the scoped sales made a consignment's entire
+    # payment history land on one month of its sales, so a July payment cancelled
+    # a September sale and September read as over-paid.
+    status = payment_status(sales, payments, closed, lo, hi)
+    # The all-time figure rides alongside so a month is never mistaken for the
+    # total exposure. The months do now add up to it.
     if lo or hi:
         status["still_to_come_all_time"] = payment_status(
             sales, payments, closed)["still_to_come"]

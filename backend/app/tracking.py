@@ -136,6 +136,7 @@ def payment_status(sales: list[dict], payments: list[dict],
     matched = outstanding = 0
     outstanding_rows: list[dict] = []
     closed_rows: list[dict] = []
+    credit_rows: list[dict] = []
     for key, rows in scoped.items():
         owed = round(sum(owed_by_row[id(r)] for r in rows), 2)
         days = [d for r in rows if (d := selling_day(r))]
@@ -148,19 +149,30 @@ def payment_status(sales: list[dict], payments: list[dict],
             "date": min(days) if days else None,
         }
         entry["ref"] = item_ref(entry)
-        if owed <= 0:
+        if owed == 0:
             matched += 1
             continue
         entry["owed"] = owed
-        entry["status"] = "over" if entry["payment_gross"] else "unpaid"
+        entry["status"] = ("credit" if owed < 0
+                           else "over" if entry["payment_gross"] else "unpaid")
         # A closed line stays visible on its own list with its value, so closing
         # can never quietly shrink the exposure.
         if closed_key("owed", entry["ref"]) in closed:
             closed_rows.append(entry)
-        else:
-            outstanding += 1
+            continue
+        # A month can come out negative on a consignment: a return booked in
+        # August reverses sales made in July, so August's own rows are worth
+        # less than nothing. Treating that as settled and dropping it lost the
+        # credit from every month view -- the months then came to more than the
+        # book. It is not a line to chase, so it is listed apart from the ones
+        # that are, but it counts towards the total either way.
+        if owed < 0:
+            credit_rows.append(entry)
             still_to_come += owed
-            outstanding_rows.append(entry)
+            continue
+        outstanding += 1
+        still_to_come += owed
+        outstanding_rows.append(entry)
 
     # Paid for more than the whole book ever sold on that consignment. A
     # position across all of it, not a property of any one month, so it is
@@ -201,6 +213,10 @@ def payment_status(sales: list[dict], payments: list[dict],
         "unmatched": unmatched,
         "unattributed": unattributed,
         "payments_recorded": len(payments),
+        # Returns that reversed sales made earlier than this window. Counted in
+        # the total, listed on their own because there is nothing to chase.
+        "credits": sorted(credit_rows, key=lambda r: r["owed"]),
+        "credit_value": round(sum(r["owed"] for r in credit_rows), 2),
         # Closed lines and what they were worth, reported rather than dropped.
         "closed": sorted(closed_rows, key=lambda r: r["owed"], reverse=True),
         "closed_value": round(sum(r["owed"] for r in closed_rows), 2),

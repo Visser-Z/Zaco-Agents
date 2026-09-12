@@ -1600,18 +1600,21 @@ function renderTracking() {
     ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((a, r) => a + r.overpaid, 0))}.</p>` : ""}
     ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
     ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} with no product breakdown, so it can never match.</p>` : ""}
+    ${(p.credits || []).length ? `<p class="trk-note">R ${fmt(-p.credit_value)} came back on ${p.credits.length} line${p.credits.length === 1 ? "" : "s"} as returns booked after the sale they reverse — nothing to collect, already taken off the total.</p>` : ""}
     ${closedList(p.closed || [], "owed", r => "R " + fmt(r.owed))}`;
 
   const owedBlock = owed.length
     ? block("owed", "Outstanding", owed.length,
-        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}${p.closed_value ? ` · R ${fmt(p.closed_value)} closed, not counted` : ""}`,
+        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}${p.closed_value ? ` · R ${fmt(p.closed_value)} closed, not counted` : ""}${p.credit_value ? ` · R ${fmt(-p.credit_value)} credited back` : ""}`,
         `<ul class="trk-list">${owed.slice(0, 5).map(owedRow).join("")}</ul>`,
         owedFull,
         `<button class="btn ghost sm" onclick="event.stopPropagation(); printOutstanding()">Print</button>`)
-    : p.closed_value
+    : (p.closed_value || p.credit_value)
       ? block("owed", "Outstanding", 0,
-          `nothing open · R ${fmt(p.closed_value)} closed, not counted`,
-          `<p class="ins-empty">Nothing is open. ${fmtInt((p.closed || []).length)} closed line${(p.closed || []).length === 1 ? " is" : "s are"} held off the total.</p>`,
+          ["nothing to collect",
+           p.closed_value ? `R ${fmt(p.closed_value)} closed, not counted` : "",
+           p.credit_value ? `R ${fmt(-p.credit_value)} credited back` : ""].filter(Boolean).join(" · "),
+          `<p class="ins-empty">Nothing is open.${p.closed_value ? ` ${fmtInt((p.closed || []).length)} closed line${(p.closed || []).length === 1 ? " is" : "s are"} held off the total.` : ""}${p.credit_value ? ` Returns booked in this period reverse sales made earlier, so it comes to R ${fmt(p.still_to_come)}.` : ""}</p>`,
           owedFull, "")
       : emptyBlock("Outstanding", "nothing owed", "Everything sold has been paid for.");
 

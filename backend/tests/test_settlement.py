@@ -112,6 +112,55 @@ def test_closing_a_line_takes_it_off_the_total_but_keeps_its_value():
     assert [r["ref"] for r in shut["closed"]] == [ref]
 
 
+NECTARINES = "NECTARINES OTHER CLASS 1 LARGE (MULTI LAYER TRAYER 5kg)"
+
+
+def test_a_return_booked_after_the_sale_it_reverses_stays_on_the_book():
+    """From the live book, DN 14584: R5 080,01 sold in July, then a two-carton
+    return of R700 on 1 August against R300 sold on 3 August. August's own rows
+    come to minus R400. Read as settled and dropped, that credit vanished from
+    every month while the all-time figure still carried it, so the months came
+    to R400 more than the book."""
+    sales = [_sale(14584, NECTARINES, 5080.01, "2026-07-28"),
+             _sale(14584, NECTARINES, -700.00, "2026-08-01"),
+             _sale(14584, NECTARINES, 300.00, "2026-08-03")]
+
+    august = tracking.payment_status(sales, [], lo="2026-08-01", hi="2026-08-31")
+    assert august["still_to_come"] == -400.0
+    assert august["credit_value"] == -400.0
+    assert [r["status"] for r in august["credits"]] == ["credit"]
+    # Nothing to chase, so it stays off the list the operator works down.
+    assert august["outstanding"] == []
+    assert august["batches_outstanding"] == 0
+
+
+def test_a_return_in_a_later_month_keeps_the_months_adding_up():
+    sales = [_sale(14584, NECTARINES, 5080.01, "2026-07-28"),
+             _sale(14584, NECTARINES, -700.00, "2026-08-01"),
+             _sale(14584, NECTARINES, 300.00, "2026-08-03")]
+
+    months = sum(
+        tracking.payment_status(sales, [], lo=lo, hi=hi)["still_to_come"]
+        for lo, hi in (("2026-07-01", "2026-07-31"), ("2026-08-01", "2026-08-31"))
+    )
+    assert round(months, 2) == tracking.payment_status(sales, [])["still_to_come"] == 4680.01
+
+
+def test_a_closed_line_carries_its_credit_month_by_month_too():
+    """Closing the line must not reintroduce the gap it was hiding."""
+    sales = [_sale(14584, NECTARINES, 5080.01, "2026-07-28"),
+             _sale(14584, NECTARINES, -700.00, "2026-08-01"),
+             _sale(14584, NECTARINES, 300.00, "2026-08-03")]
+    ref = tracking.payment_status(sales, [])["outstanding"][0]["ref"]
+    shut = {tracking.closed_key("owed", ref)}
+
+    months = sum(
+        tracking.payment_status(sales, [], closed=shut, lo=lo, hi=hi)["closed_value"]
+        for lo, hi in (("2026-07-01", "2026-07-31"), ("2026-08-01", "2026-08-31"))
+    )
+    assert round(months, 2) == tracking.payment_status(sales, [], closed=shut)["closed_value"]
+
+
 def test_a_sale_with_no_date_settles_last():
     """An undated sale cannot be placed in the order, so it must not take credit
     from a sale known to be older."""

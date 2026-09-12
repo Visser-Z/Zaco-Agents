@@ -1604,11 +1604,16 @@ function renderTracking() {
 
   const owedBlock = owed.length
     ? block("owed", "Outstanding", owed.length,
-        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}`,
+        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}${p.closed_value ? ` · R ${fmt(p.closed_value)} closed, not counted` : ""}`,
         `<ul class="trk-list">${owed.slice(0, 5).map(owedRow).join("")}</ul>`,
         owedFull,
         `<button class="btn ghost sm" onclick="event.stopPropagation(); printOutstanding()">Print</button>`)
-    : emptyBlock("Outstanding", "nothing owed", "Everything sold has been paid for.");
+    : p.closed_value
+      ? block("owed", "Outstanding", 0,
+          `nothing open · R ${fmt(p.closed_value)} closed, not counted`,
+          `<p class="ins-empty">Nothing is open. ${fmtInt((p.closed || []).length)} closed line${(p.closed || []).length === 1 ? " is" : "s are"} held off the total.</p>`,
+          owedFull, "")
+      : emptyBlock("Outstanding", "nothing owed", "Everything sold has been paid for.");
 
   // --- slow stock ----------------------------------------------------------
   const slowRow = r => `<li>

@@ -2088,11 +2088,12 @@ function renderAssistant() {
 function renderReports() {
   const R = S.reports;
   if (!R.periods.length && S.live) loadReportPeriods();
-  // Same guard Tracking and Insights carry. Leaving the tab clears the data so
-  // a reopened page is never a stale snapshot -- but nothing here fetched it
-  // back, and the range survives, so returning to a report already built landed
-  // on "Building the report…" with no request behind it, for good. It looked
-  // like the second report hung; there was never a second request.
+  // Same guard Tracking and Insights carry. Opening a tab clears its data so
+  // the page is never a stale snapshot -- but nothing here fetched it back, and
+  // the chosen range survives, so every visit after the first skipped the
+  // "choose a date range" screen, found no data, and sat on "Building the
+  // report…" with no request behind it. It looked like the second report hung;
+  // there was never a second request.
   if (R.from && R.to && R.data === null && !R.loading && R.error === null) loadReport();
 
   const months = (R.periods || []).map(p =>

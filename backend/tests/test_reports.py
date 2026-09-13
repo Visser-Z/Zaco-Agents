@@ -91,3 +91,52 @@ def test_figures_arriving_as_strings_report_the_same():
         return [{**_sale("2026-08-01", "GRAPES", n(10), n(100.0))}]
     assert reports.build(rows(True), [], "2026-08-01", "2026-08-01")["money"]["sold"] == \
            reports.build(rows(False), [], "2026-08-01", "2026-08-01")["money"]["sold"] == 1000.0
+
+
+# --- what a row is worth, and which day it belongs to ---------------------
+
+def test_a_line_is_worth_what_the_statement_says_not_cartons_times_price():
+    """From the live book: 13 cartons of PLUMS ELDORADO sold for R740,00. The
+    statement prints no unit price -- R56,92 is the average worked out from
+    those two figures and rounded -- so 13 x R56,92 comes back as R739,96. The
+    report showed the line at R1 359,96 where the dockets said R1 360,00."""
+    sales = [
+        dict(_sale("2026-09-03", "PLUMS ELDORADO", 13, 56.92), sales_total=740.00),
+        dict(_sale("2026-09-04", "PLUMS ELDORADO", 2, 60.00), sales_total=120.00),
+        dict(_sale("2026-09-07", "PLUMS ELDORADO", 5, 100.00), sales_total=500.00),
+    ]
+    line = reports.by_product(sales)[0]
+    assert line["cartons"] == 20
+    assert line["value"] == 1360.00
+    # And the per-carton figure divides the total exactly, so the two columns
+    # the operator reads across agree with each other.
+    assert line["price"] == 68.00
+    assert round(line["price"] * line["cartons"], 2) == line["value"]
+
+
+def test_a_row_with_no_exact_value_still_falls_back_to_cartons_times_price():
+    """History recorded before the sales value was captured must still count."""
+    line = reports.by_product([_sale("2026-09-03", "GRAPES", 10, 100.0)])[0]
+    assert line["value"] == 1000.0
+
+
+def test_a_sale_belongs_to_the_month_it_sold_in_not_the_one_it_arrived_in():
+    """A June delivery that sells in July is July's trade. Scoped on the
+    delivery date it landed on June's report and July's never saw it -- on this
+    book R224 940 of it in one month."""
+    sales = [dict(_sale("2026-06-28", "GRAPES", 10, 100.0), last_sale="2026-07-02")]
+
+    june = reports.build(sales, [], "2026-06-01", "2026-06-30")
+    july = reports.build(sales, [], "2026-07-01", "2026-07-31")
+    assert june["totals"]["statements"] == 0
+    assert july["totals"]["statements"] == 1
+    assert [d["date"] for d in july["by_day"]] == ["2026-07-02"]
+
+
+def test_days_traded_counts_selling_days_not_delivery_days():
+    """One load, sent once, sold down over three days is three days of trade."""
+    sales = [dict(_sale("2026-09-03", "GRAPES", 5, 100.0), last_sale=d)
+             for d in ("2026-09-03", "2026-09-04", "2026-09-07")]
+    assert reports.by_product(sales)[0]["days_sold"] == 3
+    assert [d["date"] for d in reports.by_day(sales)] == [
+        "2026-09-03", "2026-09-04", "2026-09-07"]

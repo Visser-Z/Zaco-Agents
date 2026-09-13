@@ -356,3 +356,38 @@ def test_the_basis_is_named_per_row():
     assert tracking.dated_by({"last_sale": "2026-08-04", "group_date": "2026-08-01"}) == "sold"
     assert tracking.dated_by({"group_date": "2026-08-01"}) == "delivered"
     assert tracking.dated_by({}) is None
+
+
+# --- where a line is sitting ----------------------------------------------
+
+def test_a_line_says_which_market_and_which_agent():
+    """The market says which floor to look at, the agent says who to phone."""
+    rows = [{"market": "TSHWANE MARKET", "market_agent": "Farmers Trust"},
+            {"market": "TSHWANE MARKET", "market_agent": "Farmers Trust"}]
+    assert tracking.where(rows) == {"market": "TSHWANE MARKET",
+                                    "market_agent": "Farmers Trust"}
+
+
+def test_a_line_that_spans_two_markets_says_both():
+    """One agency sells at more than one market. Reading the first row would
+    show one of them and hide the other."""
+    rows = [{"market": "SPRINGS MARKET", "market_agent": "Subtropico"},
+            {"market": "JOBURG MKT - TFRESH", "market_agent": "Subtropico"}]
+    assert tracking.where(rows)["market"] == "JOBURG MKT - TFRESH · SPRINGS MARKET"
+    assert tracking.where(rows)["market_agent"] == "Subtropico"
+
+
+def test_a_line_with_no_market_recorded_says_nothing_rather_than_blank():
+    rows = [{"market": None, "market_agent": "Farmers Trust"},
+            {"market": "   ", "market_agent": "Farmers Trust"}]
+    assert tracking.where(rows) == {"market": None, "market_agent": "Farmers Trust"}
+
+
+def test_an_outstanding_line_carries_where_it_is():
+    sales = [{"dn": 14621, "product": "GRAPES CLASS 2 NO SIZE (PUNNET 5kg)",
+              "cartons_sold": 1, "price": 9850.0, "sales_total": 9850.0,
+              "last_sale": "2026-09-07", "group_date": "2026-09-07",
+              "market": "TSHWANE MARKET", "market_agent": "Farmers Trust"}]
+    line = tracking.payment_status(sales, [])["outstanding"][0]
+    assert line["market"] == "TSHWANE MARKET"
+    assert line["market_agent"] == "Farmers Trust"

@@ -314,7 +314,13 @@
   /* Slow stock leads with a days-on-floor badge, so its name is the second
      column rather than the first. */
   .trk-list.trk-sig li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
-  .trk-p { min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The name, and under it where the line is sitting. A column so the market
+     sits beneath the commodity instead of taking a grid column of its own and
+     squeezing the amount; the row's baseline is still the name's, so the
+     amounts stay in line whether or not a row knows its market. */
+  .trk-p { min-width: 0; color: var(--ink); display: flex; flex-direction: column; gap: 1px; }
+  .trk-nm, .trk-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trk-sub { color: var(--ink-faint); font-size: 11px; letter-spacing: .01em; }
   .trk-d { color: var(--ink-faint); font-size: 12px; white-space: nowrap;
            font-variant-numeric: tabular-nums; }
   .trk-n { color: var(--ink); font-weight: 600; white-space: nowrap;
@@ -544,7 +550,7 @@
   .wsig.t-slow  { background: var(--warn-tint); color: var(--warn); }
   .wsig.t-dead  { background: var(--crit-tint); color: var(--crit); }
   .trk-list li.done { opacity: .5; }
-  .trk-list li.done .trk-p { text-decoration: line-through; }
+  .trk-list li.done .trk-nm { text-decoration: line-through; }
   .xbtn { appearance: none; border: 0; background: none; cursor: pointer; padding: 0 2px;
           color: var(--ink-faint); font-size: 14px; line-height: 1; border-radius: 6px; }
   .xbtn:hover { color: var(--crit); background: var(--crit-tint); }
@@ -1489,6 +1495,24 @@ function shortProduct(name) {
   return String(name || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
 }
 
+/** Where a line is sitting, as one line of text: the market, then the agent
+ *  selling it there. Both, because the market says which floor to look at and
+ *  the agent says who to phone, and an agency can sell at more than one market.
+ *  Either may be missing on an older import, so the separator only appears
+ *  when there is something on both sides of it. */
+function whereLine(r) {
+  return [r.market, r.market_agent].filter(Boolean).join(" · ");
+}
+
+/** The name cell of a tracking row: what it is, and under it where it is. */
+function nameCell(r, label) {
+  const name = label !== undefined ? label : (shortProduct(r.product || r.reference) || "—");
+  const at = whereLine(r);
+  return `<span class="trk-p" title="${esc(r.product || r.reference || "")}"
+    ><span class="trk-nm">${esc(name)}</span>${
+    at ? `<span class="trk-sub" title="${esc(at)}">${esc(at)}</span>` : ""}</span>`;
+}
+
 function renderTracking() {
   const T = S.tracking;
   if (T.data === null && !T.loading && T.error === null) loadTracking();
@@ -1574,7 +1598,7 @@ function renderTracking() {
 
   // --- outstanding ---------------------------------------------------------
   const owedRow = r => `<li>
-      <span class="trk-p" title="${esc(r.product || r.reference || "")}">${esc(shortProduct(r.product || r.reference) || "—")}</span>
+      ${nameCell(r)}
       <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
       <span class="trk-n num">R ${fmt(r.owed)}</span>
       <button class="xbtn" title="Close this one off"
@@ -1587,7 +1611,7 @@ function renderTracking() {
       ? ` · R ${fmt(rows.reduce((t, r) => t + (r.owed || 0), 0))} not counted above` : ""}</p>
     <ul class="trk-list${kind === "slow" ? " trk-sig" : ""}">${rows.map(r => `<li class="done">
       ${kind === "slow" ? `<span class="wsig t-${esc(r.tier)}">${fmtInt(r.days_on_floor)}d</span>` : ""}
-      <span class="trk-p" title="${esc(r.product || r.reference || "")}">${esc(shortProduct(r.product || r.reference) || "—")}</span>
+      ${nameCell(r)}
       <span class="trk-d">${what(r)}</span>
       <button class="xbtn undo" title="Put this back on the list"
         onclick="event.stopPropagation(); closeTrackingItem('${kind}', ${q(r.ref)}, true)">Reopen</button>
@@ -1621,7 +1645,7 @@ function renderTracking() {
   // --- slow stock ----------------------------------------------------------
   const slowRow = r => `<li>
       <span class="wsig t-${esc(r.tier)}" title="${esc(TIER_WORD[r.tier] || r.tier)}">${fmtInt(r.days_on_floor)}d</span>
-      <span class="trk-p" title="${esc(r.product)}">${esc(shortProduct(r.product))}</span>
+      ${nameCell(r)}
       <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
       <button class="xbtn" title="Close this one off"
         onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></li>`;
@@ -1641,7 +1665,7 @@ function renderTracking() {
   const ranged = !!(T.from || T.to);
 
   const dayRow = d => `<li>
-      <span class="trk-p">${esc(niceDate(d.date) || d.date)}</span>
+      <span class="trk-p"><span class="trk-nm">${esc(niceDate(d.date) || d.date)}</span></span>
       <span class="trk-d">${fmtInt(d.cartons)} ctn${d.returned ? " · " + fmtInt(d.returned) + " back" : ""}</span>
       <span class="trk-n num">R ${fmt(d.value)}</span></li>`;
 

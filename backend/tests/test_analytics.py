@@ -293,3 +293,34 @@ def test_history_without_a_sale_date_still_places_itself():
     assert analytics.row_date({"invoice_date": "2026-08-02"}) == date(2026, 8, 2)
     assert analytics.row_date({"date_received": "2026-07-28"}) == date(2026, 7, 28)
     assert analytics.row_date({}) is None
+
+
+def test_a_row_is_worth_the_value_the_statement_recorded():
+    """``price`` is an average the extractor works out and rounds, so it does
+    not multiply back to the money that came in. 13 cartons for R740,00 average
+    R56,9230..., stored as R56,92, and 13 x R56,92 is R739,96."""
+    row = {"cartons_sold": 13, "price": 56.92, "sales_total": 740.00}
+    assert analytics.row_value(row) == 740.00
+
+
+def test_a_row_without_a_recorded_value_falls_back_to_cartons_times_price():
+    assert analytics.row_value({"cartons_sold": 13, "price": 56.92}) == 13 * 56.92
+
+
+def test_a_row_recorded_as_worth_nothing_is_worth_nothing():
+    """Zero is a reading, not a missing value, so it must not fall back."""
+    assert analytics.row_value({"cartons_sold": 10, "price": 100.0, "sales_total": 0}) == 0.0
+
+
+def test_the_selling_day_is_the_sale_date_and_falls_back_to_the_load():
+    assert analytics.selling_day({"last_sale": "2026-09-07", "group_date": "2026-09-03"}) == "2026-09-07"
+    assert analytics.selling_day({"group_date": "2026-09-03"}) == "2026-09-03"
+    assert analytics.selling_day({}) is None
+
+
+def test_tracking_and_analytics_place_a_sale_on_the_same_day():
+    """Three tabs must not answer "which month is this" three ways."""
+    from app import tracking
+    row = {"last_sale": "2026-07-02", "group_date": "2026-06-28"}
+    assert tracking.selling_day(row) == analytics.selling_day(row) == "2026-07-02"
+    assert analytics.row_date(row).isoformat() == analytics.selling_day(row)

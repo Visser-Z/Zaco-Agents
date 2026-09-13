@@ -23,11 +23,17 @@ def _day(value) -> str | None:
     return str(value)[:10] if value else None
 
 
-def in_range(rows: list[dict], key: str, start: str | None, end: str | None) -> list[dict]:
-    """Rows whose `key` date falls within the range, inclusive at both ends."""
+def in_range(rows: list[dict], key, start: str | None, end: str | None) -> list[dict]:
+    """Rows whose date falls within the range, inclusive at both ends.
+
+    ``key`` is the field name to read, or a function that works the date out of
+    the row -- which is how sales are scoped, since the day a row belongs to is
+    a rule rather than a column.
+    """
+    read = key if callable(key) else (lambda row: _day(row.get(key)))
     out = []
     for row in rows:
-        day = _day(row.get(key))
+        day = read(row)
         if day is None:
             continue
         if (start and day < start) or (end and day > end):
@@ -46,7 +52,7 @@ def by_product(sales: list[dict]) -> list[dict]:
         d["cartons"] += analytics.row_cartons(row)
         d["returned"] += analytics.row_returned(row)
         d["value"] += analytics.row_value(row)
-        if (day := _day(row.get("group_date"))):
+        if (day := analytics.selling_day(row)):
             d["days"].add(day)
     out = []
     for d in agg.values():
@@ -68,7 +74,7 @@ def by_day(sales: list[dict]) -> list[dict]:
     """Every day in the range that sold something, oldest first."""
     agg: dict[str, dict] = {}
     for row in sales:
-        day = _day(row.get("group_date"))
+        day = analytics.selling_day(row)
         if day is None:
             continue
         d = agg.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0, "value": 0.0})
@@ -123,8 +129,14 @@ def build(sales: list[dict], payments: list[dict],
 
     Sales are selected on the day they sold; payments on the day they were
     received. Two different questions, each asked of the column that answers it.
+
+    Sales used to be selected on ``group_date``, the day the load was sent. A
+    delivery that arrives in June and sells in July then landed on June's
+    report, and July's report never saw it -- R224 940 of it in one month on
+    this book -- so Reports and Insights answered "what did June do" with
+    different rows.
     """
-    scoped_sales = in_range(sales, "group_date", start, end)
+    scoped_sales = in_range(sales, analytics.selling_day, start, end)
     scoped_pay = in_range(payments, "date", start, end)
 
     cartons = round(sum(analytics.row_cartons(r) for r in scoped_sales), 2)

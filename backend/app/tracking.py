@@ -43,6 +43,25 @@ def closed_key(kind: str, ref: str) -> str:
     return f"{kind}:{ref}"
 
 
+def where(rows: list[dict]) -> dict:
+    """Where a line is sitting: the market, and the agent selling it there.
+
+    Both are needed. The market says which floor to look at, the agent says who
+    to phone, and they are not the same thing -- one agency sells the same
+    commodity at more than one market.
+
+    Collected across the line's rows rather than read off the first of them. A
+    consignment is one delivery to one agent at one market, so this is normally
+    a single name each, and a group that somehow spans two then says so instead
+    of quietly showing whichever row happened to sort first.
+    """
+    def names(field: str) -> str | None:
+        seen = sorted({n for r in rows if (n := str(r.get(field) or "").strip())})
+        return " · ".join(seen) or None
+
+    return {"market": names("market"), "market_agent": names("market_agent")}
+
+
 def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
     """Work out what each individual sale still has owing on it.
 
@@ -147,6 +166,7 @@ def payment_status(sales: list[dict], payments: list[dict],
             "payment_gross": round(paid.get(key, {}).get("gross", 0.0), 2),
             "payment_nett": round(paid.get(key, {}).get("nett", 0.0), 2),
             "date": min(days) if days else None,
+            **where(rows),
         }
         entry["ref"] = item_ref(entry)
         if owed == 0:
@@ -322,18 +342,10 @@ def sales_by_day(sales: list[dict], start: str | None = None,
 
 # --- slow to sell ---------------------------------------------------------
 
-def selling_day(row: dict) -> str | None:
-    """The day a row actually sold on.
-
-    ``group_date`` is the consignment's date -- the earliest across its
-    delivery-note group, i.e. the day the load was sent -- so several selling
-    days share one value. Dropping a week of reports at once collapsed 46 of 60
-    rows onto a single day and reported R192 965 as one day's trade. The row
-    carries its own sale date in ``last_sale``; use it, and keep ``group_date``
-    as the fallback for history recorded before it was captured.
-    """
-    day = row.get("last_sale") or row.get("group_date")
-    return str(day)[:10] if day else None
+# The rule now lives in ``analytics`` beside ``row_date``, because Reports has
+# to place a sale in a period exactly the way Tracking and Insights do. Kept
+# here as the name this module has always called it.
+selling_day = analytics.selling_day
 
 
 def dated_by(row: dict) -> str | None:
@@ -423,7 +435,7 @@ def slow_stock(sales: list[dict], today: date | None = None,
                              "product": analytics.product_label(first)}),
             "product": analytics.product_label(first),
             "dn": first.get("dn"),
-            "market_agent": first.get("market_agent"),
+            **where(group),
             "cartons_left": int(left),
             "cartons_sent": int(sent),
             "days_on_floor": days,

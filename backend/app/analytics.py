@@ -30,7 +30,24 @@ def _num(value) -> float:
 
 
 def row_value(row: dict) -> float:
-    """Gross sale value for a row: cartons sold x unit price."""
+    """What the row sold for.
+
+    The statement prints a value per docket and a quantity; it does not print a
+    unit price. ``price`` is one the extractor works out -- the value over the
+    cartons, rounded to the cent -- so it is an average, and for most lines it
+    is not a number that divides the total exactly. Multiplying it back by the
+    cartons therefore does not return the money that came in: 13 cartons that
+    sold for R740,00 average R56,9230..., stored as R56,92, and 13 x R56,92 is
+    R739,96. The four cents were never missing; they were rounded away and then
+    multiplied up.
+
+    So the exact value both extractors already record is used when it is there,
+    and cartons x price only stands in for rows that predate it. That is what
+    the statement says, and what the agent paid on, to the cent.
+    """
+    exact = row.get("sales_total")
+    if exact is not None:
+        return _num(exact)
     return _num(row.get("cartons_sold")) * _num(row.get("price"))
 
 
@@ -107,13 +124,32 @@ def row_date(row: dict) -> date | None:
 
     The remaining fallbacks are for history recorded before the sale date was
     captured: something dated is better than a row that cannot be placed at all.
-    Kept in step with ``tracking.selling_day``, which must answer the same
-    question the same way.
+    Kept in step with ``selling_day``, which must answer the same question the
+    same way.
     """
     for key in ("last_sale", "group_date", "invoice_date", "date_received", "created_at"):
         if (d := _parse_date(row.get(key))) is not None:
             return d
     return None
+
+
+def selling_day(row: dict) -> str | None:
+    """The day a row actually sold on, as a plain YYYY-MM-DD string.
+
+    ``group_date`` is the consignment's date -- the earliest across its
+    delivery-note group, i.e. the day the load was sent -- so several selling
+    days share one value. Dropping a week of reports at once collapsed 46 of 60
+    rows onto a single day and reported R192 965 as one day's trade. The row
+    carries its own sale date in ``last_sale``; use it, and keep ``group_date``
+    as the fallback for history recorded before it was captured.
+
+    This lives here, beside ``row_date``, because it is the one rule that
+    decides which period a sale belongs to. Tracking, Insights and Reports all
+    have to answer that the same way or the same month reads three different
+    ways depending on which tab is open.
+    """
+    day = row.get("last_sale") or row.get("group_date")
+    return str(day)[:10] if day else None
 
 
 # --- consignments ---------------------------------------------------------

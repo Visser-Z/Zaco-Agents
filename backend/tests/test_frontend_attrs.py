@@ -160,3 +160,30 @@ def test_the_page_script_actually_parses(source: str) -> None:
         done = subprocess.run([node, "--check", str(js)],
                               capture_output=True, text=True)
     assert done.returncode == 0, f"the page script does not parse:\n{done.stderr}"
+
+
+def test_every_view_setmodule_clears_can_fetch_itself_again(source: str) -> None:
+    """Leaving a tab clears its data so the page is never a stale snapshot.
+
+    The render function has to be able to fetch it back, or the tab is dead on
+    reopening -- it sits on its loading state with no request behind it. Reports
+    shipped without the guard: the first report built, and every one after it
+    span forever.
+    """
+    cleared = re.search(
+        r"const view = (.*?);\s*\n\s*if \(view\) \{ view\.data = null",
+        source, re.S)
+    assert cleared, "setModule no longer clears a view's data the way this test reads it."
+    views = set(re.findall(r"S\.(\w+)", cleared.group(1)))
+    assert views, "no views found in setModule's reset"
+
+    for view in sorted(views):
+        render = re.search(
+            rf"function render{view.capitalize()}\(\) \{{(.*?)\n\}}", source, re.S)
+        assert render, f"no render function found for the {view} tab"
+        body = render.group(1)
+        # The loader's name is the page's business; that one is called off the
+        # cleared state is not.
+        assert re.search(r"\.data === null[^\n]*\bload\w*\(", body), (
+            f"render{view.capitalize()} does not fetch its data back when setModule "
+            f"has cleared it, so reopening the {view} tab hangs on its spinner")

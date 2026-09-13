@@ -1684,7 +1684,9 @@ function renderTracking() {
         ).join("")}</div>` : ""}
       <table class="sday-items">
         <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
-        <thead><tr><th>Product</th><th>Cartons</th><th>Per carton</th><th>Value</th></tr></thead>
+        <thead><tr><th>Product</th><th>Cartons</th>
+          <th title="The average the day fetched: the value divided by the cartons. Cartons on one day can go at different prices, so this will not always multiply back to the value exactly.">Avg / carton</th>
+          <th>Value</th></tr></thead>
         <tbody>${d.products.map(x => {
           const off = x.market_avg && x.price < x.market_avg * 0.7;
           return `<tr>
@@ -1881,7 +1883,7 @@ function reportCsv(d) {
     ["Reconciled", n(m.reconciled)],
     [],
     ["By product"],
-    ["Product", "Cartons", "Returned", "Days sold", "Per carton", "Value"],
+    ["Product", "Cartons", "Returned", "Days sold", "Avg per carton", "Value"],
     ...d.by_product.map(p => [p.product, n(p.cartons), n(p.returned), n(p.days_sold), n(p.price), n(p.value)]),
     [],
     ["By day"],
@@ -2181,7 +2183,9 @@ function renderReports() {
           <span class="rep-c">${fmtInt(d.by_product.length)} product${d.by_product.length === 1 ? "" : "s"}</span></div>
         <div class="rep-scroll"><table class="rep-table">
           <thead><tr><th>Product</th><th class="num">Cartons</th><th class="num">Back</th>
-            <th class="num">Days</th><th class="num">Per carton</th><th class="num">Value</th></tr></thead>
+            <th class="num">Days</th>
+            <th class="num" title="The average this commodity fetched over the range: the value divided by the cartons. Cartons sold at different prices on different days, so this will not usually multiply back to the value exactly.">Avg / carton</th>
+            <th class="num">Value</th></tr></thead>
           <tbody>${productRows}</tbody>
           <tfoot><tr><td>Total</td><td class="num">${fmtInt(t.cartons_sold)}</td>
             <td class="num">${fmtInt(t.cartons_returned)}</td><td class="num">${fmtInt(t.days_traded)}</td>

@@ -100,3 +100,30 @@ def test_a_missing_dismissals_table_names_its_migration():
     # PostgREST answers a missing table with a bare 404 as well.
     assert main._pending_migration(
         _Boom("404: Could not find the table 'public.dismissals'")) == "0016_dismissals.sql"
+
+
+def test_the_history_read_asks_for_every_field_the_views_actually_read():
+    """A field the code reads but the query never asks for reads as missing.
+
+    ``sales_total`` was written on every save and left out of this list, so the
+    exact value was on the row in the database and absent from every row the app
+    worked with -- and row_value silently fell back to cartons x rounded price.
+    Nothing failed; the figures were just quietly out.
+    """
+    asked = set(main._ANALYTICS_COLUMNS.split(","))
+    needed = {
+        "sales_total",    # what the row sold for; see analytics.row_value
+        "cartons_sold", "price",   # the fallback for history without it
+        "last_sale", "group_date",  # which day a sale belongs to
+        "market", "market_agent",   # where the line is sitting
+        "product",
+    }
+    assert not (needed - asked), f"read never asks for: {sorted(needed - asked)}"
+
+
+def test_the_columns_dropped_on_retry_are_all_really_in_the_list():
+    """A typo in the fallback chain drops nothing and the retry is a no-op."""
+    asked = set(main._ANALYTICS_COLUMNS.split(","))
+    for group in main._LATE_COLUMNS:
+        for name in group:
+            assert name in asked, f"{name} is dropped on retry but never requested"

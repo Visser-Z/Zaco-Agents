@@ -746,6 +746,13 @@ async def save_rows(
 _ANALYTICS_COLUMNS = (
     "market_agent,market,description,product,cartons_sold,price,nett_total,"
     "group_date,invoice_date,date_received,status,created_at,"
+    # What the row actually sold for. ``price`` is an average the extractor
+    # divides out and rounds, so cartons x price does not come back to the
+    # money: 13 cartons for R740,00 read back as R739,96. Both extractors
+    # record the exact figure and the save writes it; leaving it out of the
+    # read meant every view recomputed the rounded one. From migration 0003,
+    # so it is older than everything in the fallback chain below.
+    "sales_total,"
     # supplier_ref and dn are how a row finds its recorded purchase cost.
     "qty_received,last_sale,payment_refs,supplier_ref,dn,"
     # Which report a row came from, so a day can say where it was read.

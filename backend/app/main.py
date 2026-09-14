@@ -20,6 +20,7 @@ from . import (
     assistant,
     config,
     csv_reports,
+    forecast,
     lookup,
     nett_adjustments,
     payment_details,
@@ -1294,6 +1295,19 @@ async def _prune_dismissals(user: User) -> int:
 # money is computed deterministically rather than by the model.
 
 
+@app.get("/api/forecast")
+async def get_forecast(user: User | None = Depends(require_user)) -> dict:
+    """What the book expects next month, and how fast things move.
+
+    Computed, not generated: every figure here comes from ``forecast`` over the
+    recorded rows, so this endpoint answers with or without an assistant key.
+    The key only buys the written brief on top of it.
+    """
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    return forecast.build(rows, payments)
+
+
 @app.get("/api/assistant")
 async def assistant_status(user: User | None = Depends(require_user)) -> dict:
     """Whether the assistant is usable, plus example questions for the UI."""
@@ -1317,8 +1331,9 @@ async def ask_assistant(
         )
 
     rows = await _history_rows(user)
+    payments = await _saved_payments(user)
     try:
-        answer = await run_in_threadpool(assistant.ask, question, rows)
+        answer = await run_in_threadpool(assistant.ask, question, rows, payments)
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -1330,7 +1345,8 @@ async def run_analysis(user: User | None = Depends(require_user)) -> dict:
     """Run the analyst panel: several specialists, then a buying recommendation.
 
     Each specialist examines the same complete history from a different angle
-    (how stock moved, what prices held, where it sold best, what is changing),
+    (how stock moved, what prices held, where it sold best, what next month
+    looks like, when the money lands, what is changing),
     and a final pass weighs their findings against each other.
     """
     if not assistant.configured():
@@ -1339,8 +1355,9 @@ async def run_analysis(user: User | None = Depends(require_user)) -> dict:
             "The assistant is not set up yet: ANTHROPIC_API_KEY is missing on the server.",
         )
     rows = await _history_rows(user)
+    payments = await _saved_payments(user)
     try:
-        return await assistant.analyse(rows)
+        return await assistant.analyse(rows, payments)
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
 

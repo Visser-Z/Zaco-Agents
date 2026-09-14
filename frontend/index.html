@@ -673,6 +673,26 @@
   .ask-findings summary { cursor: pointer; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
   .ask-f { margin-top: 10px; }
   .ask-ft { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 4px; }
+  /* -------- intelligence */
+  table.intel-table { min-width: 700px; }
+  table.intel-table th:first-child, table.intel-table td:first-child { width: 30%; }
+  table.intel-table th:nth-child(2), table.intel-table td:nth-child(2) { width: 27%; }
+  table.intel-table th:last-child, table.intel-table td:last-child { text-align: right; }
+  .est { white-space: nowrap; }
+  .rng { display: block; margin-top: 2px; color: var(--ink-faint); font-size: 11px; font-weight: 500; }
+  .rng-to { padding: 0 1px; }
+  /* How much history is behind a figure, said on the figure rather than in a
+     footnote. A single month is not a forecast and must not look like one. */
+  .conf { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+          font-weight: 650; white-space: nowrap; }
+  .conf.c-fair { background: var(--ok-tint); color: var(--ok); }
+  .conf.c-low { background: var(--warn-tint); color: var(--warn); }
+  .conf.c-single-month { background: var(--crit-tint); color: var(--crit); }
+  .banner.warn { background: var(--warn-tint); border-color: color-mix(in srgb, var(--warn) 25%, transparent); }
+  .banner.caveats { align-items: flex-start; }
+  .banner.caveats ul { margin: 6px 0 0; padding-left: 18px; }
+  .banner.caveats li { margin-bottom: 4px; }
+  .banner.caveats li:last-child { margin-bottom: 0; }
   /* -------- delete-history control ----------------------------------- */
   .ins-danger { margin-top: 18px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
   .ins-danger .dwarn { font-size: 13px; color: var(--ink-soft); flex: 1; min-width: 220px; }
@@ -811,7 +831,7 @@
     <button class="tab" data-module="tracking" onclick="setModule('tracking')">Tracking</button>
     <button class="tab" data-module="insights" onclick="setModule('insights')">Insights</button>
     <button class="tab" data-module="reports" onclick="setModule('reports')">Reports</button>
-    <button class="tab" data-module="assistant" onclick="setModule('assistant')">Assistant</button>
+    <button class="tab" data-module="intel" onclick="setModule('intel')">Intelligence</button>
   </nav>
 
   <div class="body">
@@ -855,6 +875,9 @@ const S = {
   // The conversation is kept across tab switches; the status is read once.
   assistant: { status: null, loading: false, error: null, log: [], busy: false,
                busyLabel: "", draft: "" },
+  // The computed outlook. Separate from the conversation because it does not
+  // need an assistant key and must still be there when there is none.
+  intel: { data: null, loading: false, error: null },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -919,6 +942,7 @@ const ICON = {
   tag:     '<path d="M3.5 8.2V3.5h4.7l6.3 6.3-4.7 4.7z"/><circle cx="6" cy="6" r=".9"/>',
   pin:     '<path d="M9 15s4.5-4.2 4.5-7.5a4.5 4.5 0 1 0-9 0C4.5 10.8 9 15 9 15z"/><circle cx="9" cy="7.5" r="1.7"/>',
   users:   '<circle cx="7" cy="7" r="2.4"/><path d="M2.8 14.2a4.4 4.4 0 0 1 8.4 0"/><path d="M12 5.2a2.2 2.2 0 0 1 0 4.3M13.2 14.2a4 4 0 0 0-1.3-2.7"/>',
+  chart:   '<path d="M3.5 3.5v11h11"/><path d="M6.5 11.5V8M9.5 11.5V5.5M12.5 11.5V9"/>',
   scale:   '<path d="M9 3.8v10.4M5 5.2h8"/><path d="M3 10.2 5 6l2 4.2a2 2 0 0 1-4 0zM11 10.2 13 6l2 4.2a2 2 0 0 1-4 0z"/>',
 };
 function icon(name, size) {
@@ -1255,7 +1279,7 @@ function setModule(m) {
   // Tracking, which had not failed, kept working -- and the history looked
   // missing from one page and present on the other.
   const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking
-             : m === "reports" ? S.reports : null;
+             : m === "reports" ? S.reports : m === "intel" ? S.intel : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
   render();
   main.scrollTo(0, 0);
@@ -1266,7 +1290,7 @@ function render() {
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
   if (S.module === "reports") return renderReports();
-  if (S.module === "assistant") return renderAssistant();
+  if (S.module === "intel") return renderIntel();
   if (S.busy) return renderBusy();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
@@ -2057,8 +2081,8 @@ async function askAssistant(text) {
 async function runAnalysis() {
   const A = S.assistant;
   if (A.busy) return;
-  A.log.push({ role: "q", text: "What should I buy next?" });
-  A.busy = true; A.busyLabel = "Four specialists are going through the book";
+  A.log.push({ role: "q", text: "What does next month look like, and what should I buy?" });
+  A.busy = true; A.busyLabel = "Six specialists are going through the book";
   render(); scrollAskLog();
   try {
     const res = await (await api("/api/assistant/analyse", { method: "POST" })).json();
@@ -2109,6 +2133,214 @@ function findingsBlock(findings) {
     findings.map(f => `<div class="ask-f"><div class="ask-ft">${esc(f.title)}</div>${
       f.failed ? `<p class="ask-muted">This one could not complete.</p>` : mdLite(f.finding)}</div>`).join("")
   }</details>`;
+}
+
+// ---------------------------------------------------------- intelligence
+// What the book expects next month, and what to do about it.
+//
+// The figures are computed by the server from the recorded rows, so this screen
+// works whether or not an assistant key is set. The key buys the written brief
+// on top of the numbers, not the numbers themselves -- which is deliberate: a
+// projection that only exists inside a model answer cannot be checked.
+
+async function loadForecast() {
+  const F = S.intel;
+  F.loading = true; F.error = null;
+  if (!S.live) { F.loading = false; F.data = null; render(); return; }
+  try {
+    F.data = await (await api("/api/forecast")).json();
+  } catch (e) {
+    F.error = e.message || String(e);
+  } finally {
+    F.loading = false; render();
+  }
+}
+
+const CONF_WORD = {
+  "fair": "three months behind it",
+  "low": "only two months behind it",
+  "single month": "one month only, so a reading not a forecast",
+};
+
+/** A range, written as a range. The middle figure never travels alone. */
+function rangeCell(r) {
+  if (r.low === r.high) return `R ${fmt(r.estimate)}`;
+  return `R ${fmt(r.low)} <span class="rng-to">to</span> R ${fmt(r.high)}`;
+}
+
+function projectionBlock(p) {
+  const t = p.total;
+  const monthName = monthLabel(p.month);
+  const caveats = (p.caveats || []).map(c => `<li>${esc(c)}</li>`).join("");
+
+  const rows = (p.products || []).map(x => `<tr>
+      <td class="rp-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}</td>
+      <td class="num est"><b>R ${fmt(x.estimate)}</b>
+        ${x.low === x.high ? "" : `<span class="rng">${rangeCell(x)}</span>`}</td>
+      <td class="num">${fmtInt(x.cartons_estimate)}</td>
+      <td class="num">${x.cartons_per_day == null ? "—" : fmtInt(x.cartons_per_day) + "/day"}</td>
+      <td class="num">${x.days_to_clear == null ? "—" : x.days_to_clear + "d"}</td>
+      <td><span class="conf c-${esc(x.confidence.replace(/\s+/g, "-"))}"
+            title="${esc(x.months_used.join(", "))}">${esc(x.confidence)}</span></td>
+    </tr>`).join("");
+
+  return `
+    <div class="kpis kpis-2">
+      ${kpiCard(`Expected in ${monthName}`, "R " + fmt(t.estimate),
+        `between R ${fmt(t.low)} and R ${fmt(t.high)}`, undefined,
+        { tone: "accent", icon: "rand" })}
+      ${kpiCard("Built from", (p.window || []).length + " month" + ((p.window || []).length === 1 ? "" : "s"),
+        (p.window || []).map(monthLabel).join(", ") || "nothing yet", undefined,
+        { icon: "table" })}
+    </div>
+
+    ${caveats ? `<div class="banner warn caveats"><span class="bi">${icon("alert", 14)}</span>
+      <div><b>Read these with the numbers.</b><ul>${caveats}</ul></div></div>` : ""}
+
+    ${rows ? `<div class="card ins-card">
+      <div class="ins-card-head"><h2>Product by product</h2>
+        <span class="rep-c">${fmtInt((p.products || []).length)} projected</span></div>
+      <div class="rep-scroll"><table class="rep-table intel-table">
+        <thead><tr><th>Product</th><th class="num">Expected</th>
+          <th class="num">Cartons</th><th class="num">Sells at</th><th class="num">Clears in</th>
+          <th>Confidence</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="rep-note">Expected is the middle of the months this product actually traded;
+        the range is its worst and best of those months. Nothing is extrapolated past what
+        the book has seen.</p>
+    </div>` : `<div class="card placeholder"><div class="pi">${icon("clock", 22)}</div>
+      <h2>Nothing to project yet</h2>
+      <p>Save a couple of months of sales and this fills in.</p></div>`}
+
+    ${(p.resting || []).length ? `<div class="card ins-card">
+      <div class="ins-card-head"><h2>Resting</h2>
+        <span class="rep-c">${fmtInt(p.resting.length)} not projected</span></div>
+      <p class="rep-note">Nothing sold on these lately, which usually means the season is
+        over rather than that they failed. They are counted at nothing rather than averaged
+        back to life.</p>
+      <ul class="trk-list">${p.resting.slice(0, 12).map(r => `<li>
+        ${nameCell(r, shortProduct(r.product))}
+        <span class="trk-d">last traded ${esc(monthLabel(r.last_traded))}</span>
+        <span class="trk-n num"></span></li>`).join("")}</ul>
+    </div>` : ""}`;
+}
+
+/** Best outlet per product: where the same fruit fetched the most, and on how
+ *  much. The volume is shown beside the price because a record price on one
+ *  carton is not a market, it is an anecdote. */
+function outletBlock(outlets) {
+  if (!outlets || !outlets.length) return "";
+  const best = {};
+  for (const o of outlets) {
+    const cur = best[o.product];
+    if (!cur || o.price > cur.price) best[o.product] = o;
+  }
+  const rows = Object.values(best)
+    .sort((a, b) => b.cartons - a.cartons)
+    .slice(0, 12)
+    .map(o => `<tr>
+      <td class="rp-p" title="${esc(o.product)}">${esc(shortProduct(o.product))}</td>
+      <td>${esc(o.market || "—")}</td>
+      <td>${esc(o.market_agent || "—")}</td>
+      <td class="num">R ${fmt(o.price)}</td>
+      <td class="num">${fmtInt(o.cartons)}</td>
+    </tr>`).join("");
+  return `<div class="card ins-card">
+    <div class="ins-card-head"><h2>Where each one fetched the most</h2></div>
+    <div class="rep-scroll"><table class="rep-table">
+      <thead><tr><th>Product</th><th>Market</th><th>Agent</th>
+        <th class="num">Per carton</th><th class="num">On cartons</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p class="rep-note">Judge the price against the cartons beside it. A high price on a
+      handful is not a better outlet than a fair price on a full load.</p>
+  </div>`;
+}
+
+/** How long each agent takes to pay, so next month's sales can be read as cash. */
+function cashBlock(lag) {
+  if (!lag || !lag.length) return "";
+  const slowest = Math.max(...lag.map(l => l.days_to_pay), 1);
+  return `<div class="card ins-card">
+    <div class="ins-card-head"><h2>When the money lands</h2>
+      <span class="rep-c">median days, last sale to payment</span></div>
+    <ul class="bars">${lag.map(l => `<li class="bar">
+      <div class="bl"><span class="bt">${esc(l.market_agent)}</span></div>
+      <div class="btrack"><span class="bfill" style="width:${Math.max(3, Math.round(l.days_to_pay / slowest * 100))}%"></span></div>
+      <div class="bv">${l.days_to_pay} d</div></li>`).join("")}</ul>
+    <p class="rep-note">Measured from the last sale on a consignment to the payment against
+      it, across ${fmtInt(lag.reduce((n, l) => n + l.payments, 0))} payments. Slowest single
+      settlement: ${fmtInt(Math.max(...lag.map(l => l.slowest_days)))} days.</p>
+  </div>`;
+}
+
+function renderIntel() {
+  const F = S.intel, A = S.assistant;
+  if (F.data === null && !F.loading && F.error === null && S.live) loadForecast();
+  if (A.status === null && !A.loading && S.live) loadAssistant();
+  const ready = !!(A.status && A.status.configured);
+
+  const head = `<div class="head ins-head">
+      <div><h1>Intelligence</h1>
+        <p class="head-sub">What the book expects next month, how fast each line moves,
+          and where it pays best. Every figure is computed from your saved sales.</p></div>
+      <div class="ins-actions">
+        <button class="btn ghost sm refresh" onclick="loadForecast()">${icon("refresh")}Refresh</button>
+        ${ready ? `<button class="btn primary sm" onclick="runAnalysis()" ${A.busy ? "disabled" : ""}>${icon("chat")}Written brief</button>` : ""}
+      </div>
+    </div>`;
+
+  if (!S.live) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card placeholder"><div class="pi">${icon("chart", 22)}</div>
+        <h2>Needs the live app</h2>
+        <p>This reads your saved history, so it only works signed in.</p></div></section>`;
+    return;
+  }
+  if (F.error) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="banner bad"><span class="bi">!</span><span><b>Could not work out the outlook.</b>
+        ${esc(F.error)}</span></div></section>`;
+    return;
+  }
+  if (!F.data) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card"><div class="busy"><span class="spin"></span> Reading the book</div></div></section>`;
+    return;
+  }
+
+  const log = A.log.map(m => m.role === "q"
+    ? `<div class="ask-q">${esc(m.text)}</div>`
+    : `<div class="ask-a${m.failed ? " failed" : ""}">${m.failed ? `<p>${esc(m.text)}</p>` : mdLite(m.text)}${findingsBlock(m.findings)}</div>`
+  ).join("");
+  const busy = A.busy
+    ? `<div class="ask-a"><div class="busy"><span class="spin"></span> ${esc(A.busyLabel)}</div></div>` : "";
+
+  const brief = ready
+    ? `<div class="card ask-card">
+        <div class="ins-card-head"><h2>Ask about any of it</h2>
+          ${A.log.length && !A.busy ? `<button class="linklike" onclick="clearAssistant()">Clear</button>` : ""}</div>
+        ${log || busy ? `<div class="ask-log">${log}${busy}</div>` : `
+          <div class="ask-chips">${(A.status.suggestions || []).map(s =>
+            `<button class="ask-chip" data-q="${esc(s)}" onclick="askAssistant(this.dataset.q)">${esc(s)}</button>`).join("")}</div>`}
+        <form class="ask-bar" onsubmit="event.preventDefault(); askAssistant(this.q.value)">
+          <input class="ask-input" name="q" autocomplete="off" maxlength="2000"
+            placeholder="Ask about next month, a product, an agent" value="${esc(A.draft)}"
+            oninput="S.assistant.draft = this.value" ${A.busy ? "disabled" : ""}>
+          <button class="btn primary sm" ${A.busy ? "disabled" : ""}>Ask</button>
+        </form>
+      </div>`
+    : `<div class="card placeholder"><div class="pi">${icon("chat", 22)}</div>
+        <h2>The written brief is not set up</h2>
+        <p>The figures above are worked out on the server and do not need it. Adding
+          <code>ANTHROPIC_API_KEY</code> in Vercel under Settings, Environment Variables
+          adds a written read of them: what to buy, how much, and where to send it.</p></div>`;
+
+  main.innerHTML = `<section class="screen ins">${head}
+    ${projectionBlock(F.data.projection)}
+    <div class="ins-grid-2">${outletBlock(F.data.outlets)}${cashBlock(F.data.payment_lag)}</div>
+    ${brief}
+  </section>`;
 }
 
 function renderAssistant() {

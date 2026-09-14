@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from . import analytics
+from . import analytics, forecast
 
 # Claude Haiku 4.5, the operator's choice: they hold the key and pay for what it
 # uses. Overridable per deployment with ZACON_ASSISTANT_MODEL -- to try Sonnet if
@@ -276,6 +276,84 @@ def build_context(rows: list[dict]) -> str:
     return "\n".join(out)
 
 
+def forecast_context(rows: list[dict], payments: list[dict]) -> str:
+    """The forward-looking block: what next month is projected at, and why.
+
+    Every figure here is computed by ``forecast``. The model is being handed a
+    projection, not asked to make one -- asked to project, it would write a
+    number that reads well and nothing in the answer would show where it came
+    from.
+
+    The caveats come first on purpose. They are the part a model is most likely
+    to drop when summarising, and they are the part that decides whether the
+    numbers under them mean anything.
+    """
+    f = forecast.build(rows, payments)
+    p = f["projection"]
+    if not p["products"] and not p["resting"]:
+        return "There is not enough recorded history to project anything yet."
+
+    out = ["## Projection for " + p["month"] + " (computed, do not recalculate)"]
+    if p["caveats"]:
+        out.append("")
+        out.append("READ THESE FIRST. They limit everything below, and they must appear "
+                   "in any answer that quotes a projected figure:")
+        for c in p["caveats"]:
+            out.append(f"- {c}")
+
+    t = p["total"]
+    out.append("")
+    out.append(f"Whole book: R {_fmt(t['estimate'])} expected, somewhere between "
+               f"R {_fmt(t['low'])} and R {_fmt(t['high'])}.")
+    out.append(f"Built from these months: {', '.join(p['window'])}. "
+               f"The book covers {', '.join(p['months_covered'])}.")
+
+    if p["products"]:
+        out.append("")
+        out.append("### Per product")
+        out.append("product | expected (R) | low (R) | high (R) | cartons | confidence | "
+                   "months used | days to clear | cartons/day")
+        for x in p["products"][:25]:
+            out.append(" | ".join([
+                x["product"], _fmt(x["estimate"]), _fmt(x["low"]), _fmt(x["high"]),
+                _count(x["cartons_estimate"]), x["confidence"], " ".join(x["months_used"]),
+                "?" if x["days_to_clear"] is None else str(x["days_to_clear"]),
+                "?" if x["cartons_per_day"] is None else str(x["cartons_per_day"]),
+            ]))
+
+    if p["resting"]:
+        out.append("")
+        out.append("### Not projected: nothing sold recently")
+        out.append("These are most likely out of season rather than failing. Do not "
+                   "recommend buying them back without saying that is what you are doing.")
+        out.append("product | last traded")
+        for r in p["resting"][:20]:
+            out.append(f"{r['product']} | {r['last_traded']}")
+
+    outlets = f["outlets"]
+    if outlets:
+        out.append("")
+        out.append("### What each outlet achieved, per product (exact)")
+        out.append("The count is the volume the price was achieved on. A high price on "
+                   "one carton is not a better outlet than a fair price on four hundred.")
+        out.append("product | market | agent | price/carton (R) | cartons | consignments")
+        for o in outlets[:60]:
+            out.append(" | ".join([
+                o["product"], o["market"] or "?", o["market_agent"] or "?",
+                _fmt(o["price"]), _count(o["cartons"]), str(o["consignments"]),
+            ]))
+
+    lag = f["payment_lag"]
+    if lag:
+        out.append("")
+        out.append("### How long each agent takes to pay (median days, last sale to money)")
+        out.append("agent | usual days | slowest | payments measured")
+        for l in lag:
+            out.append(f"{l['market_agent']} | {l['days_to_pay']} | {l['slowest_days']} | {l['payments']}")
+
+    return "\n".join(out)
+
+
 # Questions worth surfacing in the UI, so the operator sees what it can do.
 SUGGESTIONS = [
     "What sold best last month, and at what price?",
@@ -332,6 +410,34 @@ ANALYSTS = [
         ),
     },
     {
+        "key": "ahead",
+        "title": "What next month looks like",
+        "brief": (
+            "Work from the projection block. Every figure in it is already "
+            "computed: quote it, never recompute it, and never produce a number "
+            "of your own. Say what the book expects next month overall and for "
+            "the three or four products that carry it, always as the range rather "
+            "than the middle figure alone. State the confidence beside each, and "
+            "name the months it rests on. Where a product is projected on a single "
+            "month, say that plainly -- it is a reading, not a forecast. Repeat "
+            "the caveats that apply; they are not optional context. If the book is "
+            "too short or too broken to support a projection, say so and stop, "
+            "rather than dressing up a thin one."
+        ),
+    },
+    {
+        "key": "cash",
+        "title": "When the money lands",
+        "brief": (
+            "Work from the payment-lag table and the outstanding position. Say how "
+            "long each agent actually takes to pay, measured from the last sale to "
+            "the money, and what that means for when next month's sales turn into "
+            "cash. Name any agent who is slower than the others and by how much. "
+            "Distinguish 'slow to pay' from 'has not paid': one is a cash-flow "
+            "fact, the other is a debt to chase. Do not speculate about why."
+        ),
+    },
+    {
         "key": "trend",
         "title": "What is changing",
         "brief": (
@@ -357,24 +463,34 @@ this data.\
 """
 
 SYNTHESIS_SYSTEM = """\
-You are advising the operator of a fresh-produce business on what to buy next. \
+You are advising the operator of a fresh-produce business on the month ahead. \
 Several specialists have each examined one angle of the same sales history; \
 their findings follow, along with the exact figures they worked from.
 
-Weigh them against each other and commit to a recommendation. Where two \
-findings pull in different directions -- a product earning well but selling \
-slowly, say -- resolve it and explain which mattered more and why.
+Weigh them against each other and commit to a view. Where two findings pull in \
+different directions -- a product earning well but selling slowly, say -- \
+resolve it and explain which mattered more and why.
+
+Every number you use is already computed in the data block. Quote those figures; \
+never derive, scale or estimate one of your own. A projected figure is always \
+given as its range, never as the middle number on its own.
 
 Structure the answer as:
-  What to buy more of, and why
-  What to be careful with
+  What next month looks like
+  What to buy, and how much
   Where to send it
+  When the money comes in
   What we cannot tell yet, and what would fix that
 
-Keep it tight, use the operator's product codes, and give the rand figures that \
-carry the argument. Say how much history is behind the advice. Never estimate a \
-cost price: nothing records what was paid, so say what sells well and where, and \
-be explicit that true profit needs purchase prices the system does not hold.\
+Under "how much", use days-to-clear and cartons-per-day rather than value alone: \
+a load bigger than the floor can absorb sits, and sitting fruit is what the \
+slow-stock list is full of.
+
+Keep it tight and give the rand figures that carry the argument. Carry the \
+projection's caveats into the answer -- a reader who acts on the numbers without \
+them has been misled. Never estimate a cost price: nothing records what was \
+paid, so say what sells well and where, and be explicit that true profit needs \
+purchase prices the system does not hold.\
 """
 
 
@@ -382,7 +498,19 @@ class AssistantError(RuntimeError):
     """The assistant could not answer -- surfaced to the operator as-is."""
 
 
-def ask(question: str, rows: list[dict]) -> str:
+def data_block(rows: list[dict], payments: list[dict] | None = None) -> str:
+    """Everything the model is given: what happened, then what is expected.
+
+    Built in one place so a question and the panel always see the same book.
+    """
+    parts = [build_context(rows)]
+    if rows:
+        parts.append(forecast_context(rows, payments or []))
+    return "\n\n".join(parts)
+
+
+def ask(question: str, rows: list[dict],
+        payments: list[dict] | None = None) -> str:
     """Answer `question` against the recorded sales `rows`."""
     import anthropic
 
@@ -399,7 +527,7 @@ def ask(question: str, rows: list[dict]) -> str:
         # follow-up question cheap. It re-caches whenever new sales are saved.
         {
             "type": "text",
-            "text": build_context(rows),
+            "text": data_block(rows, payments),
             "cache_control": {"type": "ephemeral"},
         },
     ]
@@ -476,7 +604,7 @@ async def _one_call(client, system: list[dict], prompt: str, max_tokens: int,
         raise
 
 
-async def analyse(rows: list[dict]) -> dict:
+async def analyse(rows: list[dict], payments: list[dict] | None = None) -> dict:
     """Run the analyst panel and synthesise a buying recommendation.
 
     The specialists run concurrently, so the wall clock is roughly one call plus
@@ -497,8 +625,8 @@ async def analyse(rows: list[dict]) -> dict:
             "There are no saved sales to analyse yet. Process a round of PDFs and save first."
         )
 
-    context = build_context(rows)
-    data_block = {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}}
+    context = data_block(rows, payments)
+    block = {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}}
 
     client = anthropic.AsyncAnthropic(api_key=key)
     try:
@@ -510,7 +638,7 @@ async def analyse(rows: list[dict]) -> dict:
                 *(
                     _one_call(
                         client,
-                        [{"type": "text", "text": SYSTEM}, data_block,
+                        [{"type": "text", "text": SYSTEM}, block,
                          {"type": "text", "text": ANALYST_SYSTEM}],
                         a["brief"],
                         ANALYST_MAX_TOKENS,
@@ -541,7 +669,7 @@ async def analyse(rows: list[dict]) -> dict:
             )
             final = await _one_call(
                 client,
-                [{"type": "text", "text": SYSTEM}, data_block,
+                [{"type": "text", "text": SYSTEM}, block,
                  {"type": "text", "text": SYNTHESIS_SYSTEM}],
                 f"The specialists reported the following.\n\n{briefing}\n\n"
                 "Weigh these and give the buying recommendation.",

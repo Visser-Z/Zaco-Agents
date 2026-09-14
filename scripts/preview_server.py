@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app import analytics, integrity, reports, tracking  # noqa: E402
+from app import analytics, forecast, integrity, reports, tracking  # noqa: E402
 
 PAGE = ROOT / "frontend" / "index.html"
 
@@ -144,6 +144,8 @@ def api(path: str, params: dict) -> dict:
                             for m in months if m]}
     if path == "/api/reports/period":
         return reports.build(SALES, PAYMENTS, params.get("from"), params.get("to"))
+    if path == "/api/forecast":
+        return forecast.build(SALES, PAYMENTS)
     if path == "/api/assistant":
         return {"configured": True, "suggestions": [
             "Which product earned the most last month?",

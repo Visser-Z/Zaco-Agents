@@ -6,29 +6,38 @@
      that when colour does appear, it means something. */
   :root {
     /* Cool neutral greys -- office software, not warm "document" cream. */
-    --ground: #F5F6F8;      /* page behind the cards        */
+    --ground: #F3F5FA;      /* page behind the cards        */
     --surface: #FFFFFF;     /* cards, tables, bars          */
-    --surface-2: #EFF1F4;   /* headers, insets, wells       */
-    --ink: #16191F;         /* charcoal, deliberately not pure black */
-    --ink-soft: #4C5461;
-    --ink-faint: #858D9A;
-    --line: #E2E5EA;
-    --line-strong: #CBD1D9;
+    --surface-2: #EDF0F6;   /* headers, insets, wells       */
+    --ink: #141821;         /* charcoal, deliberately not pure black */
+    --ink-soft: #4A5361;
+    /* Muted labels. Darkened from #858D9A, which measured 3.35:1 on white and
+       was carrying 11px text -- this one clears 4.5:1 on the card AND on the
+       ground behind it. */
+    --ink-faint: #697280;
+    --line: #E1E6EE;
+    --line-strong: #C8D0DC;
 
-    /* Single accent: a restrained corporate blue for primary actions only. */
-    --accent: #1F5FA8;
-    --accent-strong: #17497F;
-    --accent-tint: #E9F0F8;
+    /* One accent, for primary actions and for every chart that plots a single
+       measure. Bars are NOT coloured per category: the category is already on
+       the axis, and a hue per bar double-encodes the length it already shows. */
+    --accent: #1B63C4;
+    --accent-strong: #144B99;
+    --accent-tint: #E8F0FC;
+    --accent-soft: #F5F8FE;
 
-    /* Semantic status. Green survives here as "correct", not as branding. */
-    --ok: #1E7A4D;    --ok-tint: #E7F4EC;
-    --warn: #9A6410;  --warn-tint: #FBF1DE;
-    --crit: #B23B34;  --crit-tint: #FAE9E7;
+    /* Status. Two steps each, because they do two different jobs: the first is
+       text and holds 4.5:1 on white and on its own tint; the -mark step is the
+       brighter one, used only for a dot, chip or rule that sits beside a label.
+       A status colour never carries the meaning alone. */
+    --ok: #1B7A4B;    --ok-tint: #E4F4EB;    --ok-mark: #17A05C;
+    --warn: #8A5A0C;  --warn-tint: #FDF3E0;  --warn-mark: #E9A317;
+    --crit: #B03A33;  --crit-tint: #FBEAE8;  --crit-mark: #DC4A42;
 
-    /* Flat and tight. Depth comes from borders, not from glow. */
-    --shadow: 0 1px 2px rgba(16, 24, 40, .05);
-    --shadow-lg: 0 4px 12px -2px rgba(16, 24, 40, .08), 0 2px 4px -2px rgba(16, 24, 40, .05);
-    --radius: 10px;
+    /* Depth comes from borders and a cool low shadow, not from glow. */
+    --shadow: 0 1px 2px rgba(19, 35, 68, .06);
+    --shadow-lg: 0 6px 16px -4px rgba(19, 35, 68, .10), 0 2px 5px -2px rgba(19, 35, 68, .06);
+    --radius: 12px;
     --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
@@ -49,9 +58,14 @@
   ::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); background-clip: padding-box; }
 
   .app { min-height: 100vh; display: flex; flex-direction: column; }
-  .topbar { display: flex; align-items: center; gap: 14px; padding: 0 22px; height: 56px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 0 22px; height: 56px;
+             background: linear-gradient(180deg, #FFFFFF, var(--accent-soft));
+             border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; font-size: 15px; }
-  .brand .glyph { width: 26px; height: 26px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 15px; }
+  .brand .glyph { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center;
+                  color: #fff; font-size: 15px;
+                  background: linear-gradient(145deg, #3E86E8, var(--accent-strong));
+                  box-shadow: 0 1px 2px rgba(20, 75, 153, .35); }
   .brand .sub { color: var(--ink-faint); font-weight: 500; font-size: 12px; letter-spacing: .02em; }
   .topbar .spacer { flex: 1; }
   .wb-pill { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
@@ -68,9 +82,9 @@
 
   .body { flex: 1; display: grid; grid-template-columns: 1fr; }
   .tabs { display: flex; gap: 2px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 56px; z-index: 19; }
-  .tab { appearance: none; border: 0; background: none; font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; }
-  .tab:hover { color: var(--ink); }
-  .tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); }
+  .tab { position: relative; z-index: 1; appearance: none; border: 0; background: none; font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 9px 9px 0 0; transition: color .15s, border-color .15s, background .15s; }
+  .tab:hover { color: var(--ink); background: var(--accent-soft); }
+  .tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); background: var(--accent-tint); }
   .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
   .rail { border-right: 1px solid var(--line); padding: 26px 18px; background: var(--surface); }
   .rail h2 { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px 6px; font-weight: 650; }
@@ -109,6 +123,8 @@
   @media (prefers-reduced-motion: reduce) { .screen, .toast, .spin { animation: none; } }
   .head { margin-bottom: 22px; }
   .head h1 { font-size: 22px; letter-spacing: -.02em; margin: 0 0 5px; text-wrap: balance; }
+  .head h1::before { content: ""; display: block; width: 30px; height: 3px; border-radius: 2px;
+                     margin-bottom: 10px; background: linear-gradient(90deg, var(--accent), #52A0F0); }
   .head p { margin: 0; color: var(--ink-soft); max-width: 64ch; }
 
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -132,10 +148,29 @@
   .wb-bar .fm { font-size: 13px; color: var(--ink-faint); }
   .wb-bar .spacer { flex: 1; }
 
-  .drop { border: 2px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-2); padding: 34px 24px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
-  .drop:hover { border-color: var(--accent); background: var(--accent-tint); }
-  .drop.over { border-color: var(--accent); background: var(--accent-tint); }
-  .drop .big { width: 44px; height: 44px; margin: 0 auto 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; font-size: 20px; color: var(--accent); }
+  /* The two drop zones are the first thing on the first screen, so they are
+     where the app either looks alive or looks like a grey form. Tinted bed,
+     a coloured well for the icon, and a lift on hover -- the two halves are
+     told apart by their tone as well as by their heading, since which half a
+     file lands on decides how it is read. */
+  .drop { border: 2px dashed var(--line-strong); border-radius: var(--radius);
+          background: linear-gradient(180deg, var(--surface), var(--surface-2));
+          padding: 34px 24px; text-align: center; cursor: pointer;
+          transition: border-color .15s, background .15s, box-shadow .15s, transform .12s; }
+  .drop:hover { border-color: var(--accent); background: linear-gradient(180deg, var(--accent-soft), var(--accent-tint)); box-shadow: var(--shadow); }
+  .drop.over { border-color: var(--accent); border-style: solid;
+               background: linear-gradient(180deg, var(--accent-soft), var(--accent-tint));
+               box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+  .drop .big { width: 48px; height: 48px; margin: 0 auto 12px; border-radius: 14px;
+               display: grid; place-items: center; font-size: 20px; color: #fff;
+               background: linear-gradient(145deg, #3E86E8, var(--accent-strong));
+               box-shadow: 0 2px 6px -1px rgba(20, 75, 153, .40); }
+  /* Payments is money coming in, and reads in the same green the Paid tile and
+     the Connected badge use. */
+  [data-drop="payments"] .drop .big { background: linear-gradient(145deg, #2FB870, #146B41);
+                                      box-shadow: 0 2px 6px -1px rgba(20, 107, 65, .40); }
+  [data-drop="payments"] .drop:hover { border-color: var(--ok-mark); background: linear-gradient(180deg, #F4FBF7, var(--ok-tint)); }
+  [data-drop="payments"] .drop.over { border-color: var(--ok-mark); background: linear-gradient(180deg, #F4FBF7, var(--ok-tint)); }
   .drop .t { font-weight: 600; }
   .drop .s { font-size: 13px; color: var(--ink-faint); margin-top: 3px; }
 
@@ -146,8 +181,9 @@
   .actions .spacer { flex: 1; }
   .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: background .15s, border-color .15s, transform .08s, box-shadow .15s; }
   .btn.sm { padding: 8px 13px; font-size: 13px; }
-  .btn.primary { background: var(--accent); color: #fff; }
-  .btn.primary:hover { background: var(--accent-strong); }
+  .btn.primary { background: linear-gradient(180deg, #2B72D4, var(--accent)); color: #fff;
+                 box-shadow: 0 1px 2px rgba(20, 75, 153, .30); }
+  .btn.primary:hover { background: linear-gradient(180deg, var(--accent), var(--accent-strong)); }
   .btn.primary:active { transform: translateY(1px); }
   .btn.primary:disabled { background: var(--line-strong); color: var(--ink-faint); cursor: not-allowed; }
   .btn.ghost { background: var(--surface); border-color: var(--line-strong); color: var(--ink); }
@@ -267,9 +303,32 @@
   .ctl select:disabled { color: var(--ink-faint); background-color: var(--surface-2); cursor: not-allowed; }
 
   .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 18px; }
-  .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 15px; }
-  .kpi .kv { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -.01em; }
-  .kpi .kl { font-size: 13px; font-weight: 600; color: var(--ink-soft); margin-top: 3px; }
+  /* A tile carries its own status: a hairline down the leading edge and a
+     tinted icon. Both are tone; the figure stays ink, so the tile is still
+     readable with no colour at all. */
+  .kpi { position: relative; background: var(--surface); border: 1px solid var(--line);
+         border-radius: var(--radius); padding: 14px 15px 14px 17px; overflow: hidden;
+         transition: border-color .15s, box-shadow .15s, transform .12s; }
+  .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+                 background: transparent; }
+  .kpi:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+  .kpi .kic { flex: none; width: 20px; height: 20px; border-radius: 6px;
+              display: grid; place-items: center;
+              background: var(--surface-2); color: var(--ink-faint); }
+  .kpi .kic .ic { margin: 0; }
+  .kpi.t-ok::before   { background: var(--ok-mark); }
+  .kpi.t-ok .kic      { background: var(--ok-tint); color: var(--ok); }
+  .kpi.t-warn::before { background: var(--warn-mark); }
+  .kpi.t-warn .kic    { background: var(--warn-tint); color: var(--warn); }
+  .kpi.t-crit::before { background: var(--crit-mark); }
+  .kpi.t-crit .kic    { background: var(--crit-tint); color: var(--crit); }
+  .kpi.t-accent::before { background: var(--accent); }
+  .kpi.t-accent .kic  { background: var(--accent-tint); color: var(--accent-strong); }
+  /* The figure owns the full width of the card. Nothing sits beside it. */
+  .kpi .kv { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -.015em; }
+  .kpi .kl { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600;
+             color: var(--ink-soft); margin-top: 6px; }
+  .kpi .kl > span { min-width: 0; }
   .kpi .kn { font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
   /* What came back reads as a subtraction, not as more of the same. The clause
      may wrap on a narrow card, but a figure never may: the thousands separator
@@ -338,9 +397,15 @@
   .trk-block { padding: 0; overflow: hidden; }
   .trk-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px;
               cursor: pointer; border-bottom: 1px solid var(--line); }
-  .trk-head:hover { background: var(--surface-2); }
+  .trk-head:hover { background: var(--accent-soft); }
   .trk-block.open .trk-head { background: var(--surface-2); }
   .trk-title { flex: 1; min-width: 0; }
+  .trk-mark { flex: none; width: 28px; height: 28px; border-radius: 9px; display: grid;
+              place-items: center; background: var(--surface-2); color: var(--ink-faint); }
+  .trk-mark.t-warn   { background: var(--warn-tint); color: var(--warn); }
+  .trk-mark.t-crit   { background: var(--crit-tint); color: var(--crit); }
+  .trk-mark.t-accent { background: var(--accent-tint); color: var(--accent-strong); }
+  .trk-mark .ic { margin: 0; }
   .trk-title h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
   .trk-sum { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-faint);
              font-variant-numeric: tabular-nums; }
@@ -459,8 +524,9 @@
   .chart-wrap { width: 100%; overflow-x: auto; }
   .repchart { width: 100%; height: auto; display: block; }
   .repchart .gl { stroke: var(--line); stroke-width: 1; }
-  .repchart .bar { fill: var(--accent); }
+  .repchart .bar { fill: var(--accent); transition: fill .12s; }
   .repchart .bar:hover { fill: var(--accent-strong); }
+  .repchart .gl:first-of-type { stroke: var(--line-strong); }
   .repchart .tx { fill: var(--ink-faint); font-size: 10px; font-family: var(--sans); }
   .trend { width: 100%; height: auto; display: block; }
   .trend .area { fill: var(--accent-tint); }
@@ -847,6 +913,13 @@ const ICON = {
   table:   '<path d="M3.5 4.5h11v9h-11z"/><path d="M3.5 8h11M7.5 8v5.5"/>',
   chat:    '<path d="M4 4.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8.5L5.5 15v-2.5H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z"/>',
   alert:   '<path d="M9 3.5 15 14H3z"/><path d="M9 7.5v3M9 12.2v.4"/>',
+  rand:    '<circle cx="9" cy="9" r="6"/><path d="M6.8 11.8V6.4h2.1a1.6 1.6 0 0 1 0 3.2H6.8M9.4 9.6l1.9 2.2"/>',
+  check:   '<circle cx="9" cy="9" r="6"/><path d="m6.4 9.2 1.8 1.8 3.4-3.6"/>',
+  box:     '<path d="M3.5 6 9 3.5 14.5 6v6L9 14.5 3.5 12z"/><path d="M3.5 6 9 8.5 14.5 6M9 8.5v6"/>',
+  tag:     '<path d="M3.5 8.2V3.5h4.7l6.3 6.3-4.7 4.7z"/><circle cx="6" cy="6" r=".9"/>',
+  pin:     '<path d="M9 15s4.5-4.2 4.5-7.5a4.5 4.5 0 1 0-9 0C4.5 10.8 9 15 9 15z"/><circle cx="9" cy="7.5" r="1.7"/>',
+  users:   '<circle cx="7" cy="7" r="2.4"/><path d="M2.8 14.2a4.4 4.4 0 0 1 8.4 0"/><path d="M12 5.2a2.2 2.2 0 0 1 0 4.3M13.2 14.2a4 4 0 0 0-1.3-2.7"/>',
+  scale:   '<path d="M9 3.8v10.4M5 5.2h8"/><path d="M3 10.2 5 6l2 4.2a2 2 0 0 1-4 0zM11 10.2 13 6l2 4.2a2 2 0 0 1-4 0z"/>',
 };
 function icon(name, size) {
   return `<svg class="ic" width="${size || 15}" height="${size || 15}" viewBox="0 0 18 18"
@@ -1513,6 +1586,14 @@ function nameCell(r, label) {
     at ? `<span class="trk-sub" title="${esc(at)}">${esc(at)}</span>` : ""}</span>`;
 }
 
+// What each Tracking block is: money still owed is a warning, stock that will
+// not move is the serious one, the day's trade is just the day's trade.
+const BLOCK_MARK = {
+  owed:  { tone: "warn",   icon: "clock" },
+  slow:  { tone: "crit",   icon: "alert" },
+  sales: { tone: "accent", icon: "rand" },
+};
+
 function renderTracking() {
   const T = S.tracking;
   if (T.data === null && !T.loading && T.error === null) loadTracking();
@@ -1578,8 +1659,10 @@ function renderTracking() {
   const block = (key, title, count, summary, preview, full, actions) => {
     const isOpen = open === key;
     const label = isOpen ? "Close" : (count > 5 ? "Show all " + fmtInt(count) : "Open");
+    const mark = BLOCK_MARK[key] || {};
     return `<section class="trk-block card${isOpen ? " open" : ""}" data-block="${key}">
       <header class="trk-head" onclick="toggleTrackingBlock('${key}')">
+        ${mark.icon ? `<span class="trk-mark t-${mark.tone}">${icon(mark.icon, 15)}</span>` : ""}
         <div class="trk-title"><h2>${title}</h2><span class="trk-sum">${summary}</span></div>
         <div class="trk-tools">${isOpen ? (actions || "") : ""}
           <button class="trk-toggle" aria-expanded="${isOpen}"
@@ -1722,12 +1805,14 @@ function renderTracking() {
       ${head}
       <div class="kpis kpis-2">
         ${kpiCard("Paid", "R " + fmt(p.total_paid),
-          `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`)}
+          `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`,
+          undefined, { tone: "ok", icon: "check" })}
         ${kpiCard("Still to come", "R " + fmt(p.still_to_come),
           `${fmtInt(p.batches_outstanding)} outstanding`
           + (p.oldest_outstanding ? ` · oldest ${ageInDays(p.oldest_outstanding)} days` : "")
           + (p.still_to_come_all_time !== undefined
-             ? ` · R ${fmt(p.still_to_come_all_time)} all time` : ""))}
+             ? ` · R ${fmt(p.still_to_come_all_time)} all time` : ""),
+          undefined, { tone: "warn", icon: "clock" })}
       </div>
       <div class="trk-grid${open ? " has-open" : ""}">
         ${owedBlock}${slowBlock}${salesBlock}
@@ -1804,7 +1889,7 @@ function reportChart(days) {
   const max = Math.max(...days.map(d => d.value), 0) || 1;
   const plotW = W - PADL - PADR, plotH = H - PADT - PADB;
   const step = plotW / days.length;
-  const barW = Math.max(3, Math.min(38, step * 0.62));
+  const barW = Math.max(3, Math.min(26, step * 0.55));
   const y = v => PADT + plotH - (v / max) * plotH;
 
   // Four gridlines, at values a person would round to.
@@ -1822,7 +1907,7 @@ function reportChart(days) {
       ? `<text x="${(x + barW / 2).toFixed(1)}" y="${H - 12}" class="tx" text-anchor="middle">${esc(shortDay(d.date))}</text>`
       : "";
     return `<rect x="${x.toFixed(1)}" y="${y(d.value).toFixed(1)}" width="${barW.toFixed(1)}"
-        height="${h.toFixed(1)}" rx="2" class="bar"><title>${esc(niceDate(d.date))} · ${fmtInt(d.cartons)} cartons · R ${fmt(d.value)}</title></rect>${label}`;
+        height="${h.toFixed(1)}" rx="3" class="bar"><title>${esc(niceDate(d.date))} · ${fmtInt(d.cartons)} cartons · R ${fmt(d.value)}</title></rect>${label}`;
   }).join("");
 
   return `<div class="card ins-card">
@@ -2171,13 +2256,17 @@ function renderReports() {
       ${empty ? `<div class="banner"><span class="bi">${icon("clock", 14)}</span><span>No sales recorded between these dates.</span></div>` : `
       <div class="kpis kpis-4">
         ${kpiCard("Sales value", money(m.sold),
-          `${fmtInt(t.cartons_sold)} cartons, net of ${fmtInt(t.cartons_returned)} returned`)}
+          `${fmtInt(t.cartons_sold)} cartons, net of ${fmtInt(t.cartons_returned)} returned`,
+          undefined, { tone: "accent", icon: "rand" })}
         ${kpiCard("Payments received", money(m.payments_received),
-          `${fmtInt(m.payment_count)} account sale${m.payment_count === 1 ? "" : "s"} paid in this range`)}
+          `${fmtInt(m.payment_count)} account sale${m.payment_count === 1 ? "" : "s"} paid in this range`,
+          undefined, { tone: "ok", icon: "check" })}
         ${kpiCard("Nett to Zaco", money(m.payments_nett),
-          m.deduction_rate != null ? `agent kept ${(m.deduction_rate * 100).toFixed(1)}% · ${money(m.deductions)}` : "no payments in range")}
+          m.deduction_rate != null ? `agent kept ${(m.deduction_rate * 100).toFixed(1)}% · ${money(m.deductions)}` : "no payments in range",
+          undefined, { tone: "accent", icon: "scale" })}
         ${kpiCard("Reconciled", money(m.reconciled),
-          `${fmtInt(m.reconciled_lines)} line${m.reconciled_lines === 1 ? "" : "s"} matched to a payment`)}
+          `${fmtInt(m.reconciled_lines)} line${m.reconciled_lines === 1 ? "" : "s"} matched to a payment`,
+          undefined, { tone: "ok", icon: "swap" })}
       </div>
       <p class="rep-note">A payment settles sales that happened earlier, often weeks earlier, so the money in
         will not equal the sales value for the same dates. Both are shown rather than netted into one figure
@@ -2655,13 +2744,13 @@ function renderInsights() {
             ? `${nb(fmtInt(k.cartons_sold))} sold <span class="kback">less ${nb(fmtInt(back))} returned · ${nb(rate + "% back")}</span>`
             : undefined;
           return `
-        ${kpiCard(back ? "Sales value, net" : "Total sales value", "R " + fmt(k.total_value), "gross across all statements", moneyNote)}
-        ${kpiCard(back ? "Cartons sold, net" : "Cartons sold", fmtInt(k.total_cartons), "units moved", cartonNote)}`;
+        ${kpiCard(back ? "Sales value, net" : "Total sales value", "R " + fmt(k.total_value), "gross across all statements", moneyNote, { tone: "accent", icon: "rand" })}
+        ${kpiCard(back ? "Cartons sold, net" : "Cartons sold", fmtInt(k.total_cartons), "units moved", cartonNote, { tone: "", icon: "box" })}`;
         })()}
-        ${kpiCard("Statements", fmtInt(k.statement_count), "recorded")}
-        ${kpiCard("Products", fmtInt(k.product_count), "distinct products")}
-        ${kpiCard("Markets", fmtInt(k.market_count), "selling points")}
-        ${kpiCard("Agents", fmtInt(k.agent_count), "market agents")}
+        ${kpiCard("Statements", fmtInt(k.statement_count), "recorded", undefined, { icon: "table" })}
+        ${kpiCard("Products", fmtInt(k.product_count), "distinct products", undefined, { icon: "tag" })}
+        ${kpiCard("Markets", fmtInt(k.market_count), "selling points", undefined, { icon: "pin" })}
+        ${kpiCard("Agents", fmtInt(k.agent_count), "market agents", undefined, { icon: "users" })}
       </div>
 
       <div class="ins-grid">
@@ -2757,9 +2846,23 @@ function isoWeekMonday(y, w) {
   return monday;
 }
 
-function kpiCard(label, value, note, noteHtml) {
+/** One headline figure.
+ *
+ *  `opts.tone` is a status, not decoration: money in reads as ok, money still
+ *  owed as warn, something wrong as crit. Tiles that are counts rather than
+ *  positions take no tone and stay neutral, so a coloured tile always means
+ *  something. The tone is carried by a tinted icon and a rule, never by the
+ *  figure itself, which stays full-contrast ink and readable without colour. */
+function kpiCard(label, value, note, noteHtml, opts) {
   const n = noteHtml === undefined ? esc(note) : noteHtml;
-  return `<div class="kpi"><div class="kv">${esc(value)}</div><div class="kl">${esc(label)}</div><div class="kn">${n}</div></div>`;
+  const { tone = "", icon: name = "" } = opts || {};
+  // The chip rides with the label, not beside the figure. Floated top-right it
+  // took width off the value, and "R 2 497 562,25" broke after the R -- a
+  // wrapped figure reads as two amounts.
+  const chip = name ? `<span class="kic">${icon(name, 13)}</span>` : "";
+  return `<div class="kpi${tone ? " t-" + tone : ""}">
+    <div class="kv">${esc(value)}</div>
+    <div class="kl">${chip}<span>${esc(label)}</span></div><div class="kn">${n}</div></div>`;
 }
 
 /** Horizontal bars. `metric` selects value/cartons; value bars show R, else units. */

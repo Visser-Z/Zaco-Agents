@@ -673,6 +673,39 @@
   .ask-findings summary { cursor: pointer; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
   .ask-f { margin-top: 10px; }
   .ask-ft { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 4px; }
+  /* -------- sales per day
+     Every figure on this screen is labelled with what it is and what it is in.
+     The client could not tell what a bare number meant, which is a fair
+     complaint about a screen carrying cartons, rands and returns at once. */
+  .sday-figs { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+  .sday-figs .fig { display: flex; align-items: baseline; gap: 6px; }
+  .sday-figs em { font-style: normal; font-size: 11px; color: var(--ink-faint);
+                  text-transform: uppercase; letter-spacing: .05em; }
+  .sday-figs b { font-size: 13px; font-weight: 700; }
+  .sday-figs .back b { color: var(--crit); }
+  .sday-markets { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; }
+  .mshare { position: relative; display: inline-flex; align-items: baseline; gap: 7px;
+            padding: 4px 9px; border-radius: 7px; background: var(--surface-2);
+            font-size: 11px; overflow: hidden; }
+  .mshare i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-tint); }
+  .mshare .mn, .mshare .mv, .mshare .mp { position: relative; }
+  .mshare .mn { color: var(--ink-soft); font-weight: 600; }
+  .mshare .mv { color: var(--ink-faint); }
+  .mshare .mp { color: var(--accent-strong); font-weight: 700; }
+  .sday-grp { display: block; font-size: 11px; color: var(--ink-faint); }
+  .sday-mk { font-size: 11px; color: var(--ink-soft); }
+  .sday-mk span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sday-mk em { font-style: normal; color: var(--ink-faint); }
+  /* Month to date, beside the days rather than behind a filter. */
+  .mtd { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px 14px 0; }
+  .mtd-c { flex: 1 1 200px; padding: 10px 12px; border: 1px solid var(--line);
+           border-radius: 10px; background: var(--surface); }
+  .mtd-c.now { border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+               background: var(--accent-soft); }
+  .mtd-m { font-size: 11px; font-weight: 700; text-transform: uppercase;
+           letter-spacing: .05em; color: var(--ink-faint); }
+  .mtd-v { font-size: 18px; font-weight: 700; margin-top: 2px; }
+  .mtd-n { font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
   /* -------- intelligence */
   table.intel-table { min-width: 700px; }
   table.intel-table th:first-child, table.intel-table td:first-child { width: 30%; }
@@ -1533,6 +1566,13 @@ function dayChart(days, metric) {
             <text class="ct" x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${tick(v)}</text>`;
   }).join("");
 
+  // Label selectively. Nothing is filtered out of this screen any more, so the
+  // chart can carry a hundred days -- a date under every bar and a figure over
+  // every bar turns into a grey smear at that width. The dates thin out to
+  // roughly a dozen, and only the best day is called out by value; the rest are
+  // in the tooltip and in the table underneath.
+  const everyX = Math.ceil(rows.length / 14);
+  const peakAt = rows.reduce((best, r, i) => r.total > rows[best].total ? i : best, 0);
   const bars = rows.map((r, i) => {
     const cx = L + (iw / rows.length) * (i + 0.5);
     let acc = 0;
@@ -1545,8 +1585,11 @@ function dayChart(days, metric) {
                 fill="${CHART_COLOURS[j % CHART_COLOURS.length]}"><title>${esc(niceDate(r.date) || r.date)}
 ${esc(n)} — ${tick(v)}</title></rect>`;
     }).join("");
-    return `${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>
-            <text class="cv" x="${cx}" y="${y(r.total) - 5}" text-anchor="middle">${tick(r.total)}</text>`;
+    const dateLbl = i % everyX === 0
+      ? `<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>` : "";
+    const valueLbl = (rows.length <= 14 || i === peakAt)
+      ? `<text class="cv" x="${cx}" y="${y(r.total) - 5}" text-anchor="middle">${tick(r.total)}</text>` : "";
+    return `${seg}${dateLbl}${valueLbl}`;
   }).join("");
 
   const legend = names.map((n, j) => `<span class="clg">
@@ -1781,8 +1824,18 @@ function renderTracking() {
   const dayBlock = d => `<div class="sday">
       <div class="sday-head">
         <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
-        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)}</span>
+        <span class="sday-figs">
+          <span class="fig"><em>Sold</em><b class="num">R ${fmt(d.value)}</b></span>
+          <span class="fig"><em>Cartons</em><b class="num">${fmtInt(d.cartons)}</b></span>
+          ${d.returned ? `<span class="fig back"><em>Came back</em><b class="num">${fmtInt(d.returned)} ctn · R ${fmt(d.returns_value)}</b></span>` : ""}
+        </span>
       </div>
+      ${(d.markets || []).length > 1 ? `<div class="sday-markets">${d.markets.map(m =>
+        `<span class="mshare" title="${esc(m.market)} — R ${fmt(m.value)} of R ${fmt(d.value)} on this day">
+          <i style="width:${Math.round(m.share * 100)}%"></i>
+          <span class="mn">${esc(m.market)}</span>
+          <span class="mv num">R ${fmt(m.value)}</span>
+          <span class="mp num">${(m.share * 100).toFixed(1)}%</span></span>`).join("")}</div>` : ""}
       ${(d.dated && d.dated.delivered) ? `<div class="sday-src"><span class="src warn"
           title="${fmtInt(d.dated.delivered)} of ${fmtInt(d.dated.delivered + d.dated.sold)} rows carry no sale date, so they are placed on the day their load was sent. That is an inference, not a reading.">
           ${icon("alert", 12)} ${fmtInt(d.dated.delivered)} row${d.dated.delivered === 1 ? "" : "s"} dated by delivery, not by sale</span></div>` : ""}
@@ -1790,14 +1843,19 @@ function renderTracking() {
           `<span class="src" title="${esc(s.file)} — ${fmtInt(s.rows)} row${s.rows === 1 ? "" : "s"}, ${fmtInt(s.cartons)} cartons">${esc(s.file)}<em>${fmtInt(s.rows)}</em></span>`
         ).join("")}</div>` : ""}
       <table class="sday-items">
-        <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
-        <thead><tr><th>Product</th><th>Cartons</th>
+        <colgroup><col><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
+        <thead><tr><th>Product</th><th>Market</th><th>Cartons</th>
           <th title="The average the day fetched: the value divided by the cartons. Cartons on one day can go at different prices, so this will not always multiply back to the value exactly.">Avg / carton</th>
-          <th>Value</th></tr></thead>
+          <th>Value (R)</th></tr></thead>
         <tbody>${d.products.map(x => {
           const off = x.market_avg && x.price < x.market_avg * 0.7;
           return `<tr>
-            <td class="sday-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}${x.returned ? `<span class="sday-back">${fmtInt(x.returned)} back</span>` : ""}</td>
+            <td class="sday-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}${
+              x.group ? `<span class="sday-grp">${esc(x.group)}</span>` : ""}${
+              x.returned ? `<span class="sday-back">${fmtInt(x.returned)} back · R ${fmt(x.returns_value)}</span>` : ""}</td>
+            <td class="sday-mk">${(x.markets || []).map(m =>
+              `<span title="${esc(m.market)} — ${fmtInt(m.cartons)} cartons, R ${fmt(m.value)}">${esc(m.market)}${
+                (x.markets || []).length > 1 ? ` <em>R ${fmt(m.value)}</em>` : ""}</span>`).join("")}</td>
             <td class="num">${fmtInt(x.cartons)}</td>
             <td class="num${off ? " under" : ""}">R ${fmt(x.price)}${x.market_avg ? `<span class="sday-mkt">mkt R ${fmt(x.market_avg)}</span>` : ""}</td>
             <td class="num">R ${fmt(x.value)}</td></tr>`;
@@ -1814,14 +1872,46 @@ function renderTracking() {
       onclick="event.stopPropagation()" onchange="setTrackingRange('to', this.value)"></label>
     ${ranged ? `<button class="btn ghost sm" onclick="event.stopPropagation(); clearTrackingRange()">Clear</button>` : ""}`;
 
-  const totalCartons = days.reduce((a, d) => a + d.cartons, 0);
+  const sd = (T.data && T.data.sales_by_day) || {};
+  const tot = sd.totals || { value: 0, cartons: 0, returned: 0, returns_value: 0, days: 0 };
+  const months = sd.months || [];
+  const periodMarkets = sd.markets || [];
+
+  /* The month total sits on the screen, not behind a filter. Where the range
+     spans more than one, every month in it is listed rather than only the
+     latest -- the client reads them side by side. */
+  const monthStrip = months.length ? `<div class="mtd">
+      ${months.map((m, i) => `<div class="mtd-c${i ? "" : " now"}">
+        <div class="mtd-m">${esc(monthLabel(m.month))}</div>
+        <div class="mtd-v num">R ${fmt(m.value)}</div>
+        <div class="mtd-n">${fmtInt(m.cartons)} cartons over ${fmtInt(m.days)} trading day${m.days === 1 ? "" : "s"}${
+          m.returns_value ? ` · R ${fmt(m.returns_value)} back` : ""}</div>
+      </div>`).join("")}
+    </div>` : "";
+
+  const marketStrip = periodMarkets.length > 1 ? `<div class="card ins-card">
+      <div class="ins-card-head"><h2>Which market is doing better</h2>
+        <span class="rep-c">share of R ${fmt(tot.value)} sold</span></div>
+      <ul class="bars">${periodMarkets.map(m => `<li class="bar">
+        <div class="bl"><span class="bt">${esc(m.market)}</span></div>
+        <div class="btrack"><span class="bfill" style="width:${Math.max(2, Math.round(m.share * 100))}%"></span></div>
+        <div class="bv">${(m.share * 100).toFixed(1)}% · R ${fmt(m.value)}</div></li>`).join("")}</ul>
+      <p class="rep-note">Share of sales value, not of cartons: a market moving a lot of
+        cheap fruit is not the one carrying the period.</p>
+    </div>` : "";
+
   const salesBlock = (days.length || ranged)
-    ? block("sales", "Sales per day", days.length,
-        `${fmtInt(days.length)} day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons${ranged ? " · filtered" : ""}`,
-        days.length ? `<ul class="trk-list">${days.slice(0, 5).map(dayRow).join("")}</ul>`
-                    : `<p class="ins-empty">No sales in that range.</p>`,
-        days.length ? dayTable : `<p class="ins-empty">No sales in that range.</p>`,
-        pickers)
+    ? `<section class="trk-block card open" data-block="sales">
+        <header class="trk-head">
+          <span class="trk-mark t-accent">${icon("rand", 15)}</span>
+          <div class="trk-title"><h2>Sales per day</h2>
+            <span class="trk-sum">R ${fmt(tot.value)} sold · ${fmtInt(tot.cartons)} cartons · ${fmtInt(tot.days)} trading day${tot.days === 1 ? "" : "s"}${
+              tot.returns_value ? ` · R ${fmt(tot.returns_value)} came back` : ""}${ranged ? " · filtered" : ""}</span></div>
+          <div class="trk-tools">${pickers}</div>
+        </header>
+        <div class="trk-body">${monthStrip}${
+          days.length ? dayTable : `<p class="ins-empty">No sales in that range.</p>`}</div>
+      </section>${marketStrip}`
     : emptyBlock("Sales per day", "nothing recorded", "No sales recorded yet.");
 
   main.innerHTML = `

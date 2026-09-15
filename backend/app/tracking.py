@@ -258,11 +258,15 @@ def report_name(row: dict) -> str:
 
 def sales_by_day(sales: list[dict], start: str | None = None,
                  end: str | None = None) -> dict:
-    """How much sold each trading day, broken down by product.
+    """How much sold each trading day, and where.
 
-    Net of returns, as every carton figure in the app is: a day that sold ten
-    and had two come back moved eight. Days come back newest first, which is the
-    order the owner reads them in.
+    Every figure is net of returns, as every carton figure in the app is: a day
+    that sold ten and had two come back moved eight. What came back is reported
+    beside the net rather than folded into it -- both the cartons and the money,
+    per product, because "Back: 2" on its own says nothing about what it cost.
+
+    Days come back newest first, which is the order the owner reads them in.
+    Nothing is truncated here: the caller is expected to show the lot.
     """
     by_day: dict[str, dict] = {}
     for row in sales:
@@ -273,31 +277,58 @@ def sales_by_day(sales: list[dict], start: str | None = None,
         if (start and day < start) or (end and day > end):
             continue
         product = analytics.product_label(row)
+        market = (row.get("market") or "").strip() or UNPLACED
         d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
-                                    "value": 0.0, "sources": defaultdict(
+                                    "value": 0.0, "returns_value": 0.0,
+                                    "sources": defaultdict(
                                         lambda: {"rows": 0, "cartons": 0.0}),
                                     "dated": defaultdict(int),
+                                    "markets": defaultdict(
+                                        lambda: {"cartons": 0.0, "value": 0.0,
+                                                 "returned": 0.0, "returns_value": 0.0}),
                                     "products": defaultdict(
                                         lambda: {"cartons": 0.0, "value": 0.0, "returned": 0.0,
-                                                 "agents": set(), "market_avg": [], "weight": 0.0})})
-        d["cartons"] += analytics.row_cartons(row)
-        d["returned"] += analytics.row_returned(row)
-        d["value"] += analytics.row_value(row)
+                                                 "returns_value": 0.0, "group": None,
+                                                 "agents": set(), "market_avg": [], "weight": 0.0,
+                                                 "markets": defaultdict(
+                                                     lambda: {"cartons": 0.0, "value": 0.0})})})
+        cartons = analytics.row_cartons(row)
+        value = analytics.row_value(row)
+        back = analytics.row_returned(row)
+        back_value = analytics.row_returns_value(row)
+
+        d["cartons"] += cartons
+        d["returned"] += back
+        d["value"] += value
+        d["returns_value"] += back_value
+
+        m = d["markets"][market]
+        m["cartons"] += cartons
+        m["value"] += value
+        m["returned"] += back
+        m["returns_value"] += back_value
+
         # Which report this row was read from. A day that turns up where no
         # trading happened is answered by naming the file it came out of, rather
         # than by trusting or doubting the date on its own.
         src = d["sources"][report_name(row)]
         src["rows"] += 1
-        src["cartons"] += analytics.row_cartons(row)
+        src["cartons"] += cartons
         if (basis := dated_by(row)):
             d["dated"][basis] += 1
+
         p = d["products"][product]
-        cartons = analytics.row_cartons(row)
         p["cartons"] += cartons
-        p["value"] += analytics.row_value(row)
-        p["returned"] += analytics.row_returned(row)
+        p["value"] += value
+        p["returned"] += back
+        p["returns_value"] += back_value
+        # The operator's own short code for this commodity -- their "group".
+        p["group"] = p["group"] or (row.get("description") or "").strip() or None
         if row.get("market_agent"):
             p["agents"].add(row["market_agent"])
+        pm = p["markets"][market]
+        pm["cartons"] += cartons
+        pm["value"] += value
         # The market's own average for this commodity that day, weighted by
         # cartons so a one-carton line cannot outvote a hundred-carton one.
         if (avg := integrity.market_avg(row)) is not None and cartons > 0:
@@ -310,14 +341,23 @@ def sales_by_day(sales: list[dict], start: str | None = None,
         products = sorted(
             ({
                 "product": name,
+                "group": v["group"],
                 "cartons": round(v["cartons"], 2),
                 "returned": round(v["returned"], 2),
+                "returns_value": round(v["returns_value"], 2),
                 "value": round(v["value"], 2),
                 # What a carton actually fetched that day.
                 "price": round(v["value"] / v["cartons"], 2) if v["cartons"] else 0.0,
                 # And what the market was paying for it, where the report says.
                 "market_avg": round(sum(v["market_avg"]) / v["weight"], 2) if v["weight"] else None,
                 "agents": sorted(v["agents"]),
+                # Where this commodity sold that day, biggest first. The answer
+                # to "this group sold what, at which market, today".
+                "markets": sorted(
+                    ({"market": mk, "cartons": round(mv["cartons"], 2),
+                      "value": round(mv["value"], 2)}
+                     for mk, mv in v["markets"].items()),
+                    key=lambda x: x["value"], reverse=True),
              } for name, v in d["products"].items()),
             key=lambda x: x["value"], reverse=True,
         )
@@ -325,8 +365,10 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             "date": day,
             "cartons": round(d["cartons"], 2),
             "returned": round(d["returned"], 2),
+            "returns_value": round(d["returns_value"], 2),
             "value": round(d["value"], 2),
             "products": products,
+            "markets": _shares(d["markets"], d["value"]),
             "sources": sorted(
                 ({"file": name, "rows": v["rows"], "cartons": round(v["cartons"], 2)}
                  for name, v in d["sources"].items()),
@@ -337,7 +379,83 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             "dated": {"sold": d["dated"].get("sold", 0),
                       "delivered": d["dated"].get("delivered", 0)},
         })
-    return {"days": days}
+
+    return {
+        "days": days,
+        # Month totals over the same scope, so the month-to-date figure sits
+        # beside the days rather than behind a filter.
+        "months": _month_totals(days),
+        # Which market is carrying the period, as a share of its sales value.
+        "markets": _period_markets(days),
+        "totals": {
+            "value": round(sum(x["value"] for x in days), 2),
+            "cartons": round(sum(x["cartons"] for x in days), 2),
+            "returned": round(sum(x["returned"] for x in days), 2),
+            "returns_value": round(sum(x["returns_value"] for x in days), 2),
+            "days": len(days),
+        },
+    }
+
+
+# A row whose market the export never named. Given a name rather than left blank
+# so it is visible in a share table instead of vanishing into a gap.
+UNPLACED = "Market not recorded"
+
+
+def _shares(markets: dict, total: float) -> list[dict]:
+    """Market rows with their share of the value, biggest first.
+
+    The share is of sales VALUE, not cartons: a market moving a lot of cheap
+    fruit is not the one carrying the day.
+    """
+    out = [{"market": name,
+            "cartons": round(v["cartons"], 2),
+            "returned": round(v["returned"], 2),
+            "returns_value": round(v["returns_value"], 2),
+            "value": round(v["value"], 2),
+            "share": round(v["value"] / total, 4) if total else 0.0}
+           for name, v in markets.items()]
+    out.sort(key=lambda x: x["value"], reverse=True)
+    return out
+
+
+def _month_totals(days: list[dict]) -> list[dict]:
+    """Each month in scope, newest first, with what it has taken so far."""
+    agg: dict[str, dict] = {}
+    for d in days:
+        m = agg.setdefault(d["date"][:7], {"month": d["date"][:7], "value": 0.0,
+                                           "cartons": 0.0, "returned": 0.0,
+                                           "returns_value": 0.0, "days": 0,
+                                           "first": d["date"], "last": d["date"]})
+        m["value"] += d["value"]
+        m["cartons"] += d["cartons"]
+        m["returned"] += d["returned"]
+        m["returns_value"] += d["returns_value"]
+        m["days"] += 1
+        m["first"] = min(m["first"], d["date"])
+        m["last"] = max(m["last"], d["date"])
+    out = [{**m, "value": round(m["value"], 2), "cartons": round(m["cartons"], 2),
+            "returned": round(m["returned"], 2),
+            "returns_value": round(m["returns_value"], 2)}
+           for m in agg.values()]
+    out.sort(key=lambda x: x["month"], reverse=True)
+    return out
+
+
+def _period_markets(days: list[dict]) -> list[dict]:
+    """Market shares across every day in scope, biggest first."""
+    agg: dict[str, dict] = defaultdict(
+        lambda: {"cartons": 0.0, "value": 0.0, "returned": 0.0, "returns_value": 0.0})
+    total = 0.0
+    for d in days:
+        for m in d["markets"]:
+            cell = agg[m["market"]]
+            cell["cartons"] += m["cartons"]
+            cell["value"] += m["value"]
+            cell["returned"] += m["returned"]
+            cell["returns_value"] += m["returns_value"]
+            total += m["value"]
+    return _shares(agg, total)
 
 
 # --- slow to sell ---------------------------------------------------------

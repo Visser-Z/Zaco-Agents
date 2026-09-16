@@ -468,8 +468,6 @@
   table.sday-items td.mkt { color: var(--ink-faint); }
   .sday-mkt { display: block; font-size: 10px; color: var(--ink-faint); }
   table.sday-items td.under { color: var(--crit); }
-  .trk-cols-2 { columns: 2; column-gap: 26px; }
-  .trk-cols-2 li { break-inside: avoid; }
   @media (max-width: 1000px) { .trk-grid { grid-template-columns: 1fr; } }
   /* Laid ACROSS in columns rather than one long stack, so a hundred lines fit
      on a page or two instead of scrolling forever. */
@@ -520,6 +518,31 @@
   .btrack { height: 9px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
   .bfill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-strong)); border-radius: 999px; }
   .bv { font-size: 13px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* Best sellers grouped by fruit. One grid for headers and products alike so
+     every figure lines up down the card, open or closed. */
+  .pgroups { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
+  .pgroup { border-bottom: 1px solid var(--line); }
+  .pg-head, .pg-item { display: grid; grid-template-columns: minmax(150px, 34%) 1fr 118px 76px 52px;
+                       align-items: center; gap: 12px; }
+  .pg-head { width: 100%; appearance: none; border: 0; background: none; padding: 11px 6px;
+             font-family: var(--sans); color: var(--ink); text-align: left; cursor: pointer; }
+  .pg-head:hover { background: var(--accent-soft); }
+  .pgroup.open > .pg-head { background: var(--surface-2); }
+  .pg-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .pg-name b { font-size: 14px; font-weight: 650; white-space: nowrap; }
+  .pg-name em { font-style: normal; font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+  .pg-name .chev { color: var(--ink-faint); display: inline-flex; }
+  .pg-v { font-size: 13px; font-weight: 650; text-align: right; white-space: nowrap; }
+  .pg-c, .pg-s { font-size: 12px; color: var(--ink-faint); text-align: right; white-space: nowrap; }
+  .pg-items { list-style: none; margin: 0; padding: 4px 6px 10px 26px; display: flex;
+              flex-direction: column; gap: 8px; }
+  .pg-item .pg-v { font-weight: 600; }
+  @media (max-width: 700px) {
+    .pg-head, .pg-item { grid-template-columns: 1fr auto auto; }
+    .pg-head .btrack, .pg-item .btrack, .pg-s { display: none; }
+    .pg-items { padding-left: 12px; }
+  }
 
   .chart-wrap { width: 100%; overflow-x: auto; }
   .repchart { width: 100%; height: auto; display: block; }
@@ -610,11 +633,35 @@
           padding: 1px 6px; border-radius: 999px; flex: none; cursor: help; }
   .wsig.severe { background: var(--crit-tint); color: var(--crit); }
   .wsig.watch { background: var(--warn-tint, var(--surface-2)); color: var(--warn, var(--ink-soft)); }
-  /* Three bands, three weights of alarm: past the Watch line, past Slow, past
-     Dead. One colour for all of them made a fortnight look like a quarter. */
-  .wsig.t-watch { background: var(--surface-2); color: var(--ink-soft); }
-  .wsig.t-slow  { background: var(--warn-tint); color: var(--warn); }
-  .wsig.t-dead  { background: var(--crit-tint); color: var(--crit); }
+  /* Stock on Hand: days on hand in the three colours the floor is read by. */
+  .wsig.t-green  { background: var(--ok-tint); color: var(--ok); }
+  .wsig.t-orange { background: var(--warn-tint); color: var(--warn); }
+  .wsig.t-red    { background: var(--crit-tint); color: var(--crit); }
+  .smkts { display: flex; flex-direction: column; }
+  .smkt { border-bottom: 1px solid var(--line); }
+  .smkt:last-child { border-bottom: 0; }
+  .smkt-head { width: 100%; appearance: none; border: 0; background: none; cursor: pointer;
+               display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+               align-items: center; gap: 10px; padding: 10px 4px; text-align: left;
+               font-family: var(--sans); color: var(--ink); }
+  .smkt-head:hover { background: var(--accent-soft); }
+  .smkt.open > .smkt-head { background: var(--surface-2); }
+  .smkt-head .chev { color: var(--ink-faint); display: inline-flex; }
+  .smkt-name { display: flex; flex-direction: column; min-width: 0; }
+  .smkt-name b { font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smkt-name em { font-style: normal; font-size: 11px; color: var(--ink-faint);
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smkt-sum { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+  .smkt-tiers { display: flex; gap: 4px; justify-content: flex-end; min-width: 0; }
+  .trk-stock { padding: 0 4px 8px 26px; }
+  .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+  @media (max-width: 700px) {
+    .smkt-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .smkt-tiers { grid-column: 2 / -1; justify-content: flex-start; }
+    .trk-stock { padding-left: 4px; }
+    .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+    .trk-list.trk-stock li .trk-d { grid-column: 2 / 3; }
+  }
   .trk-list li.done { opacity: .5; }
   .trk-list li.done .trk-nm { text-decoration: line-through; }
   .xbtn { appearance: none; border: 0; background: none; cursor: pointer; padding: 0 2px;
@@ -1354,6 +1401,13 @@ async function loadTracking() {
 
 /** Open one block full width, or close it. Only one is open at a time: two
  *  long lists side by side is the layout this replaced. */
+/** Open or close one market on Stock on Hand. Several can be open at once. */
+function toggleStockMarket(name) {
+  const open = S.tracking.openMarkets || (S.tracking.openMarkets = {});
+  open[name] = !open[name];
+  render();
+}
+
 function toggleTrackingBlock(key) {
   S.tracking.open = S.tracking.open === key ? null : key;
   if (S.tracking.open !== "sales") S.tracking.day = null;
@@ -1657,7 +1711,7 @@ function nameCell(r, label) {
 // not move is the serious one, the day's trade is just the day's trade.
 const BLOCK_MARK = {
   owed:  { tone: "warn",   icon: "clock" },
-  slow:  { tone: "crit",   icon: "alert" },
+  stock: { tone: "crit",   icon: "box" },
   sales: { tone: "accent", icon: "rand" },
 };
 
@@ -1717,10 +1771,8 @@ function renderTracking() {
 
   const p = T.data.payments || {};
   const days = (T.data.sales_by_day || {}).days || [];
-  const slow = T.data.slow_stock || { bands: {}, counts: {}, items: [] };
   const owed = p.outstanding || [];
-  const slowItems = slow.items || [];
-  const open = T.open;                      // "owed" | "slow" | "sales" | null
+  const open = T.open;                      // "owed" | "stock" | "sales" | null
 
   /** One block: five rows at rest, everything once opened. */
   const block = (key, title, count, summary, preview, full, actions) => {
@@ -1760,7 +1812,7 @@ function renderTracking() {
     <p class="trk-note">${fmtInt(rows.length)} closed${kind === "owed"
       ? ` · R ${fmt(rows.reduce((t, r) => t + (r.owed || 0), 0))} not counted above` : ""}</p>
     <ul class="trk-list${kind === "slow" ? " trk-sig" : ""}">${rows.map(r => `<li class="done">
-      ${kind === "slow" ? `<span class="wsig t-${esc(r.tier)}">${fmtInt(r.days_on_floor)}d</span>` : ""}
+      ${kind === "slow" ? `<span class="wsig t-${esc(r.tier)}">${fmtInt(r.days_on_hand)}d</span>` : ""}
       ${nameCell(r)}
       <span class="trk-d">${what(r)}</span>
       <button class="xbtn undo" title="Put this back on the list"
@@ -1792,22 +1844,54 @@ function renderTracking() {
           owedFull, "")
       : emptyBlock("Outstanding", "nothing owed", "Everything sold has been paid for.");
 
-  // --- slow stock ----------------------------------------------------------
-  const slowRow = r => `<li>
-      <span class="wsig t-${esc(r.tier)}" title="${esc(TIER_WORD[r.tier] || r.tier)}">${fmtInt(r.days_on_floor)}d</span>
-      ${nameCell(r)}
+  // --- stock on hand -------------------------------------------------------
+  const soh = T.data.stock_on_hand || { markets: [], items: 0, cartons_left: 0, counts: {}, closed: [] };
+  const openMarkets = T.openMarkets || {};
+  const shortDate = iso => (niceDate(iso) || iso).replace(/ \d{4}$/, "");
+
+  /* One unsold consignment. The badge carries the days on hand in its colour;
+     the market is the group it sits under, so the line names only the agent. */
+  const stockRow = r => `<li>
+      <span class="wsig t-${esc(r.tier)}" title="${fmtInt(r.days_on_hand)} day${r.days_on_hand === 1 ? "" : "s"} on hand">${fmtInt(r.days_on_hand)}d</span>
+      ${nameCell({ ...r, market: null })}
+      <span class="trk-d" title="${r.arrived_basis === "received"
+        ? "The market's delivery date."
+        : "The Daily Sales report prints no arrival date, so this is the first day it sold."}">${
+        r.arrived_basis === "received" ? "Received" : "First sold"} ${esc(shortDate(r.arrived))}</span>
       <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
       <button class="xbtn" title="Close this one off"
         onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></li>`;
 
-  const slowBlock = slowItems.length
-    ? block("slow", "Taking too long to sell", slowItems.length,
-        `${fmtInt(slow.flagged)} line${slow.flagged === 1 ? "" : "s"} · flagged past ${fmtInt(slow.bands.watch)} days`,
-        `<ul class="trk-list trk-sig">${slowItems.slice(0, 5).map(slowRow).join("")}</ul>`,
-        `<ul class="trk-list trk-sig trk-cols-2">${slowItems.map(slowRow).join("")}</ul>
-         <p class="trk-note">Watch ${fmtInt(slow.bands.watch)}d · Slow ${fmtInt(slow.bands.slow)}d · Dead ${fmtInt(slow.bands.dead)}d, read from ${esc(slow.bands.from || "")}.</p>
-         ${closedList(slow.closed || [], "slow", r => fmtInt(r.cartons_left) + " of " + fmtInt(r.cartons_sent))}`)
-    : emptyBlock("Taking too long to sell", "nothing sitting", "Nothing is sitting longer than usual.");
+  /* One market, collapsed to its totals until opened. */
+  const marketGroup = m => {
+    const isOpen = !!openMarkets[m.market];
+    return `<div class="smkt${isOpen ? " open" : ""}">
+      <button class="smkt-head" aria-expanded="${isOpen}"
+        onclick="event.stopPropagation(); toggleStockMarket(${q(m.market)})">
+        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
+        <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
+        <span class="smkt-sum num">${fmtInt(m.items)} line${m.items === 1 ? "" : "s"} · ${fmtInt(m.cartons_left)} ctn</span>
+        <span class="smkt-tiers">${m.red ? `<span class="wsig t-red">${fmtInt(m.red)} red</span>` : ""}${
+          m.orange ? `<span class="wsig t-orange">${fmtInt(m.orange)} orange</span>` : ""}</span>
+      </button>
+      ${isOpen ? `<ul class="trk-list trk-sig trk-stock">${m.lines.map(stockRow).join("")}</ul>` : ""}
+    </div>`;
+  };
+
+  const stockMarkets = `<div class="smkts">${(soh.markets || []).map(marketGroup).join("")}</div>`;
+  const stockBlock = soh.items
+    ? block("stock", "Stock on Hand", soh.items,
+        `${fmtInt(soh.cartons_left)} cartons over ${fmtInt(soh.items)} line${soh.items === 1 ? "" : "s"} at ${
+          fmtInt(soh.markets.length)} market${soh.markets.length === 1 ? "" : "s"}${
+          soh.counts.red ? ` · ${fmtInt(soh.counts.red)} red` : ""}`,
+        stockMarkets,
+        `${stockMarkets}
+         <p class="trk-note">Green up to ${fmtInt(soh.bands.orange - 1)} days on hand, orange from ${
+           fmtInt(soh.bands.orange)}, red from ${fmtInt(soh.bands.red)}.${soh.dated_by_first_sale
+           ? ` ${fmtInt(soh.dated_by_first_sale)} of ${fmtInt(soh.items)} line${soh.items === 1 ? " is" : "s are"} counted from the day ${
+             soh.items === 1 ? "it" : "they"} first sold, because the Daily Sales report prints no arrival date.` : ""}</p>
+         ${closedList(soh.closed || [], "slow", r => fmtInt(r.cartons_left) + " of " + fmtInt(r.cartons_sent))}`)
+    : emptyBlock("Stock on Hand", "nothing unsold", "Everything sent to market has sold.");
 
   // --- sales per day -------------------------------------------------------
   const span = T.data.span || {};
@@ -1919,7 +2003,12 @@ function renderTracking() {
       ${head}
       <div class="kpis kpis-2">
         ${kpiCard("Paid", "R " + fmt(p.total_paid),
-          `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`,
+          // Paid is money for THIS period's sales, whenever it arrived. What
+          // actually came in during the period differs by the sales on either
+          // edge of it, so it is named beside the figure, not swapped in.
+          `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`
+          + ((T.month || T.week) && p.received_in_window !== undefined
+             ? ` · R ${fmt(p.received_in_window)} came in during ${esc(trackingScope(T))}` : ""),
           undefined, { tone: "ok", icon: "check" })}
         ${kpiCard("Still to come", "R " + fmt(p.still_to_come),
           `${fmtInt(p.batches_outstanding)} outstanding`
@@ -1929,7 +2018,7 @@ function renderTracking() {
           undefined, { tone: "warn", icon: "clock" })}
       </div>
       <div class="trk-grid${open ? " has-open" : ""}">
-        ${owedBlock}${slowBlock}${salesBlock}
+        ${owedBlock}${stockBlock}${salesBlock}
       </div>
     </section>`;
 }
@@ -2770,7 +2859,6 @@ function renderBusy() {
 // Nett and what is still outstanding. See /api/reconcile.
 
 /** What each ageing band means, for the badge tooltip. */
-const TIER_WORD = { watch: "Past the Watch line", slow: "Past Slow", dead: "Past Dead" };
 
 const RECON_STATUS = {
   matched:     { label: "Matched",      cls: "ok"  },
@@ -2983,6 +3071,56 @@ function setInsightMetric(m) {
   render();                 // best-seller ordering is client-side, no refetch
 }
 
+/** Open or close one fruit on the best sellers card. Several can be open at
+ *  once: comparing two fruits' products side by side is the point of it. */
+function toggleProductGroup(label) {
+  const open = S.insights.openGroups || (S.insights.openGroups = {});
+  open[label] = !open[label];
+  render();
+}
+
+/** Best sellers, one collapsible row per fruit, best to worst.
+ *
+ *  Each header carries the fruit's total value, cartons and share of the
+ *  period, so the fruits compare without opening any of them. Opening one
+ *  lists its products ranked the same way, each with its value and cartons
+ *  and the Pareto class and unsold flag the flat list carried. */
+function productGroupList(groups, metric) {
+  if (!groups || !groups.length) return `<p class="ins-empty">Nothing to show yet.</p>`;
+  const open = S.insights.openGroups || {};
+  const byMetric = (a, b) => b[metric] - a[metric];
+  const ranked = [...groups].sort(byMetric);
+  const top = Math.max(...ranked.map(g => g[metric]), 0) || 1;
+  const width = (v, max) => Math.max(2, Math.round((v / max) * 100));
+  const abcClass = { A: "a", B: "b", C: "c" };
+  const figures = x => `<span class="pg-v num">R ${fmt(x.value)}</span>
+      <span class="pg-c num">${fmtInt(x.cartons)} ctn</span>`;
+
+  return `<ul class="pgroups">${ranked.map(g => {
+    const isOpen = !!open[g.label];
+    const products = [...(g.products || [])].sort(byMetric);
+    const inner = Math.max(...products.map(p => p[metric]), 0) || 1;
+    const count = products.length;
+    return `<li class="pgroup${isOpen ? " open" : ""}">
+      <button class="pg-head" aria-expanded="${isOpen}" onclick="toggleProductGroup(${q(g.label)})">
+        <span class="pg-name"><span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
+          <b>${esc(g.label)}</b><em>${fmtInt(count)} product${count === 1 ? "" : "s"}</em></span>
+        <span class="btrack"><span class="bfill" style="width:${width(g[metric], top)}%"></span></span>
+        ${figures(g)}
+        <span class="pg-s num">${(g.share * 100).toFixed(1)}%</span>
+      </button>
+      ${isOpen ? `<ul class="pg-items">${products.map(p => `<li class="pg-item">
+        <span class="pg-name" title="${esc(p.label)}">${p.abc
+          ? `<span class="abc ${abcClass[p.abc] || ""}" title="Class ${esc(p.abc)} across the whole period">${esc(p.abc)}</span>` : ""}
+          <span class="bt">${esc(p.label)}</span>${unsoldChip(p.label)}</span>
+        <span class="btrack"><span class="bfill" style="width:${width(p[metric], inner)}%"></span></span>
+        ${figures(p)}
+        <span class="pg-s num"></span>
+      </li>`).join("")}</ul>` : ""}
+    </li>`;
+  }).join("")}</ul>`;
+}
+
 function renderInsights() {
   const I = S.insights;
   // Kick off the first load lazily once the module is opened.
@@ -3029,7 +3167,6 @@ function renderInsights() {
 
   const metric = I.metric;              // "value" | "cartons"
   const metricLabel = metric === "value" ? "sales value" : "cartons";
-  const sellers = [...d.best_sellers].sort((a, b) => b[metric] - a[metric]).slice(0, 12);
   const scopedEmpty = (k.statement_count || 0) === 0;
   const trendTitle = { day: "Daily", week: "Weekly", month: "Monthly" }[d.period] || "";
 
@@ -3078,13 +3215,13 @@ function renderInsights() {
       <div class="ins-grid">
         <div class="card ins-card wide">
           <div class="ins-card-head">
-            <h2>Best sellers</h2>
+            <h2>Best sellers by fruit</h2>
             <div class="seg sm">
               <button class="${metric === "value" ? "on" : ""}" onclick="setInsightMetric('value')">By value</button>
               <button class="${metric === "cartons" ? "on" : ""}" onclick="setInsightMetric('cartons')">By cartons</button>
             </div>
           </div>
-          ${barList(sellers, metric, { abc: true, signals: true })}
+          ${productGroupList(d.product_groups, metric)}
         </div>
 
         <div class="card ins-card">
@@ -3311,6 +3448,24 @@ function demoAnalytics(month, week) {
   }
   let cum = 0;
   for (const i of sellers) { i.abc = cum < 0.8 ? "A" : cum < 0.95 ? "B" : "C"; cum = i.cumulative_share; }
+  // Grouped by fruit, the first word of the market's name. Mirrors
+  // `analytics.product_type` and `analytics.product_groups`.
+  const fruit = name => {
+    const n = String(name || "").toUpperCase().split(/\s+/).filter(Boolean).join(" ");
+    if (!n || n === "UNKNOWN") return "Unknown";
+    const two = ["DRAGON FRUIT", "EXOTIC CITRUS"].find(k => n === k || n.startsWith(k + " "));
+    const kind = two || n.split(" ")[0];
+    return kind.charAt(0) + kind.slice(1).toLowerCase();
+  };
+  const groupMap = new Map();
+  for (const i of sellers) {
+    const g = groupMap.get(fruit(i.label)) || { label: fruit(i.label), value: 0, cartons: 0, lines: 0, products: [] };
+    g.value += i.value; g.cartons += i.cartons; g.lines += i.lines; g.products.push(i);
+    groupMap.set(g.label, g);
+  }
+  const product_groups = [...groupMap.values()]
+    .map(g => ({ ...g, value: round2(g.value), cartons: round2(g.cartons), share: round4(g.value / total) }))
+    .sort((a, b) => b.value - a.value);
   const periods = new Map();
   for (const r of rows) {
     const pk = periodKey(r.group_date, period);
@@ -3341,6 +3496,7 @@ function demoAnalytics(month, week) {
       last_date: dates[dates.length - 1] || null,
     },
     best_sellers: sellers,
+    product_groups,
     by_market: roll(r => r.market),
     by_agent: roll(r => r.market_agent),
     trend, period, available, filter: { month: month || null, week: week || null },

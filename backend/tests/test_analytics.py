@@ -324,3 +324,50 @@ def test_tracking_and_analytics_place_a_sale_on_the_same_day():
     row = {"last_sale": "2026-07-02", "group_date": "2026-06-28"}
     assert tracking.selling_day(row) == analytics.selling_day(row) == "2026-07-02"
     assert analytics.row_date(row).isoformat() == analytics.selling_day(row)
+
+
+# --- product groups ---------------------------------------------------------
+
+def _sold(product, cartons, price, description=None):
+    return {"product": product, "description": description, "cartons_sold": cartons,
+            "price": price, "sales_total": cartons * price, "last_sale": "2026-08-03"}
+
+
+def test_product_type_is_the_first_word_of_the_market_name():
+    assert analytics.product_type("GRAPES CRIMSON SEEDLESS CLASS 2 NO SIZE (PUNNET 5kg)") == "Grapes"
+    assert analytics.product_type("PLUMS ANGELINO CLASS 1 LARGE") == "Plums"
+    assert analytics.product_type("GRAPEFRUIT STAR RUBY CLASS 1") == "Grapefruit"
+
+
+def test_two_word_commodities_stay_whole():
+    assert analytics.product_type("DRAGON FRUIT DRAGON FRUIT CLASS 1 LARGE BOX") == "Dragon fruit"
+    assert analytics.product_type("EXOTIC CITRUS SONET CLASS 1 (CARTON 10kg)") == "Exotic citrus"
+
+
+def test_the_type_ignores_a_wrong_short_code():
+    """Dragon fruit is coded "Imp White Grapes" in the live book."""
+    rows = [_sold("DRAGON FRUIT DRAGON FRUIT CLASS 1 LARGE BOX", 2, 300.0, "Imp White Grapes"),
+            _sold("GRAPES SUGRAONE CLASS 1", 10, 380.0, "Imp White Grapes")]
+    labels = [g["label"] for g in analytics.product_groups(rows)]
+    assert labels == ["Grapes", "Dragon fruit"]
+
+
+def test_groups_rank_by_total_value_and_products_rank_inside_them():
+    rows = [_sold("PLUMS FORTUNE CLASS 2", 30, 100.0),          # 3 000
+            _sold("GRAPES SUGRAONE CLASS 1", 5, 380.0),         # 1 900
+            _sold("GRAPES RALLI CLASS 1", 10, 375.0),           # 3 750
+            _sold("GRAPES SUGRAONE CLASS 1", 1, 380.0),         #   380, same product
+            _sold("CHERRIES OTHER CLASS 1", 4, 250.0)]          # 1 000
+    groups = analytics.product_groups(rows)
+    assert [(g["label"], g["value"], g["cartons"]) for g in groups] == [
+        ("Grapes", 6030.0, 16.0), ("Plums", 3000.0, 30.0), ("Cherries", 1000.0, 4.0)]
+    grapes = groups[0]["products"]
+    assert [(p["label"], p["value"], p["cartons"]) for p in grapes] == [
+        ("GRAPES RALLI CLASS 1", 3750.0, 10.0), ("GRAPES SUGRAONE CLASS 1", 2280.0, 6.0)]
+    assert round(sum(g["share"] for g in groups), 2) == 1.0
+
+
+def test_groups_add_up_to_the_period():
+    rows = [_sold("PLUMS FORTUNE CLASS 2", 30, 100.0), _sold("GRAPES RALLI CLASS 1", 10, 375.0)]
+    payload = analytics.compute(rows)
+    assert sum(g["value"] for g in payload["product_groups"]) == payload["kpis"]["total_value"]

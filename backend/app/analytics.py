@@ -248,6 +248,58 @@ def best_sellers(rows: list[dict]) -> list[dict]:
     return items
 
 
+# Commodities the market names in two words. Every other product's type is the
+# first word of its name: GRAPES, PLUMS, CHERRIES. Checked before the first word
+# so "DRAGON FRUIT" is one type and not a product called "Dragon".
+TWO_WORD_TYPES = ("DRAGON FRUIT", "EXOTIC CITRUS")
+
+
+def product_type(label: str | None) -> str:
+    """The kind of fruit a product is, read off the market's own name for it.
+
+    Not the operator's short code in ``description``: those are typed by hand
+    and several are wrong in the live book (dragon fruit coded as white grapes,
+    granadillas as apples), which would file a product under the wrong fruit.
+    The name the market prints always leads with the commodity.
+    """
+    name = " ".join(str(label or "").upper().split())
+    if not name or name == UNKNOWN.upper():
+        return UNKNOWN
+    for kind in TWO_WORD_TYPES:
+        if name == kind or name.startswith(kind + " "):
+            return kind.capitalize()
+    return name.split(" ")[0].capitalize()
+
+
+def product_groups(rows: list[dict]) -> list[dict]:
+    """Best sellers, grouped by type of fruit and ranked best to worst.
+
+    Each group carries its own total so groups compare without opening them,
+    and its products ranked the same way inside it. Products keep the fields
+    ``best_sellers`` gives them (share and Pareto class across the whole
+    period), so a line means the same thing in either view.
+    """
+    groups: dict[str, dict] = {}
+    for item in best_sellers(rows):
+        kind = product_type(item["label"])
+        g = groups.setdefault(kind, {"label": kind, "value": 0.0, "cartons": 0.0,
+                                     "lines": 0, "products": []})
+        g["value"] += item["value"]
+        g["cartons"] += item["cartons"]
+        g["lines"] += item["lines"]
+        g["products"].append(item)
+    total = sum(g["value"] for g in groups.values())
+    out = []
+    for g in groups.values():
+        g["value"] = round(g["value"], 2)
+        g["cartons"] = round(g["cartons"], 2)
+        g["share"] = round(g["value"] / total, 4) if total else 0.0
+        g["products"].sort(key=lambda d: d["value"], reverse=True)
+        out.append(g)
+    out.sort(key=lambda d: d["value"], reverse=True)
+    return out
+
+
 def _period_key(d: date, period: str) -> str:
     if period == "day":
         return d.isoformat()          # e.g. 2026-07-27
@@ -462,6 +514,7 @@ def compute(rows: list[dict], period: str = "week") -> dict:
     return {
         "kpis": kpis(rows),
         "best_sellers": best_sellers(rows),
+        "product_groups": product_groups(rows),
         "by_market": _totals_by(rows, lambda r: r.get("market")),
         "by_agent": _totals_by(rows, lambda r: r.get("market_agent")),
         "trend": trend(rows, period),

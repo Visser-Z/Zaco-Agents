@@ -17,7 +17,8 @@ consignment, never once per row -- the rule the rest of the app lives by.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
+from itertools import combinations
 
 from . import analytics, integrity, reconcile
 
@@ -62,29 +63,105 @@ def where(rows: list[dict]) -> dict:
     return {"market": names("market"), "market_agent": names("market_agent")}
 
 
-def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
-    """Work out what each individual sale still has owing on it.
+# How long after a sale's last day its payment may land and still be taken as
+# the payment for exactly that sale. Agents pay within days; three weeks covers
+# a slow week without letting a coincidence a month later claim the sale.
+EXACT_WINDOW_DAYS = 21
 
-    A payment is for a consignment, not for a month. One delivery sells down
-    over weeks and the agent pays as it goes, so a payment settles the sales
-    that had already happened when it was made. Each consignment's payments are
-    therefore applied to that consignment's own sales oldest first, and what a
-    sale still has owing is its own value less the share that reached it.
+# The most payment lines one sale may be settled by and still count as an exact
+# match. A run is normally paid in one or two account sales; searching wider
+# than three starts finding sums that only add up by chance.
+EXACT_MAX_LINES = 3
 
-    That is what lets a month answer for itself. Comparing a month's sales
-    against a consignment's entire payment history made a July payment cancel a
-    September sale of the same delivery: September read as over-paid while the
-    delivery was, across the whole book, tens of thousands short. Settled this
-    way the months add up to the all-time figure instead of fighting it.
 
-    A sale that names its payment reference is settled here the same way as any
-    other, because that payment is already in its consignment's pool.
+def _started(row: dict) -> str | None:
+    """The first day a sales row could have been paid for.
 
-    Returns (owed per sale by id, leftover credit per consignment, a label for
-    each consignment) -- keyed the way ``reconcile`` matches, so a consignment
-    means the same thing here as it does on the payment panel.
+    A row covers a run of days, from the first day it sold (``date_received``)
+    to ``last_sale``. The agent pays part way through a run, so a payment dated
+    inside the run can still be the payment for it.
     """
-    pool = {k: v["gross"] for k, v in reconcile.aggregate_payment(payments).items()}
+    days = [d for d in (str(row.get("date_received") or "")[:10], selling_day(row)) if d]
+    return min(days) if days else None
+
+
+def _after(day: str, days: int) -> str:
+    return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+
+
+def _by_date(item: dict) -> tuple:
+    return (item["date"] is None, item["date"] or "")
+
+
+def _payment_lines(payments: list[dict]) -> dict[tuple, list[dict]]:
+    """Every commodity line of every payment, keyed the way sales are matched.
+
+    Each line carries its share of the payment's Nett, split by value exactly
+    as ``reconcile.aggregate_payment`` splits it, so what settles a sale can be
+    reported as the money that actually reached Zaco.
+
+    A negative line (a credit the agent booked) cannot pay for anything, so it
+    comes off the latest line of the same commodity paid on or before it. What
+    each commodity was paid in total is unchanged; it is only placed.
+    """
+    lines: dict[tuple, list[dict]] = defaultdict(list)
+    credits: list[tuple[tuple, dict]] = []
+    for rec in payments:
+        rec_lines = rec.get("lines") or []
+        base = (sum(reconcile._num(l.get("sales_total")) for l in rec_lines)
+                or reconcile._num(rec.get("gross")))
+        nett = reconcile._num(rec.get("nett"))
+        day = str(rec.get("date") or "")[:10] or None
+        for l in rec_lines:
+            gross = reconcile._num(l.get("sales_total"))
+            if not gross:
+                continue
+            line = {"gross": gross, "left": gross, "date": day,
+                    "rate": nett / base if base else 0.0}
+            key = reconcile._key(rec.get("dn"), l.get("product"))
+            if gross < 0:
+                credits.append((key, line))
+            else:
+                lines[key].append(line)
+    for key, credit in credits:
+        pool = sorted(lines.get(key, []), key=_by_date)
+        before = [l for l in pool
+                  if l["date"] and credit["date"] and l["date"] <= credit["date"]]
+        for target in reversed(before or pool):
+            take = min(target["left"], -credit["left"])
+            target["left"] -= take
+            target["gross"] -= take
+            credit["left"] += take
+            if credit["left"] >= -0.005:
+                break
+    return lines
+
+
+def _allocate(sales: list[dict], payments: list[dict]):
+    """Settle each payment against the sale it was actually for.
+
+    The Daily Sales PDF prints no reference joining a sale to its payment, so
+    the match is made on delivery note and commodity and then placed on the
+    right sale in three passes:
+
+      1. Exact. One to three payment lines that add up to one sale's value to
+         the cent, paid during that sale's run or within three weeks after it,
+         are the payment for that sale.
+      2. By date. What is left of each payment, in the order it was paid, goes
+         to the sales that had already started selling when it was paid, oldest
+         first. A payment cannot be for fruit that had not sold yet.
+      3. Anything still left goes to any unpaid sale, oldest first, so a date
+         that is out by a day never turns a real payment into credit.
+
+    This replaced pooling a consignment's payments and paying its sales off
+    oldest first, which moved shortfalls between months. On DN 14013 the April
+    strawberry runs were R805 short while June's R19 630 was paid to the cent
+    on 5 and 8 June, and June carried April's R805 as its own.
+
+    Returns (owed per sale, Nett paid per sale, leftover credit per
+    consignment, a label for each consignment), sales keyed by id.
+    """
+    lines = _payment_lines(payments)
     groups: dict[tuple, list[dict]] = defaultdict(list)
     label: dict[tuple, dict] = {}
     for row in sales:
@@ -93,20 +170,69 @@ def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
         label.setdefault(key, {"dn": row.get("dn"), "product": row.get("product")})
 
     owed: dict[int, float] = {}
+    paid_nett: dict[int, float] = {}
+    credit: dict[tuple, float] = {}
     for key, rows in groups.items():
-        left = pool.get(key, 0.0)
-        # Oldest first. A sale with no date cannot be placed in the order, so it
-        # settles last rather than taking credit from a sale known to be older.
-        for row in sorted(rows, key=lambda r: (selling_day(r) is None, selling_day(r) or "")):
-            value = reconcile._num(row.get("sales_total"))
-            take = min(left, value) if value > 0 and left > 0 else 0.0
-            left -= take
-            owed[id(row)] = round(value - take, 2)
-        pool[key] = left
+        # A sale with no date cannot be placed in the order, so it settles last
+        # rather than taking credit from a sale known to be older.
+        rows = sorted(rows, key=lambda r: (selling_day(r) is None, selling_day(r) or ""))
+        pool = sorted(lines.get(key, []), key=_by_date)
+        # Returns are worth less than nothing and are owed as they stand.
+        left = {id(r): max(reconcile._num(r.get("sales_total")), 0.0) for r in rows}
+        nett = {id(r): 0.0 for r in rows}
 
-    credit = {k: round(v, 2) for k, v in pool.items() if v > 0.01}
-    for key, rec in reconcile.aggregate_payment(payments).items():
+        def pay(row: dict, line: dict, amount: float) -> None:
+            line["left"] -= amount
+            left[id(row)] -= amount
+            nett[id(row)] += amount * line["rate"]
+
+        for row in rows:
+            start, end = _started(row), selling_day(row)
+            if left[id(row)] <= 0 or not start or not end:
+                continue
+            latest = _after(end, EXACT_WINDOW_DAYS)
+            untouched = [l for l in pool
+                         if l["left"] > 0 and abs(l["left"] - l["gross"]) < 0.005
+                         and l["date"] and start <= l["date"] <= latest][:12]
+            match = next((combo for n in range(1, EXACT_MAX_LINES + 1)
+                          for combo in combinations(untouched, n)
+                          if abs(sum(l["left"] for l in combo) - left[id(row)]) < 0.005), ())
+            for line in match:
+                pay(row, line, line["left"])
+
+        for dated_only in (True, False):
+            for line in pool:
+                for row in rows:
+                    if line["left"] <= 0.005:
+                        break
+                    if left[id(row)] <= 0.005:
+                        continue
+                    start = _started(row)
+                    if dated_only and not (line["date"] and start and start <= line["date"]):
+                        continue
+                    pay(row, line, min(line["left"], left[id(row)]))
+
+        for row in rows:
+            value = reconcile._num(row.get("sales_total"))
+            owed[id(row)] = round(left[id(row)] if value > 0 else value, 2)
+            paid_nett[id(row)] = round(nett[id(row)], 2)
+
+    for key, pool in lines.items():
         label.setdefault(key, {"dn": key[0], "product": key[1]})
+        if (spare := round(sum(l["left"] for l in pool), 2)) > 0.01:
+            credit[key] = spare
+    return owed, paid_nett, credit, label
+
+
+def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
+    """What each individual sale still has owing on it.
+
+    See ``_allocate`` for how a payment finds its sale. Returns (owed per sale
+    by id, leftover credit per consignment, a label for each consignment),
+    keyed the way ``reconcile`` matches, so a consignment means the same thing
+    here as it does on the payment panel.
+    """
+    owed, _, credit, label = _allocate(sales, payments)
     return owed, credit, label
 
 
@@ -128,12 +254,12 @@ def payment_status(sales: list[dict], payments: list[dict],
               if r.get("sales_total") is not None else analytics.row_value(r)}
              for r in sales]
 
-    owed_by_row, credit, label = settle(sales, payments)
+    owed_by_row, paid_by_row, credit, label = _allocate(sales, payments)
     paid = reconcile.aggregate_payment(payments)
 
-    # What the agent actually paid in this window, read straight off the
-    # payments rather than off the match: a payment settles sales that happened
-    # earlier, so this is money received, not money accounted for.
+    # What the agent paid in this window, by the day it arrived. Not the Paid
+    # figure: a sale on the 31st is paid on the 5th, so counting by arrival
+    # put that money in the wrong month. Kept beside it as a note.
     in_window = [
         p for p in payments
         if not ((lo and str(p.get("date") or "")[:10] < lo)
@@ -150,6 +276,10 @@ def payment_status(sales: list[dict], payments: list[dict],
         if (lo and day < lo) or (hi and day > hi):
             continue
         scoped[reconcile._key(row.get("dn"), row.get("product"))].append(row)
+
+    # Paid means paid FOR this window's sales, whenever the money came in, so
+    # the month the fruit sold in is the month that shows it paid.
+    paid_for_window = round(sum(paid_by_row[id(r)] for rows in scoped.values() for r in rows), 2)
 
     still_to_come = 0.0
     matched = outstanding = 0
@@ -221,7 +351,8 @@ def payment_status(sales: list[dict], payments: list[dict],
     oldest = min(dates) if dates else None
 
     return {
-        "total_paid": paid_in_window,
+        "total_paid": paid_for_window,
+        "received_in_window": paid_in_window,
         "payments_in_window": len(in_window),
         "still_to_come": round(still_to_come, 2),
         "batches_paid": matched,
@@ -576,6 +707,130 @@ def slow_stock(sales: list[dict], today: date | None = None,
             "closed": shut, "closed_count": len(shut)}
 
 
+# --- stock on hand --------------------------------------------------------
+
+# Days on hand, in the three colours the operator reads the floor by. A line
+# is green for its first six days, orange from seven, red from fourteen.
+ORANGE_FROM_DAYS = 7
+RED_FROM_DAYS = 14
+
+
+def stock_tier(days: int) -> str:
+    if days >= RED_FROM_DAYS:
+        return "red"
+    if days >= ORANGE_FROM_DAYS:
+        return "orange"
+    return "green"
+
+
+def _from_csv(row: dict) -> bool:
+    """Whether a row came from the TechnoFresh CSV export.
+
+    Only the CSV prints the market's Delivery Date, and only the CSV names the
+    payment reference on every docket, so either tells the two apart.
+    """
+    return bool(row.get("payment_refs")) or ".csv" in str(row.get("source_file") or "").lower()
+
+
+def _arrival(group: list[dict]) -> tuple[date | None, str]:
+    """When a consignment reached the market, and what that date really is.
+
+    The CSV export prints the Delivery Date, which is the arrival. The Daily
+    Sales PDF prints no arrival at all, so ``date_received`` on those rows is
+    the first day the consignment sold. Both are used, but never passed off as
+    each other: the basis rides with the date so the screen can say "received"
+    or "first sold" honestly. A real delivery date wins wherever one exists.
+    """
+    def earliest(rows):
+        return min((d for r in rows if (d := analytics._parse_date(r.get("date_received")))),
+                   default=None)
+    delivered = earliest([r for r in group if _from_csv(r)])
+    if delivered is not None:
+        return delivered, "received"
+    return earliest(group), "first_sold"
+
+
+def stock_on_hand(sales: list[dict], today: date | None = None,
+                  closed: set[str] | frozenset[str] = frozenset(),
+                  lo: str | None = None, hi: str | None = None) -> dict:
+    """Everything still unsold, grouped by the market it is sitting at.
+
+    A line is one consignment: cartons sent less cartons sold, counted once per
+    delivery exactly as ``slow_stock`` counts them, however many days it sold
+    over. Unlike ``slow_stock`` nothing is held back until it passes a
+    threshold; every unsold carton is on the list from its first day, coloured
+    by how long it has been there.
+
+    Lines within a market run oldest first so the red ones sit at the top.
+    Markets run by how many red lines they carry, then by cartons on hand.
+    Closing a line uses the same name as closing a slow line, so anything
+    already closed stays closed.
+    """
+    today = today or date.today()
+    lines: list[dict] = []
+    for group in analytics.group_consignments(sales):
+        sent = analytics.cartons_sent(group)
+        sold = sum(analytics.row_cartons(r) for r in group)
+        left = sent - sold
+        if sent <= 0 or left <= 0:
+            continue
+        arrived, basis = _arrival(group)
+        if arrived is None:
+            continue
+        days = max((today - arrived).days, 0)
+        first = group[0]
+        lines.append({
+            "ref": item_ref({"dn": first.get("dn"),
+                             "product": analytics.product_label(first)}),
+            "product": analytics.product_label(first),
+            "dn": first.get("dn"),
+            **where(group),
+            "cartons_left": int(left),
+            "cartons_sent": int(sent),
+            "arrived": arrived.isoformat(),
+            "arrived_basis": basis,
+            "days_on_hand": days,
+            "tier": stock_tier(days),
+        })
+    # Scoped by when the stock arrived, as slow stock always was: "August's
+    # stock" is what August put on the floor.
+    if lo or hi:
+        lines = [r for r in lines
+                 if not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)]
+    shut = [r for r in lines if closed_key("slow", r["ref"]) in closed]
+    lines = [r for r in lines if closed_key("slow", r["ref"]) not in closed]
+
+    markets: dict[str, dict] = {}
+    for r in lines:
+        name = r["market"] or UNPLACED
+        m = markets.setdefault(name, {"market": name, "agents": set(), "lines": [],
+                                      "cartons_left": 0, "red": 0, "orange": 0, "green": 0})
+        m["lines"].append(r)
+        m["cartons_left"] += r["cartons_left"]
+        m[r["tier"]] += 1
+        if r["market_agent"]:
+            m["agents"].add(r["market_agent"])
+    out = []
+    for m in markets.values():
+        m["lines"].sort(key=lambda r: (-r["days_on_hand"], -r["cartons_left"]))
+        m["agents"] = " · ".join(sorted(m["agents"])) or None
+        m["items"] = len(m["lines"])
+        out.append(m)
+    out.sort(key=lambda m: (-m["red"], -m["cartons_left"], m["market"]))
+    return {
+        "markets": out,
+        "items": len(lines),
+        "cartons_left": sum(r["cartons_left"] for r in lines),
+        "counts": {t: sum(1 for r in lines if r["tier"] == t) for t in ("green", "orange", "red")},
+        "bands": {"orange": ORANGE_FROM_DAYS, "red": RED_FROM_DAYS},
+        # How many lines are dated by their first sale rather than a real
+        # delivery date, so the screen can say so rather than imply otherwise.
+        "dated_by_first_sale": sum(1 for r in lines if r["arrived_basis"] == "first_sold"),
+        "closed": sorted(shut, key=lambda r: -r["days_on_hand"]),
+        "closed_count": len(shut),
+    }
+
+
 # --- the whole payload ----------------------------------------------------
 
 def date_span(sales: list[dict]) -> dict:
@@ -655,6 +910,7 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
         "payments": status,
         "sales_by_day": sales_by_day(sales, d_start, d_end),
         "slow_stock": slow_stock(sales, today, closed, lo, hi),
+        "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi),
         "span": date_span(sales),
         "periods": available_periods(sales),
         "filter": {"from": d_start, "to": d_end, "month": month, "week": week},

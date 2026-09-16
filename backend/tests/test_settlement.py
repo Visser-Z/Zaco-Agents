@@ -1,10 +1,11 @@
-"""A payment settles the sales it was actually for, oldest first.
+"""A payment settles the sales it was actually for.
 
-A payment belongs to a consignment, not to a month. Comparing one month's
-sales against a consignment's whole payment history made a July payment cancel
-a September sale of the same delivery: September reported as over-paid while
-that delivery was, across the book, tens of thousands short. Settled oldest
-first, each month answers for its own sales and the months add up to the whole.
+A payment belongs to a sale, not to the month it arrived in. Comparing one
+month's sales against a consignment's whole payment history made a July payment
+cancel a September sale of the same delivery. Pooling the payments and paying
+the sales off oldest first then moved an old shortfall onto the newest month.
+Matched to the sale it paid for, each month answers for its own sales and the
+months add up to the whole.
 """
 
 from app import tracking
@@ -171,3 +172,98 @@ def test_a_sale_with_no_date_settles_last():
     owed, _, _ = tracking.settle([dated, undated], payments)
     assert owed[id(dated)] == 0.0
     assert owed[id(undated)] == 600.0
+
+
+STRAWBERRIES = "STRAWBERRIES NO VARIETY NOT GRADED NO SIZE (DOUBLE LAYER TRAY 7kg)"
+
+
+def _run(dn, product, value, first, last):
+    """A sales row as the Daily Sales PDF records it: a run of selling days."""
+    return {**_sale(dn, product, value, last), "date_received": first}
+
+
+def _dn_14013():
+    """DN 14013 strawberries, from the live book."""
+    sales = [_run(14013, STRAWBERRIES, 97770.0, "2026-04-10", "2026-04-11"),
+             _run(14013, STRAWBERRIES, 24255.0, "2026-04-13", "2026-04-17"),
+             _run(14013, STRAWBERRIES, 8850.0, "2026-04-15", "2026-04-18"),
+             _run(14013, STRAWBERRIES, 500.0, "2026-04-21", "2026-04-21"),
+             _run(14013, STRAWBERRIES, 19630.0, "2026-06-03", "2026-06-05")]
+    payments = [_payment(14013, STRAWBERRIES, 97770.0, "2026-04-13"),
+                _payment(14013, STRAWBERRIES, 24650.0, "2026-04-15"),
+                _payment(14013, STRAWBERRIES, 8150.0, "2026-04-17"),
+                _payment(14013, STRAWBERRIES, 14730.0, "2026-06-05"),
+                _payment(14013, STRAWBERRIES, 4900.0, "2026-06-08")]
+    return sales, payments
+
+
+def test_a_shortfall_stays_in_the_month_it_belongs_to():
+    """April's runs were R805 short. June's R19 630 was paid to the cent by the
+    5 and 8 June payments, so June owes nothing and April owes the R805.
+    Pooled and paid off oldest first, June carried April's shortfall."""
+    sales, payments = _dn_14013()
+    april = tracking.payment_status(sales, payments, lo="2026-04-01", hi="2026-04-30")
+    june = tracking.payment_status(sales, payments, lo="2026-06-01", hi="2026-06-30")
+    assert june["still_to_come"] == 0.0
+    assert june["batches_outstanding"] == 0
+    assert april["still_to_come"] == 805.0
+    assert april["still_to_come"] + june["still_to_come"] == \
+        tracking.payment_status(sales, payments)["still_to_come"]
+
+
+def test_a_payment_split_across_account_sales_is_still_an_exact_match():
+    sales, payments = _dn_14013()
+    owed, _, _ = tracking.settle(sales, payments)
+    assert owed[id(sales[4])] == 0.0          # 14 730 + 4 900 = 19 630
+
+
+def test_a_genuine_shortfall_is_not_hidden():
+    """DN 14238, from the live book: the 30 April run was paid to the cent the
+    same day, and the only later payment, R2 450, does not cover May."""
+    product = "GRAPES CLASS 1 NO SIZE (PUNNET 5kg)"
+    sales = [_run(14238, product, 3340.0, "2026-04-29", "2026-04-30"),
+             _run(14238, product, 3880.0, "2026-04-29", "2026-05-02"),
+             _run(14238, product, 1910.0, "2026-05-04", "2026-05-05")]
+    payments = [_payment(14238, product, 300.0, "2026-04-30"),
+                _payment(14238, product, 3040.0, "2026-04-30"),
+                _payment(14238, product, 2450.0, "2026-05-06")]
+    april = tracking.payment_status(sales, payments, lo="2026-04-01", hi="2026-04-30")
+    may = tracking.payment_status(sales, payments, lo="2026-05-01", hi="2026-05-31")
+    assert april["still_to_come"] == 0.0
+    assert may["still_to_come"] == 3340.0
+
+
+def test_a_sale_on_the_31st_paid_on_the_5th_counts_as_paid_in_its_own_month():
+    sales = [_run(14587, GRAPES, 1000.0, "2026-07-31", "2026-07-31")]
+    payments = [_payment(14587, GRAPES, 1000.0, "2026-08-05", nett=850.0)]
+    july = tracking.payment_status(sales, payments, lo="2026-07-01", hi="2026-07-31")
+    august = tracking.payment_status(sales, payments, lo="2026-08-01", hi="2026-08-31")
+    assert july["still_to_come"] == 0.0
+    assert july["total_paid"] == 850.0
+    assert july["received_in_window"] == 0.0
+    # August received the money but sold nothing, so it paid for nothing.
+    assert august["total_paid"] == 0.0
+    assert august["received_in_window"] == 850.0
+
+
+def test_a_payment_cannot_pay_for_fruit_that_had_not_sold_yet():
+    """The 3 July payment is for the run that had started by then, even though
+    a later run is older by its last sale date's position in the list."""
+    sales = [_run(14954, NECTARINES, 400.0, "2026-06-27", "2026-06-27"),
+             _run(14954, NECTARINES, 600.0, "2026-07-06", "2026-07-07")]
+    payments = [_payment(14954, NECTARINES, 500.0, "2026-07-03")]
+    owed, _, _ = tracking.settle(sales, payments)
+    assert owed[id(sales[0])] == 0.0
+    # 100 left over, and nothing else had started, so it goes to the next sale
+    # rather than becoming credit.
+    assert owed[id(sales[1])] == 500.0
+
+
+def test_a_credit_line_on_a_payment_comes_off_what_was_paid():
+    product = "GRAPES CLASS 1 NO SIZE (PUNNET 5kg)"
+    sales = [_run(20026, product, 1000.0, "2026-05-20", "2026-05-21")]
+    payments = [_payment(20026, product, 1000.0, "2026-05-22"),
+                _payment(20026, product, -105.12, "2026-05-25")]
+    out = tracking.payment_status(sales, payments)
+    assert out["still_to_come"] == 105.12
+    assert out["overpaid"] == []

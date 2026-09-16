@@ -63,7 +63,10 @@ def test_still_to_come_is_only_the_unpaid_shortfall():
     assert p["batches_outstanding"] == 1
     # The over-payment is reported, never quietly cancelling out the shortfall.
     assert [r["overpaid"] for r in p["overpaid"]] == [200.0]
-    assert p["total_paid"] == 1500.0           # both netts landed
+    # Paid is what settled a sale. The plums' extra R200 gross paid for nothing,
+    # so its share of the Nett is left out of Paid and still counted as received.
+    assert p["total_paid"] == 1333.33          # 500 + 1000 x 1000/1200
+    assert p["received_in_window"] == 1500.0   # both netts landed
 
 
 def test_a_payment_with_nothing_sold_is_an_exception_not_dropped():
@@ -277,16 +280,18 @@ def test_a_period_scopes_the_lists_by_the_day_it_sold():
     assert aug["periods"]["months"] == ["2026-07", "2026-08"]
 
 
-def test_paid_is_the_money_that_landed_in_the_period():
-    """Read off the payments, not off the match: scoping the match would make
-    an August sale settled in September look unpaid."""
+def test_paid_counts_in_the_month_of_the_sale_it_paid_for():
+    """An August sale settled in September is August's money. Counted by the
+    day it arrived, August looked unpaid and September looked paid for sales it
+    never made. What arrived in each month is still reported, beside it."""
     sales = [_sale("GRAPES", 10, 100.0, "2026-08-01", dn=14584)]
     pays = [dict(_payment(14584, "GRAPES", 1000.0, 850.0), date="2026-09-03")]
     assert tracking.compute(sales, pays)["payments"]["total_paid"] == 850.0
     aug = tracking.compute(sales, pays, month="2026-08")["payments"]
-    assert aug["total_paid"] == 0.0 and aug["payments_in_window"] == 0
+    assert aug["total_paid"] == 850.0 and aug["still_to_come"] == 0.0
+    assert aug["received_in_window"] == 0.0 and aug["payments_in_window"] == 0
     sep = tracking.compute(sales, pays, month="2026-09")["payments"]
-    assert sep["total_paid"] == 850.0
+    assert sep["total_paid"] == 0.0 and sep["received_in_window"] == 850.0
 
 
 def test_a_scoped_view_still_reports_the_whole_exposure():

@@ -437,9 +437,32 @@
   svg.daychart .ct { fill: var(--ink-faint); font: 10px var(--sans); }
   svg.daychart .cx { fill: var(--ink-soft); font: 10.5px var(--sans); }
   svg.daychart .cv { fill: var(--ink-faint); font: 9.5px var(--sans); }
-  .clegend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 18px; }
-  .clg { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); }
-  .clg i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+  svg.daychart .cday { cursor: pointer; }
+  svg.daychart .chit { fill: transparent; }
+  svg.daychart .cday:hover .chit { fill: var(--accent-soft); }
+  svg.daychart .cday.off > rect:not(.chit) { opacity: .28; }
+  svg.daychart .cday.on .cx, svg.daychart .cday.on .cv { fill: var(--ink); font-weight: 700; }
+  .cgap { height: 18px; }
+  /* What one clicked day sold. Same grid on every row so the figures stack. */
+  .dbreak { margin: 10px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .dbreak-head { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+                 border-bottom: 1px solid var(--line); background: var(--surface-2); border-radius: 10px 10px 0 0; }
+  .dbreak-head b { font-size: 14px; }
+  .dbreak-head span { flex: 1; font-size: 12px; color: var(--ink-soft); }
+  .dbreak-list { list-style: none; margin: 0; padding: 6px 14px 10px; }
+  .dbreak-list li { display: grid; align-items: center; gap: 10px; padding: 6px 0;
+                    grid-template-columns: 12px minmax(160px, 34%) 1fr 70px 110px 48px;
+                    border-bottom: 1px solid var(--line); font-size: 13px; }
+  .dbreak-list li:last-child { border-bottom: 0; }
+  .dsw { width: 12px; height: 12px; border-radius: 3px; }
+  .dnm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dnm em { display: block; font-style: normal; font-size: 11px; color: var(--crit); }
+  .dct, .dsh { font-size: 12px; color: var(--ink-faint); text-align: right; white-space: nowrap; }
+  .dvl { font-weight: 650; text-align: right; white-space: nowrap; }
+  @media (max-width: 700px) {
+    .dbreak-list li { grid-template-columns: 12px minmax(0, 1fr) auto auto; }
+    .dbreak-list .btrack, .dbreak-list .dsh { display: none; }
+  }
   .sday-list { display: grid; gap: 18px; }
   .sday-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
                padding: 0 0 6px; border-bottom: 1px solid var(--line-strong); }
@@ -1541,6 +1564,12 @@ function ageInDays(iso) {
 const CHART_COLOURS = ["#1F5FA8", "#1E7A4D", "#9A6410", "#B23B34", "#5B4B9E",
                        "#0E7490", "#A34A78", "#4D6B1F"];
 const CHART_TOP = 8;
+// Everything outside the top products. Grey, and never one of the product
+// colours: cycling the palette gave Other the same blue as the best seller, so
+// the two could not be told apart on a bar.
+const CHART_OTHER = "#8A94A3";
+const chartColour = (names, name) =>
+  name === "Other" ? CHART_OTHER : CHART_COLOURS[names.indexOf(name) % CHART_COLOURS.length];
 
 function chartSeries(days, metric) {
   const total = {};
@@ -1563,8 +1592,12 @@ function chartSeries(days, metric) {
   return { names, rows };
 }
 
-/** Stacked bars: x is the selling day, y is cartons or rand. */
-function dayChart(days, metric) {
+/** Stacked bars: x is the selling day, y is cartons or rand.
+ *
+ *  No legend: thirty long product names under the bars had to be matched to
+ *  the colours by eye. Clicking a day lists exactly what sold on it instead,
+ *  each product beside its colour, and fades the other days. */
+function dayChart(days, metric, selected) {
   const chron = days.slice().reverse();            // days arrive newest first
   if (!chron.length) return `<p class="ins-empty">Nothing to chart.</p>`;
   const { names, rows } = chartSeries(chron, metric);
@@ -1587,24 +1620,27 @@ function dayChart(days, metric) {
             <text class="ct" x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${tick(v)}</text>`;
   }).join("");
 
+  const colW = iw / rows.length;
   const bars = rows.map((r, i) => {
-    const cx = L + (iw / rows.length) * (i + 0.5);
+    const cx = L + colW * (i + 0.5);
     let acc = 0;
-    const seg = names.map((n, j) => {
+    const seg = names.map(n => {
       const v = r.by[n] || 0;
       if (v <= 0) return "";
       const y0 = y(acc + v), y1 = y(acc);
       acc += v;
       return `<rect x="${cx - bw / 2}" y="${y0}" width="${bw}" height="${Math.max(0.6, y1 - y0)}"
-                fill="${CHART_COLOURS[j % CHART_COLOURS.length]}"><title>${esc(niceDate(r.date) || r.date)}
-${esc(n)} — ${tick(v)}</title></rect>`;
+                fill="${chartColour(names, n)}"><title>${esc(n)}: ${tick(v)}</title></rect>`;
     }).join("");
-    return `${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>
-            <text class="cv" x="${cx}" y="${y(r.total) - 5}" text-anchor="middle">${tick(r.total)}</text>`;
+    const state = selected ? (selected === r.date ? " on" : " off") : "";
+    // The whole column is the target, not just the bar, so a thin day is as
+    // easy to click as a big one.
+    return `<g class="cday${state}" onclick="event.stopPropagation(); setTrackingDay(${q(r.date)})">
+      <title>${esc(niceDate(r.date) || r.date)}: ${tick(r.total)}</title>
+      <rect class="chit" x="${L + colW * i}" y="${T}" width="${colW}" height="${H - T}"/>
+      ${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>
+      <text class="cv" x="${cx}" y="${y(r.total) - 5}" text-anchor="middle">${tick(r.total)}</text></g>`;
   }).join("");
-
-  const legend = names.map((n, j) => `<span class="clg">
-      <i style="background:${CHART_COLOURS[j % CHART_COLOURS.length]}"></i>${esc(shortProduct(n))}</span>`).join("");
 
   return `<div class="chart-head">
       <div class="seg">
@@ -1618,7 +1654,40 @@ ${esc(n)} — ${tick(v)}</title></rect>`;
       <line class="ca" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>
       ${bars}
     </svg></div>
-    <div class="clegend">${legend}</div>`;
+    ${selected && days.some(d => d.date === selected)
+      ? dayBreakdown(days.find(d => d.date === selected), names, metric)
+      : `<div class="cgap"></div>`}`;
+}
+
+/** Everything one day sold, product by product, biggest first.
+ *
+ *  Every product is listed, including the ones the chart pools into Other,
+ *  each with the colour of its slice of the bar so the list and the bar read
+ *  as one thing. */
+function dayBreakdown(day, names, metric) {
+  const products = [...(day.products || [])].sort((a, b) => (b[metric] || 0) - (a[metric] || 0));
+  const whole = metric === "value" ? day.value : day.cartons;
+  const share = x => whole > 0 ? (x[metric] || 0) / whole : 0;
+  const top = Math.max(...products.map(x => x[metric] || 0), 0) || 1;
+  const rows = products.map(x => {
+    const colour = chartColour(names, names.includes(x.product) ? x.product : "Other");
+    return `<li>
+      <i class="dsw" style="background:${colour}"></i>
+      <span class="dnm" title="${esc(x.product)}">${esc(shortProduct(x.product))}${
+        x.returned ? `<em>${fmtInt(x.returned)} back · R ${fmt(x.returns_value || 0)}</em>` : ""}</span>
+      <span class="btrack"><span class="bfill" style="width:${Math.max(2, Math.round(((x[metric] || 0) / top) * 100))}%;background:${colour}"></span></span>
+      <span class="dct num">${fmtInt(x.cartons)} ctn</span>
+      <span class="dvl num">R ${fmt(x.value)}</span>
+      <span class="dsh num">${(share(x) * 100).toFixed(1)}%</span></li>`;
+  }).join("");
+  return `<div class="dbreak">
+    <div class="dbreak-head">
+      <b>${esc(niceDate(day.date) || day.date)}</b>
+      <span class="num">R ${fmt(day.value)} · ${fmtInt(day.cartons)} cartons · ${fmtInt(products.length)} product${products.length === 1 ? "" : "s"}</span>
+      <button class="btn ghost sm" onclick="event.stopPropagation(); setTrackingDay(${q(day.date)})">Close</button>
+    </div>
+    <ul class="dbreak-list">${rows}</ul>
+  </div>`;
 }
 
 /** "1 Aug" -- the axis has no room for the year, and every bar shares it. */
@@ -1888,7 +1957,7 @@ function renderTracking() {
         }).join("")}</tbody>
       </table>
     </div>`;
-  const dayTable = `${dayChart(days, T.chart)}
+  const dayTable = `${dayChart(days, T.chart, T.day)}
       <div class="sday-list">${days.map(dayBlock).join("")}</div>`;
 
   const pickers = `

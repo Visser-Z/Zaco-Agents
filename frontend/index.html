@@ -440,7 +440,7 @@
   svg.daychart .cday { cursor: pointer; }
   svg.daychart .chit { fill: transparent; }
   svg.daychart .cday:hover .chit { fill: var(--accent-soft); }
-  svg.daychart .cday.off > rect:not(.chit) { opacity: .28; }
+  svg.daychart .cday.off > rect:not(.chit) { opacity: .45; }
   svg.daychart .cday.on .cx, svg.daychart .cday.on .cv { fill: var(--ink); font-weight: 700; }
   .cgap { height: 18px; }
   /* What one clicked day sold. Same grid on every row so the figures stack. */
@@ -1557,39 +1557,55 @@ function ageInDays(iso) {
 /* --- day-to-day sales, per product -----------------------------------------
  *  A stacked bar per selling day, one band per product, so the question the
  *  owner actually asks -- "what moved, and on which day" -- is answered by
- *  looking rather than by reading down eight tables. Products beyond the top
- *  few are pooled into Other: a legend of thirty commodities tells nobody
- *  anything, and the tail is individually tiny by definition.
+ *  looking rather than by reading down eight tables.
+ *
+ *  Every product has its own colour. Pooling all but the top eight into a
+ *  grey Other turned whole days grey: on a day the big sellers did not trade,
+ *  nine of ten products were Other and the bar said nothing.
  */
-const CHART_COLOURS = ["#1F5FA8", "#1E7A4D", "#9A6410", "#B23B34", "#5B4B9E",
-                       "#0E7490", "#A34A78", "#4D6B1F"];
-const CHART_TOP = 8;
-// Everything outside the top products. Grey, and never one of the product
-// colours: cycling the palette gave Other the same blue as the best seller, so
-// the two could not be told apart on a bar.
-const CHART_OTHER = "#8A94A3";
-const chartColour = (names, name) =>
-  name === "Other" ? CHART_OTHER : CHART_COLOURS[names.indexOf(name) % CHART_COLOURS.length];
+const CHART_COLOURS = ["#1F5FA8", "#1E7A4D", "#C27A12", "#B23B34", "#5B4B9E",
+                       "#0E7490", "#A34A78", "#5E8A1E", "#E0602A", "#3D8BE0",
+                       "#2FA36B", "#D64F7F", "#8A6DD1", "#12A3B8", "#B8960F",
+                       "#7A3E1D", "#1D3F7A", "#C24FC2"];
+
+/** A colour for every product, never shared by two products on the same day.
+ *
+ *  There are more products than colours, so some colours repeat across the
+ *  period. Each product is handed the first colour no product it trades a day
+ *  with already has, biggest sellers first, so within any one bar and any one
+ *  day's list every colour is different. Assigned by value whichever measure
+ *  is on show, so switching to cartons does not repaint the chart. */
+function chartColours(days, ranked) {
+  const sharesDay = {};
+  days.forEach(d => {
+    const names = (d.products || []).map(p => p.product);
+    names.forEach(n => {
+      const set = sharesDay[n] || (sharesDay[n] = new Set());
+      names.forEach(m => m !== n && set.add(m));
+    });
+  });
+  const colour = {};
+  ranked.forEach((n, i) => {
+    const taken = new Set([...(sharesDay[n] || [])].map(m => colour[m]).filter(Boolean));
+    colour[n] = CHART_COLOURS.find(c => !taken.has(c)) || CHART_COLOURS[i % CHART_COLOURS.length];
+  });
+  return colour;
+}
 
 function chartSeries(days, metric) {
-  const total = {};
+  const total = {}, value = {};
   days.forEach(d => (d.products || []).forEach(p => {
     total[p.product] = (total[p.product] || 0) + (p[metric] || 0);
+    value[p.product] = (value[p.product] || 0) + (p.value || 0);
   }));
-  const ranked = Object.keys(total).sort((a, b) => total[b] - total[a]);
-  const top = ranked.slice(0, CHART_TOP);
-  const named = new Set(top);
-  const hasOther = ranked.length > top.length;
-  const names = hasOther ? top.concat(["Other"]) : top;
+  const names = Object.keys(total).sort((a, b) => total[b] - total[a]);
+  const colour = chartColours(days, Object.keys(value).sort((a, b) => value[b] - value[a]));
   const rows = days.map(d => {
     const by = {};
-    (d.products || []).forEach(p => {
-      const key = named.has(p.product) ? p.product : "Other";
-      by[key] = (by[key] || 0) + (p[metric] || 0);
-    });
+    (d.products || []).forEach(p => { by[p.product] = (by[p.product] || 0) + (p[metric] || 0); });
     return { date: d.date, by, total: names.reduce((t, n) => t + (by[n] || 0), 0) };
   });
-  return { names, rows };
+  return { names, rows, colour };
 }
 
 /** Stacked bars: x is the selling day, y is cartons or rand.
@@ -1600,7 +1616,7 @@ function chartSeries(days, metric) {
 function dayChart(days, metric, selected) {
   const chron = days.slice().reverse();            // days arrive newest first
   if (!chron.length) return `<p class="ins-empty">Nothing to chart.</p>`;
-  const { names, rows } = chartSeries(chron, metric);
+  const { names, rows, colour } = chartSeries(chron, metric);
   if (!names.length) return `<p class="ins-empty">No products on these days.</p>`;
 
   const W = 900, H = 300, L = 62, R = 12, T = 14, B = 44;
@@ -1630,7 +1646,7 @@ function dayChart(days, metric, selected) {
       const y0 = y(acc + v), y1 = y(acc);
       acc += v;
       return `<rect x="${cx - bw / 2}" y="${y0}" width="${bw}" height="${Math.max(0.6, y1 - y0)}"
-                fill="${chartColour(names, n)}"><title>${esc(n)}: ${tick(v)}</title></rect>`;
+                fill="${colour[n]}"><title>${esc(n)}: ${tick(v)}</title></rect>`;
     }).join("");
     const state = selected ? (selected === r.date ? " on" : " off") : "";
     // The whole column is the target, not just the bar, so a thin day is as
@@ -1655,22 +1671,19 @@ function dayChart(days, metric, selected) {
       ${bars}
     </svg></div>
     ${selected && days.some(d => d.date === selected)
-      ? dayBreakdown(days.find(d => d.date === selected), names, metric)
+      ? dayBreakdown(days.find(d => d.date === selected), colour, metric)
       : `<div class="cgap"></div>`}`;
 }
 
-/** Everything one day sold, product by product, biggest first.
- *
- *  Every product is listed, including the ones the chart pools into Other,
- *  each with the colour of its slice of the bar so the list and the bar read
- *  as one thing. */
-function dayBreakdown(day, names, metric) {
+/** Everything one day sold, product by product, biggest first, each with the
+ *  colour of its slice of the bar so the list and the bar read as one thing. */
+function dayBreakdown(day, colours, metric) {
   const products = [...(day.products || [])].sort((a, b) => (b[metric] || 0) - (a[metric] || 0));
   const whole = metric === "value" ? day.value : day.cartons;
   const share = x => whole > 0 ? (x[metric] || 0) / whole : 0;
   const top = Math.max(...products.map(x => x[metric] || 0), 0) || 1;
   const rows = products.map(x => {
-    const colour = chartColour(names, names.includes(x.product) ? x.product : "Other");
+    const colour = colours[x.product] || CHART_COLOURS[0];
     return `<li>
       <i class="dsw" style="background:${colour}"></i>
       <span class="dnm" title="${esc(x.product)}">${esc(shortProduct(x.product))}${

@@ -236,6 +236,33 @@ def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
     return owed, credit, label
 
 
+def owed_by_market(rows: list[dict]) -> list[dict]:
+    """Outstanding lines grouped by the market they are owed from.
+
+    Chasing money is done market by market: one call to that floor covers
+    every line on it. Markets come biggest debt first, and within a market the
+    biggest line first, which is the order they are worth chasing in.
+    """
+    markets: dict[str, dict] = {}
+    for r in rows:
+        name = r.get("market") or UNPLACED
+        m = markets.setdefault(name, {"market": name, "agents": set(), "lines": [],
+                                      "owed": 0.0})
+        m["lines"].append(r)
+        m["owed"] += r.get("owed", 0.0)
+        if r.get("market_agent"):
+            m["agents"].add(r["market_agent"])
+    out = []
+    for m in markets.values():
+        m["lines"].sort(key=lambda r: r.get("owed", 0.0), reverse=True)
+        days = [d for r in m["lines"] if (d := r.get("date"))]
+        out.append({**m, "agents": " · ".join(sorted(m["agents"])) or None,
+                    "owed": round(m["owed"], 2), "items": len(m["lines"]),
+                    "oldest": min(days) if days else None})
+    out.sort(key=lambda m: -m["owed"])
+    return out
+
+
 def payment_status(sales: list[dict], payments: list[dict],
                    closed: set[str] | frozenset[str] = frozenset(),
                    lo: str | None = None, hi: str | None = None) -> dict:
@@ -360,6 +387,9 @@ def payment_status(sales: list[dict], payments: list[dict],
         "oldest_outstanding": oldest,
         # Not truncated: this is the list the operator prints and works down.
         "outstanding": outstanding_rows,
+        # The same lines grouped by the market that owes them, which is who
+        # gets phoned about them.
+        "outstanding_markets": owed_by_market(outstanding_rows),
         "overpaid": sorted(overpaid_rows, key=lambda r: r["overpaid"], reverse=True)[:20],
         "unmatched": unmatched,
         "unattributed": unattributed,

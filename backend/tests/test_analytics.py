@@ -371,3 +371,45 @@ def test_groups_add_up_to_the_period():
     rows = [_sold("PLUMS FORTUNE CLASS 2", 30, 100.0), _sold("GRAPES RALLI CLASS 1", 10, 375.0)]
     payload = analytics.compute(rows)
     assert sum(g["value"] for g in payload["product_groups"]) == payload["kpis"]["total_value"]
+
+
+# --- markets, and what sells at them ----------------------------------------
+
+def _at(market, agent, product, cartons, price):
+    return {"market": market, "market_agent": agent, "product": product,
+            "cartons_sold": cartons, "price": price, "sales_total": cartons * price,
+            "last_sale": "2026-08-03"}
+
+
+def test_markets_rank_by_value_and_carry_their_own_products():
+    rows = [_at("TSHWANE MARKET", "Farmers Trust", "GRAPES SUGRAONE", 10, 380.0),   # 3 800
+            _at("TSHWANE MARKET", "Farmers Trust", "PLUMS FORTUNE", 5, 100.0),      #   500
+            _at("DURBAN MARKET", "Grow Port Natal", "GRAPES SUGRAONE", 4, 400.0)]   # 1 600
+    markets = analytics.market_groups(rows)
+    assert [(m["label"], m["value"]) for m in markets] == [
+        ("TSHWANE MARKET", 4300.0), ("DURBAN MARKET", 1600.0)]
+    tshwane = markets[0]["products"]
+    assert [(p["label"], p["value"], p["share"]) for p in tshwane] == [
+        ("GRAPES SUGRAONE", 3800.0, 0.8837), ("PLUMS FORTUNE", 500.0, 0.1163)]
+    # The same product at another market is that market's line, not this one's.
+    assert markets[1]["products"][0]["value"] == 1600.0
+
+
+def test_a_product_names_the_agent_selling_it_there():
+    rows = [_at("TSHWANE MARKET", "Farmers Trust", "GRAPES SUGRAONE", 10, 380.0),
+            _at("TSHWANE MARKET", "Subtropico", "GRAPES SUGRAONE", 2, 380.0)]
+    [grapes] = analytics.market_groups(rows)[0]["products"]
+    assert grapes["agents"] == ["Farmers Trust", "Subtropico"]
+
+
+def test_markets_add_up_to_the_period():
+    rows = [_at("TSHWANE MARKET", "Farmers Trust", "GRAPES SUGRAONE", 10, 380.0),
+            _at("DURBAN MARKET", "Grow Port Natal", "PLUMS FORTUNE", 5, 100.0)]
+    payload = analytics.compute(rows)
+    assert sum(m["value"] for m in payload["market_groups"]) == payload["kpis"]["total_value"]
+    assert round(sum(m["share"] for m in payload["market_groups"]), 2) == 1.0
+
+
+def test_a_row_with_no_market_is_named_not_dropped():
+    [m] = analytics.market_groups([_at(None, "Farmers Trust", "GRAPES SUGRAONE", 1, 100.0)])
+    assert m["label"] == analytics.UNKNOWN

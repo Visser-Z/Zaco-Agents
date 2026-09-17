@@ -353,6 +353,8 @@
     body.printing-outstanding .trk-body { padding: 0; }
     body.printing-outstanding .print-head { display: block; font-weight: 600; font-size: 13px;
       margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #000; }
+    body.printing-outstanding .smkts { display: none !important; }
+    body.printing-outstanding .print-only { display: block !important; }
     body.printing-outstanding .trk-cols { columns: 3; column-gap: 18px; font-size: 11px; }
     body.printing-outstanding .trk-cols li { padding: 3px 0; border-bottom: 1px solid #ddd; }
     body.printing-outstanding, body.printing-outstanding * { color: #000 !important; background: #fff !important; }
@@ -385,6 +387,8 @@
   .trk-n { color: var(--ink); font-weight: 600; white-space: nowrap;
            font-variant-numeric: tabular-nums; text-align: right; }
   .trk-note { font-size: 12px; color: var(--ink-faint); margin: 10px 0 0; }
+  /* For the print sheet only. The screen reads the same lines by market. */
+  .print-only { display: none; }
 
   /* Three blocks abreast. Opening one gives it the full width and drops the
      others below it, so a long list is never squeezed into a third of the page. */
@@ -546,7 +550,9 @@
      every figure lines up down the card, open or closed. */
   .pgroups { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
   .pgroup { border-bottom: 1px solid var(--line); }
-  .pg-head, .pg-item { display: grid; grid-template-columns: minmax(150px, 34%) 1fr 118px 76px 52px;
+  /* The name column takes nearly half the card: a product name with an unsold
+     flag and an agent beside it was squeezed to three letters at a third. */
+  .pg-head, .pg-item { display: grid; grid-template-columns: minmax(220px, 46%) 1fr 118px 76px 52px;
                        align-items: center; gap: 12px; }
   .pg-head { width: 100%; appearance: none; border: 0; background: none; padding: 11px 6px;
              font-family: var(--sans); color: var(--ink); text-align: left; cursor: pointer; }
@@ -555,6 +561,11 @@
   .pg-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
   .pg-name b { font-size: 14px; font-weight: 650; white-space: nowrap; }
   .pg-name em { font-style: normal; font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+  /* The agent gives way to the product name when there is not room for both. */
+  .pg-ag { flex: 0 1 auto; min-width: 0; font-style: normal; font-size: 11px; color: var(--ink-faint);
+           background: var(--surface-2); border-radius: 999px; padding: 1px 7px;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pg-item .bt { flex: 1 1 auto; }
   .pg-name .chev { color: var(--ink-faint); display: inline-flex; }
   .pg-v { font-size: 13px; font-weight: 650; text-align: right; white-space: nowrap; }
   .pg-c, .pg-s { font-size: 12px; color: var(--ink-faint); text-align: right; white-space: nowrap; }
@@ -1391,10 +1402,13 @@ async function loadTracking() {
 
 /** Open one block full width, or close it. Only one is open at a time: two
  *  long lists side by side is the layout this replaced. */
-/** Open or close one market on Stock on Hand. Several can be open at once. */
-function toggleStockMarket(name) {
+/** Open or close one market on Tracking. Several can be open at once, and the
+ *  two lists keep their own state: a market can be open on what is owed and
+ *  shut on stock. */
+function toggleTrackingMarket(kind, name) {
   const open = S.tracking.openMarkets || (S.tracking.openMarkets = {});
-  open[name] = !open[name];
+  const key = kind + "|" + name;
+  open[key] = !open[key];
   render();
 }
 
@@ -1812,6 +1826,9 @@ function renderTracking() {
   const days = (T.data.sales_by_day || {}).days || [];
   const owed = p.outstanding || [];
   const open = T.open;                      // "owed" | "stock" | "sales" | null
+  // Which markets are expanded, on both lists. Declared here because what is
+  // owed is rendered before the stock that also reads it.
+  const openMarkets = T.openMarkets || {};
 
   /** One block: five rows at rest, everything once opened. */
   const block = (key, title, count, summary, preview, full, actions) => {
@@ -1858,10 +1875,31 @@ function renderTracking() {
         onclick="event.stopPropagation(); closeTrackingItem('${kind}', ${q(r.ref)}, true)">Reopen</button>
       </li>`).join("")}</ul>`;
 
+  /* What is owed, market by market: chasing it is one call per floor. The flat
+     list stays in the page for the print sheet, which runs down the page in
+     three columns and has no room for group headers. */
+  const owedMarket = m => {
+    const isOpen = !!openMarkets["owed|" + m.market];
+    return `<div class="smkt${isOpen ? " open" : ""}">
+      <button class="smkt-head" aria-expanded="${isOpen}"
+        onclick="event.stopPropagation(); toggleTrackingMarket('owed', ${q(m.market)})">
+        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
+        <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
+        <span class="smkt-sum num">${fmtInt(m.items)} line${m.items === 1 ? "" : "s"}${
+          m.oldest ? ` · oldest ${fmtInt(ageInDays(m.oldest))} days` : ""}</span>
+        <span class="smkt-tiers"><span class="trk-n num">R ${fmt(m.owed)}</span></span>
+      </button>
+      ${isOpen ? `<ul class="trk-list trk-stock">${m.lines.map(r =>
+        owedRow({ ...r, market: null })).join("")}</ul>` : ""}
+    </div>`;
+  };
+  const owedMarkets = `<div class="smkts">${(p.outstanding_markets || []).map(owedMarket).join("")}</div>`;
+
   const owedFull = `
     <div class="print-head">Outstanding payments · ${esc(niceDate(new Date().toISOString().slice(0, 10)))}
       · ${fmtInt(owed.length)} to collect · R ${fmt(p.still_to_come)}</div>
-    <ol class="trk-cols">${owed.map(owedRow).join("")}</ol>
+    ${owedMarkets}
+    <ol class="trk-cols print-only">${owed.map(owedRow).join("")}</ol>
     ${(p.overpaid || []).length ? `<p class="trk-note">${p.overpaid.length} group${p.overpaid.length === 1 ? "" : "s"} paid for more than sold — R ${fmt(p.overpaid.reduce((a, r) => a + r.overpaid, 0))}.</p>` : ""}
     ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
     ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} with no product breakdown, so it can never match.</p>` : ""}
@@ -1871,7 +1909,7 @@ function renderTracking() {
   const owedBlock = owed.length
     ? block("owed", "Outstanding", owed.length,
         `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}${p.closed_value ? ` · R ${fmt(p.closed_value)} closed, not counted` : ""}${p.credit_value ? ` · R ${fmt(-p.credit_value)} credited back` : ""}`,
-        `<ul class="trk-list">${owed.slice(0, 5).map(owedRow).join("")}</ul>`,
+        owedMarkets,
         owedFull,
         `<button class="btn ghost sm" onclick="event.stopPropagation(); printOutstanding()">Print</button>`)
     : (p.closed_value || p.credit_value)
@@ -1885,7 +1923,6 @@ function renderTracking() {
 
   // --- stock on hand -------------------------------------------------------
   const soh = T.data.stock_on_hand || { markets: [], items: 0, cartons_left: 0, counts: {}, closed: [] };
-  const openMarkets = T.openMarkets || {};
   const shortDate = iso => (niceDate(iso) || iso).replace(/ \d{4}$/, "");
 
   /* One unsold consignment. The badge carries the days on hand in its colour;
@@ -1903,10 +1940,10 @@ function renderTracking() {
 
   /* One market, collapsed to its totals until opened. */
   const marketGroup = m => {
-    const isOpen = !!openMarkets[m.market];
+    const isOpen = !!openMarkets["stock|" + m.market];
     return `<div class="smkt${isOpen ? " open" : ""}">
       <button class="smkt-head" aria-expanded="${isOpen}"
-        onclick="event.stopPropagation(); toggleStockMarket(${q(m.market)})">
+        onclick="event.stopPropagation(); toggleTrackingMarket('stock', ${q(m.market)})">
         <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
         <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
         <span class="smkt-sum num">${fmtInt(m.items)} line${m.items === 1 ? "" : "s"} · ${fmtInt(m.cartons_left)} ctn</span>
@@ -3065,9 +3102,10 @@ function setInsightMetric(m) {
 
 /** Open or close one fruit on the best sellers card. Several can be open at
  *  once: comparing two fruits' products side by side is the point of it. */
-function toggleProductGroup(label) {
+function toggleProductGroup(kind, label) {
   const open = S.insights.openGroups || (S.insights.openGroups = {});
-  open[label] = !open[label];
+  const key = kind + "|" + label;
+  open[key] = !open[key];
   render();
 }
 
@@ -3077,7 +3115,7 @@ function toggleProductGroup(label) {
  *  period, so the fruits compare without opening any of them. Opening one
  *  lists its products ranked the same way, each with its value and cartons
  *  and the Pareto class and unsold flag the flat list carried. */
-function productGroupList(groups, metric) {
+function productGroupList(groups, metric, kind) {
   if (!groups || !groups.length) return `<p class="ins-empty">Nothing to show yet.</p>`;
   const open = S.insights.openGroups || {};
   const byMetric = (a, b) => b[metric] - a[metric];
@@ -3089,12 +3127,12 @@ function productGroupList(groups, metric) {
       <span class="pg-c num">${fmtInt(x.cartons)} ctn</span>`;
 
   return `<ul class="pgroups">${ranked.map(g => {
-    const isOpen = !!open[g.label];
+    const isOpen = !!open[kind + "|" + g.label];
     const products = [...(g.products || [])].sort(byMetric);
     const inner = Math.max(...products.map(p => p[metric]), 0) || 1;
     const count = products.length;
     return `<li class="pgroup${isOpen ? " open" : ""}">
-      <button class="pg-head" aria-expanded="${isOpen}" onclick="toggleProductGroup(${q(g.label)})">
+      <button class="pg-head" aria-expanded="${isOpen}" onclick="toggleProductGroup(${q(kind)}, ${q(g.label)})">
         <span class="pg-name"><span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
           <b>${esc(g.label)}</b><em>${fmtInt(count)} product${count === 1 ? "" : "s"}</em></span>
         <span class="btrack"><span class="bfill" style="width:${width(g[metric], top)}%"></span></span>
@@ -3104,7 +3142,8 @@ function productGroupList(groups, metric) {
       ${isOpen ? `<ul class="pg-items">${products.map(p => `<li class="pg-item">
         <span class="pg-name" title="${esc(p.label)}">${p.abc
           ? `<span class="abc ${abcClass[p.abc] || ""}" title="Class ${esc(p.abc)} across the whole period">${esc(p.abc)}</span>` : ""}
-          <span class="bt">${esc(p.label)}</span>${unsoldChip(p.label)}</span>
+          <span class="bt">${esc(p.label)}</span>${unsoldChip(p.label)}${
+          (p.agents || []).length ? `<em class="pg-ag" title="Sold by ${esc(p.agents.join(", "))}">${esc(p.agents.join(" · "))}</em>` : ""}</span>
         <span class="btrack"><span class="bfill" style="width:${width(p[metric], inner)}%"></span></span>
         ${figures(p)}
         <span class="pg-s num"></span>
@@ -3213,7 +3252,7 @@ function renderInsights() {
               <button class="${metric === "cartons" ? "on" : ""}" onclick="setInsightMetric('cartons')">By cartons</button>
             </div>
           </div>
-          ${productGroupList(d.product_groups, metric)}
+          ${productGroupList(d.product_groups, metric, "fruit")}
         </div>
 
         <div class="card ins-card">
@@ -3221,14 +3260,10 @@ function renderInsights() {
           ${trendChart(d.trend)}
         </div>
 
-        <div class="card ins-card">
-          <div class="ins-card-head"><h2>By market</h2></div>
-          ${barList([...d.by_market].sort((a, b) => b[metric] - a[metric]).slice(0, 10), metric, {})}
-        </div>
-
-        <div class="card ins-card">
-          <div class="ins-card-head"><h2>By agent</h2></div>
-          ${barList([...d.by_agent].sort((a, b) => b[metric] - a[metric]).slice(0, 10), metric, {})}
+        <div class="card ins-card wide">
+          <div class="ins-card-head"><h2>By market</h2>
+            <span class="rep-c">open a market to see what sells there</span></div>
+          ${productGroupList(d.market_groups, metric, "market")}
         </div>
       </div>
 
@@ -3489,6 +3524,28 @@ function demoAnalytics(month, week) {
     },
     best_sellers: sellers,
     product_groups,
+    // Each market and what sells at it. Mirrors `analytics.market_groups`.
+    market_groups: (() => {
+      const byMarket = new Map();
+      for (const r of rows) {
+        const name = r.market || "Unknown";
+        const m = byMarket.get(name) || { label: name, value: 0, cartons: 0, lines: 0, products: new Map() };
+        const p = m.products.get(label(r)) || { label: label(r), value: 0, cartons: 0, lines: 0, agents: new Set() };
+        for (const cell of [m, p]) { cell.value += val(r); cell.cartons += car(r); cell.lines++; }
+        if (r.market_agent) p.agents.add(r.market_agent);
+        m.products.set(label(r), p);
+        byMarket.set(name, m);
+      }
+      const whole = [...byMarket.values()].reduce((t, m) => t + m.value, 0) || 1;
+      return [...byMarket.values()].map(m => ({
+        label: m.label, value: round2(m.value), cartons: round2(m.cartons), lines: m.lines,
+        share: round4(m.value / whole),
+        products: [...m.products.values()].map(p => ({
+          label: p.label, value: round2(p.value), cartons: round2(p.cartons), lines: p.lines,
+          agents: [...p.agents].sort(), share: round4(p.value / (m.value || 1)),
+        })).sort((a, b) => b.value - a.value),
+      })).sort((a, b) => b.value - a.value);
+    })(),
     by_market: roll(r => r.market),
     by_agent: roll(r => r.market_agent),
     trend, period, available, filter: { month: month || null, week: week || null },

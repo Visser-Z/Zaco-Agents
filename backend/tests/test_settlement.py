@@ -267,3 +267,27 @@ def test_a_credit_line_on_a_payment_comes_off_what_was_paid():
     out = tracking.payment_status(sales, payments)
     assert out["still_to_come"] == 105.12
     assert out["overpaid"] == []
+
+
+def test_what_is_owed_is_grouped_by_the_market_that_owes_it():
+    """Chasing is done market by market: one call covers every line on a floor."""
+    sales = [{**_sale(14587, GRAPES, 1000.0, "2026-09-07"),
+              "market": "TSHWANE MARKET", "market_agent": "Farmers Trust"},
+             {**_sale(14588, GRAPES, 400.0, "2026-09-08"),
+              "market": "TSHWANE MARKET", "market_agent": "Farmers Trust"},
+             {**_sale(14599, NECTARINES, 2500.0, "2026-09-09"),
+              "market": "DURBAN MARKET", "market_agent": "Grow Port Natal"}]
+    out = tracking.payment_status(sales, [])
+    markets = out["outstanding_markets"]
+    assert [(m["market"], m["owed"], m["items"]) for m in markets] == [
+        ("DURBAN MARKET", 2500.0, 1), ("TSHWANE MARKET", 1400.0, 2)]
+    assert markets[1]["agents"] == "Farmers Trust"
+    assert markets[1]["oldest"] == "2026-09-07"
+    assert [r["owed"] for r in markets[1]["lines"]] == [1000.0, 400.0]
+    # The flat list the print sheet uses is untouched, and both hold the same money.
+    assert sum(m["owed"] for m in markets) == out["still_to_come"]
+
+
+def test_a_line_whose_market_was_never_recorded_is_named_not_dropped():
+    out = tracking.payment_status([_sale(14587, GRAPES, 500.0, "2026-09-07")], [])
+    assert [m["market"] for m in out["outstanding_markets"]] == [tracking.UNPLACED]

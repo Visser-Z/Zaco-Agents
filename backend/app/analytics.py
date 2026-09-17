@@ -300,6 +300,57 @@ def product_groups(rows: list[dict]) -> list[dict]:
     return out
 
 
+def market_groups(rows: list[dict]) -> list[dict]:
+    """Each market, and what sells best at it.
+
+    The question this answers is which market is worth sending to, and then
+    what that market actually pays for. So a market carries its own total, and
+    opening it ranks the products sold there, each naming the agent selling it.
+    The agent belongs to the product rather than to a card of its own: the same
+    agency sells at more than one market, so its total across all of them says
+    nothing about where to send a load.
+    """
+    markets: dict[str, dict] = {}
+    for row in rows:
+        name = (row.get("market") or "").strip() or UNKNOWN
+        m = markets.setdefault(name, {"label": name, "value": 0.0, "cartons": 0.0,
+                                      "lines": 0, "products": {}})
+        label = product_label(row)
+        p = m["products"].setdefault(label, {"label": label, "value": 0.0,
+                                             "cartons": 0.0, "lines": 0, "agents": set()})
+        for cell in (m, p):
+            cell["value"] += row_value(row)
+            cell["cartons"] += row_cartons(row)
+            cell["lines"] += 1
+        if (agent := (row.get("market_agent") or "").strip()):
+            p["agents"].add(agent)
+
+    total = sum(m["value"] for m in markets.values())
+    out = []
+    for m in markets.values():
+        products = []
+        for p in m["products"].values():
+            products.append({
+                "label": p["label"],
+                "value": round(p["value"], 2),
+                "cartons": round(p["cartons"], 2),
+                "lines": p["lines"],
+                "agents": sorted(p["agents"]),
+                "share": round(p["value"] / m["value"], 4) if m["value"] else 0.0,
+            })
+        products.sort(key=lambda d: d["value"], reverse=True)
+        out.append({
+            "label": m["label"],
+            "value": round(m["value"], 2),
+            "cartons": round(m["cartons"], 2),
+            "lines": m["lines"],
+            "share": round(m["value"] / total, 4) if total else 0.0,
+            "products": products,
+        })
+    out.sort(key=lambda d: d["value"], reverse=True)
+    return out
+
+
 def _period_key(d: date, period: str) -> str:
     if period == "day":
         return d.isoformat()          # e.g. 2026-07-27
@@ -516,6 +567,7 @@ def compute(rows: list[dict], period: str = "week") -> dict:
         "best_sellers": best_sellers(rows),
         "product_groups": product_groups(rows),
         "by_market": _totals_by(rows, lambda r: r.get("market")),
+        "market_groups": market_groups(rows),
         "by_agent": _totals_by(rows, lambda r: r.get("market_agent")),
         "trend": trend(rows, period),
         "period": period,

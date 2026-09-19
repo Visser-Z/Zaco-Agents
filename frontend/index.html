@@ -483,6 +483,15 @@
   .sday-src .src.warn { background: var(--warn-tint, var(--surface-2));
                         color: var(--warn, var(--ink-soft)); font-weight: 600; }
   .sday-tot { font-size: 12px; color: var(--ink-soft); }
+  /* A month's total over its days. */
+  .smonth { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+            flex-wrap: wrap; padding: 9px 10px; border-radius: 8px; background: var(--accent-soft);
+            border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); }
+  .trk-list li.smonth { display: flex; margin: 6px 0 2px; border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); }
+  .sm-name { font-weight: 700; font-size: 13px; }
+  .sm-figs { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .sm-paid { color: var(--ok); cursor: help; }
+  .sm-owed { color: var(--warn); cursor: help; }
   table.sday-items { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
   table.sday-items col.c-n { width: 18%; }
   table.sday-items th { text-align: right; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
@@ -688,11 +697,20 @@
   .smkt-sum { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
   .smkt-tiers { display: flex; gap: 4px; justify-content: flex-end; min-width: 0; }
   .trk-stock { padding: 0 4px 8px 26px; }
+  /* A delivery note inside a market: a slim header, its products beneath. */
+  .sdn { margin: 0 0 4px 26px; }
+  .sdn-head { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center;
+              gap: 10px; padding: 7px 8px; border-radius: 7px; background: var(--surface-2);
+              font-size: 12px; }
+  .sdn-head b { font-size: 12.5px; }
+  .sdn-sub { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sdn .trk-stock { padding-left: 12px; }
   .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
   @media (max-width: 700px) {
     .smkt-head { grid-template-columns: auto minmax(0, 1fr) auto; }
     .smkt-tiers { grid-column: 2 / -1; justify-content: flex-start; }
     .trk-stock { padding-left: 4px; }
+    .sdn { margin-left: 4px; }
     .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
     .trk-list.trk-stock li .trk-d { grid-column: 2 / 3; }
   }
@@ -1950,9 +1968,22 @@ function renderTracking() {
         <span class="smkt-tiers">${m.red ? `<span class="wsig t-red">${fmtInt(m.red)} red</span>` : ""}${
           m.orange ? `<span class="wsig t-orange">${fmtInt(m.orange)} orange</span>` : ""}</span>
       </button>
-      ${isOpen ? `<ul class="trk-list trk-sig trk-stock">${m.lines.map(stockRow).join("")}</ul>` : ""}
+      ${isOpen ? (m.dns || []).map(deliveryNote).join("") : ""}
     </div>`;
   };
+
+  /* One delivery note inside a market: the load, then the products on it. The
+     note takes the colour and age of its oldest product. */
+  const deliveryNote = g => `<div class="sdn">
+      <div class="sdn-head">
+        <span class="wsig t-${esc(g.tier)}">${fmtInt(g.days_on_hand)}d</span>
+        <b>${g.dn != null ? "DN " + esc(g.dn) : "No delivery note"}</b>
+        <span class="sdn-sub">${fmtInt(g.items)} product${g.items === 1 ? "" : "s"} · ${
+          g.arrived_basis === "received" ? "received" : "first sold"} ${esc(shortDate(g.arrived))}</span>
+        <span class="trk-n num">${fmtInt(g.cartons_left)} of ${fmtInt(g.cartons_sent)}</span>
+      </div>
+      <ul class="trk-list trk-sig trk-stock">${g.lines.map(stockRow).join("")}</ul>
+    </div>`;
 
   const stockMarkets = `<div class="smkts">${(soh.markets || []).map(marketGroup).join("")}</div>`;
   const stockBlock = soh.items
@@ -1974,17 +2005,37 @@ function renderTracking() {
   const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
   const ranged = !!(T.from || T.to);
 
+  const PAID_TIP = "What reached you for these sales, after the agent's deductions, whenever it was paid.";
+  const OWED_TIP = "Sale value still waiting on a payment.";
+  const money = x => `<span class="sm-paid" title="${PAID_TIP}">paid R ${fmt(x.paid || 0)}</span>${
+    (x.owed || 0) > 0.005 ? ` · <span class="sm-owed" title="${OWED_TIP}">R ${fmt(x.owed)} owed</span>` : ""}`;
+
   const dayRow = d => `<li>
       <span class="trk-p"><span class="trk-nm">${esc(niceDate(d.date) || d.date)}</span></span>
-      <span class="trk-d">${fmtInt(d.cartons)} ctn${d.returned ? " · " + fmtInt(d.returned) + " back" : ""}</span>
+      <span class="trk-d">${fmtInt(d.cartons)} ctn${d.returned ? " · " + fmtInt(d.returned) + " back" : ""} · ${money(d)}</span>
       <span class="trk-n num">R ${fmt(d.value)}</span></li>`;
+
+  /* Each month's total, above its days: the days added up. */
+  const monthOf = {};
+  ((T.data.sales_by_day || {}).months || []).forEach(m => { monthOf[m.month] = m; });
+  const monthLine = key => {
+    const m = monthOf[key];
+    if (!m) return "";
+    return `<span class="sm-name">${esc(monthLabel(key))}</span>
+      <span class="sm-figs">R ${fmt(m.value)} sold · ${fmtInt(m.cartons)} ctn · ${money(m)} · ${
+        fmtInt(m.days)} trading day${m.days === 1 ? "" : "s"}</span>`;
+  };
+  /** Days with their month's total ahead of the first day of each month. */
+  const byMonth = (list, month, day) => list.map((d, i) =>
+    (i === 0 || list[i - 1].date.slice(0, 7) !== d.date.slice(0, 7) ? month(d.date.slice(0, 7)) : "")
+    + day(d)).join("");
 
   /* Every day, with exactly what sold under it. The product lines are always
      visible: hiding them behind a click per day was the whole complaint. */
   const dayBlock = d => `<div class="sday">
       <div class="sday-head">
         <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
-        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)}</span>
+        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)} · ${money(d)}</span>
       </div>
       ${(d.dated && d.dated.delivered) ? `<div class="sday-src"><span class="src warn"
           title="${fmtInt(d.dated.delivered)} of ${fmtInt(d.dated.delivered + d.dated.sold)} rows carry no sale date, so they are placed on the day their load was sent. That is an inference, not a reading.">
@@ -2008,7 +2059,7 @@ function renderTracking() {
       </table>
     </div>`;
   const dayTable = `${dayChart(days, T.chart, T.day)}
-      <div class="sday-list">${days.map(dayBlock).join("")}</div>`;
+      <div class="sday-list">${byMonth(days, k => `<div class="smonth">${monthLine(k)}</div>`, dayBlock)}</div>`;
 
   const pickers = `
     <label class="ctl inline"><span>From</span><input type="date" value="${esc(T.from)}" ${bounds}
@@ -2021,7 +2072,7 @@ function renderTracking() {
   const salesBlock = (days.length || ranged)
     ? block("sales", "Sales per day", days.length,
         `${fmtInt(days.length)} day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons${ranged ? " · filtered" : ""}`,
-        days.length ? `<ul class="trk-list">${days.slice(0, 5).map(dayRow).join("")}</ul>`
+        days.length ? `<ul class="trk-list">${byMonth(days.slice(0, 5), k => `<li class="smonth">${monthLine(k)}</li>`, dayRow)}</ul>`
                     : `<p class="ins-empty">No sales in that range.</p>`,
         days.length ? dayTable : `<p class="ins-empty">No sales in that range.</p>`,
         pickers)

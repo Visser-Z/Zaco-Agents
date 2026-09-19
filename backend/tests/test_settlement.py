@@ -291,3 +291,25 @@ def test_what_is_owed_is_grouped_by_the_market_that_owes_it():
 def test_a_line_whose_market_was_never_recorded_is_named_not_dropped():
     out = tracking.payment_status([_sale(14587, GRAPES, 500.0, "2026-09-07")], [])
     assert [m["market"] for m in out["outstanding_markets"]] == [tracking.UNPLACED]
+
+
+def test_each_sales_day_says_what_came_back_for_it_and_what_is_still_owed():
+    """A sale on the 31st paid on the 5th is money back for the 31st."""
+    sales = [_run(14587, GRAPES, 1000.0, "2026-07-31", "2026-07-31"),
+             _run(14588, GRAPES, 400.0, "2026-08-03", "2026-08-03")]
+    payments = [_payment(14587, GRAPES, 1000.0, "2026-08-05", nett=850.0)]
+    sd = tracking.compute(sales, payments)["sales_by_day"]
+    by_day = {d["date"]: d for d in sd["days"]}
+    assert (by_day["2026-07-31"]["paid"], by_day["2026-07-31"]["owed"]) == (850.0, 0.0)
+    assert (by_day["2026-08-03"]["paid"], by_day["2026-08-03"]["owed"]) == (0.0, 400.0)
+    months = {m["month"]: m for m in sd["months"]}
+    assert (months["2026-07"]["value"], months["2026-07"]["paid"]) == (1000.0, 850.0)
+    assert (months["2026-08"]["value"], months["2026-08"]["owed"]) == (400.0, 400.0)
+    assert (sd["totals"]["paid"], sd["totals"]["owed"]) == (850.0, 400.0)
+
+
+def test_what_the_days_owe_agrees_with_outstanding():
+    sales, payments = _dn_14013()
+    out = tracking.compute(sales, payments)
+    days_owed = round(sum(d["owed"] for d in out["sales_by_day"]["days"]), 2)
+    assert days_owed == out["payments"]["still_to_come"] == 805.0

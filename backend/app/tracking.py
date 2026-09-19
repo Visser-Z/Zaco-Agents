@@ -263,6 +263,19 @@ def owed_by_market(rows: list[dict]) -> list[dict]:
     return out
 
 
+def valued(sales: list[dict]) -> list[dict]:
+    """The sales, each carrying the value payments are matched against.
+
+    Reconcile matches on each row's sold VALUE. Older history does not carry
+    the exact docket total, so it is filled with the gross the app trusts
+    everywhere else -- cartons sold times price -- which differs only by
+    rounding and is the figure being compared against on the payment side.
+    """
+    return [{**r, "sales_total": r.get("sales_total")
+             if r.get("sales_total") is not None else analytics.row_value(r)}
+            for r in sales]
+
+
 def payment_status(sales: list[dict], payments: list[dict],
                    closed: set[str] | frozenset[str] = frozenset(),
                    lo: str | None = None, hi: str | None = None) -> dict:
@@ -273,13 +286,7 @@ def payment_status(sales: list[dict], payments: list[dict],
     they were settled. So a month shows what is still owed on that month's own
     sales, and the months sum to the whole.
     """
-    # Reconcile matches on each row's sold VALUE. The history read does not carry
-    # the exact docket total, so fill it with the gross the app trusts
-    # everywhere else -- cartons sold times price -- which differs only by
-    # rounding and is the figure being compared against on the payment side.
-    sales = [{**r, "sales_total": r.get("sales_total")
-              if r.get("sales_total") is not None else analytics.row_value(r)}
-             for r in sales]
+    sales = valued(sales)
 
     owed_by_row, paid_by_row, credit, label = _allocate(sales, payments)
     paid = reconcile.aggregate_payment(payments)
@@ -418,7 +425,8 @@ def report_name(row: dict) -> str:
 
 
 def sales_by_day(sales: list[dict], start: str | None = None,
-                 end: str | None = None) -> dict:
+                 end: str | None = None,
+                 settled: tuple[dict, dict] | None = None) -> dict:
     """How much sold each trading day, and where.
 
     Every figure is net of returns, as every carton figure in the app is: a day
@@ -441,6 +449,7 @@ def sales_by_day(sales: list[dict], start: str | None = None,
         market = (row.get("market") or "").strip() or UNPLACED
         d = by_day.setdefault(day, {"date": day, "cartons": 0.0, "returned": 0.0,
                                     "value": 0.0, "returns_value": 0.0,
+                                    "paid": 0.0, "owed": 0.0,
                                     "sources": defaultdict(
                                         lambda: {"rows": 0, "cartons": 0.0}),
                                     "dated": defaultdict(int),
@@ -462,6 +471,12 @@ def sales_by_day(sales: list[dict], start: str | None = None,
         d["returned"] += back
         d["value"] += value
         d["returns_value"] += back_value
+        # What came back for this day's sales, whenever the money arrived, and
+        # what of them is still unpaid. Settled exactly as Outstanding is.
+        if settled is not None:
+            owed, paid = settled
+            d["paid"] += paid.get(id(row), 0.0)
+            d["owed"] += owed.get(id(row), 0.0)
 
         m = d["markets"][market]
         m["cartons"] += cartons
@@ -528,6 +543,12 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             "returned": round(d["returned"], 2),
             "returns_value": round(d["returns_value"], 2),
             "value": round(d["value"], 2),
+            # Paid is the Nett that reached Zaco for this day's sales, after the
+            # agent's deductions. Owed is the sale value still waiting on a
+            # payment. So sold less paid is NOT owed: the difference between
+            # them is the agent's cut on what has been paid.
+            "paid": round(d["paid"], 2),
+            "owed": round(d["owed"], 2),
             "products": products,
             "markets": _shares(d["markets"], d["value"]),
             "sources": sorted(
@@ -553,6 +574,8 @@ def sales_by_day(sales: list[dict], start: str | None = None,
             "cartons": round(sum(x["cartons"] for x in days), 2),
             "returned": round(sum(x["returned"] for x in days), 2),
             "returns_value": round(sum(x["returns_value"] for x in days), 2),
+            "paid": round(sum(x["paid"] for x in days), 2),
+            "owed": round(sum(x["owed"] for x in days), 2),
             "days": len(days),
         },
     }
@@ -586,9 +609,12 @@ def _month_totals(days: list[dict]) -> list[dict]:
     for d in days:
         m = agg.setdefault(d["date"][:7], {"month": d["date"][:7], "value": 0.0,
                                            "cartons": 0.0, "returned": 0.0,
-                                           "returns_value": 0.0, "days": 0,
+                                           "returns_value": 0.0, "paid": 0.0,
+                                           "owed": 0.0, "days": 0,
                                            "first": d["date"], "last": d["date"]})
         m["value"] += d["value"]
+        m["paid"] += d.get("paid", 0.0)
+        m["owed"] += d.get("owed", 0.0)
         m["cartons"] += d["cartons"]
         m["returned"] += d["returned"]
         m["returns_value"] += d["returns_value"]
@@ -596,6 +622,7 @@ def _month_totals(days: list[dict]) -> list[dict]:
         m["first"] = min(m["first"], d["date"])
         m["last"] = max(m["last"], d["date"])
     out = [{**m, "value": round(m["value"], 2), "cartons": round(m["cartons"], 2),
+            "paid": round(m["paid"], 2), "owed": round(m["owed"], 2),
             "returned": round(m["returned"], 2),
             "returns_value": round(m["returns_value"], 2)}
            for m in agg.values()]
@@ -780,6 +807,36 @@ def _arrival(group: list[dict]) -> tuple[date | None, str]:
     return earliest(group), "first_sold"
 
 
+def _by_delivery_note(lines: list[dict]) -> list[dict]:
+    """A market's unsold lines, grouped by the delivery note they came in on.
+
+    One delivery note often carries several products, and the load is what the
+    operator knows: "DN 14954 is still on the floor at Tshwane". Each note is
+    as old as its oldest line and coloured by it, so a note with one red
+    product among fresh ones still reads red. Oldest note first, as the lines
+    within it are.
+    """
+    notes: dict[object, dict] = {}
+    for r in lines:
+        g = notes.setdefault(r.get("dn"), {"dn": r.get("dn"), "lines": [], "cartons_left": 0,
+                                           "cartons_sent": 0, "days_on_hand": 0,
+                                           "arrived": r["arrived"],
+                                           "arrived_basis": r["arrived_basis"]})
+        g["lines"].append(r)
+        g["cartons_left"] += r["cartons_left"]
+        g["cartons_sent"] += r["cartons_sent"]
+        if r["days_on_hand"] >= g["days_on_hand"]:
+            g["days_on_hand"] = r["days_on_hand"]
+            g["arrived"], g["arrived_basis"] = r["arrived"], r["arrived_basis"]
+    out = []
+    for g in notes.values():
+        g["items"] = len(g["lines"])
+        g["tier"] = stock_tier(g["days_on_hand"])
+        out.append(g)
+    out.sort(key=lambda g: (-g["days_on_hand"], -g["cartons_left"]))
+    return out
+
+
 def stock_on_hand(sales: list[dict], today: date | None = None,
                   closed: set[str] | frozenset[str] = frozenset(),
                   lo: str | None = None, hi: str | None = None) -> dict:
@@ -845,6 +902,7 @@ def stock_on_hand(sales: list[dict], today: date | None = None,
         m["lines"].sort(key=lambda r: (-r["days_on_hand"], -r["cartons_left"]))
         m["agents"] = " · ".join(sorted(m["agents"])) or None
         m["items"] = len(m["lines"])
+        m["dns"] = _by_delivery_note(m["lines"])
         out.append(m)
     out.sort(key=lambda m: (-m["red"], -m["cartons_left"], m["market"]))
     return {
@@ -931,6 +989,10 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
     # payment history land on one month of its sales, so a July payment cancelled
     # a September sale and September read as over-paid.
     status = payment_status(sales, payments, closed, lo, hi)
+    # The days are settled on the same match, so what a day shows as paid and
+    # owed agrees with Outstanding to the cent.
+    filled = valued(sales)
+    owed_by_row, paid_by_row, _, _ = _allocate(filled, payments)
     # The all-time figure rides alongside so a month is never mistaken for the
     # total exposure. The months do now add up to it.
     if lo or hi:
@@ -938,7 +1000,8 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
             sales, payments, closed)["still_to_come"]
     return {
         "payments": status,
-        "sales_by_day": sales_by_day(sales, d_start, d_end),
+        "sales_by_day": sales_by_day(filled, d_start, d_end,
+                                     settled=(owed_by_row, paid_by_row)),
         "slow_stock": slow_stock(sales, today, closed, lo, hi),
         "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi),
         "span": date_span(sales),

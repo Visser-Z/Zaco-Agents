@@ -79,3 +79,19 @@ def test_the_month_scopes_by_arrival():
              _row(2, "GRAPES B", "TSHWANE MARKET", 10, 2, "2026-09-10")]
     s = tracking.compute(sales, [], today=TODAY, month="2026-09")["stock_on_hand"]
     assert [r["product"] for m in s["markets"] for r in m["lines"]] == ["GRAPES B"]
+
+
+def test_a_market_groups_its_stock_by_delivery_note():
+    """One delivery note often carries several products; the load is what the
+    operator knows, so a market lists its notes, each with its products."""
+    def row(cid, dn, product, sent, sold, first):
+        return {**_row(cid, product, "TSHWANE MARKET", sent, sold, first), "dn": dn}
+    sales = [row(1, 14954, "NECTARINES A", 100, 40, "2026-09-12"),   # 4 days
+             row(2, 14954, "PLUMS B", 50, 10, "2026-08-20"),         # 27 days
+             row(3, 14960, "GRAPES C", 30, 5, "2026-09-06")]         # 10 days
+    [market] = tracking.stock_on_hand(sales, TODAY)["markets"]
+    assert [(g["dn"], g["items"], g["cartons_left"], g["days_on_hand"], g["tier"])
+            for g in market["dns"]] == [(14954, 2, 100, 27, "red"), (14960, 1, 25, 10, "orange")]
+    # Inside a note, oldest first; the note is as old as its oldest line.
+    assert [r["product"] for r in market["dns"][0]["lines"]] == ["PLUMS B", "NECTARINES A"]
+    assert market["dns"][0]["arrived"] == "2026-08-20"

@@ -1,0 +1,33 @@
+    Consignment Reports                                Zaco Agents (Pty) Ltd (20026)
+
+    Report:   Daily Sales Detail                          Run Date: 2026/09/19 07:30:00
+
+    Market:   ALL
+    Agent:    ALL
+    Product:  ALL
+    Date Range: 2026/09/17 - 2026/09/18
+
+    DURBAN MARKET       Grow Port Natal (Dbn)
+    Delivery ID: 1856701Z Supplier Ref: 20026*5004488 Qty Sent: 120 Qty Amended To: 120 Qty Avail: 31
+    Consignment ID: 185670101Z Comment:
+
+    Product:  GRAPES COTTON CANDY CLASS 1 NO SIZE (PUNNET 5kg)
+
+      Date Sold   Docket Number Qty Sold Market Avg    Price       Sales Value
+    2026-09-17 DUR*B6I17CE8178*01Z  1       R 450.00        R 450.00   R 450.00
+    2026-09-17 DUR*B6I17CE8793*01Z  1       R 450.00        R 450.00   R 450.00
+    2026-09-17 DUR*B6I17CE8796*01Z  5       R 450.00        R 450.00   R 2250.00
+    2026-09-17 DUR*B6I17CE9317*01Z  1       R 450.00        R 450.00   R 450.00
+    2026-09-18 DUR*B6I18CE0740*01Z  2       R 195.45        R 450.00   R 900.00
+    2026-09-18 DUR*B6I18DS1734*01Z  8       R 195.45        R 100.00   R 800.00
+    2026-09-18 DUR*B6I18CE1840*01Z  1       R 195.45        R 450.00   R 450.00
+                                    19                                 R 5750.00
+
+    TSHWANE MARKET      Farmers Trust (Pre)
+    Delivery ID: 1188226Z Supplier Ref: 20026*14362 Qty Sent: 104 Qty Amended To: 104 Qty Avail: 89
+    Consignment ID: 118822602Z Comment:
+    Product:  PLUMS ELDORADO CLASS 1 NO SIZE (DOUBLE LAYER TRAY 5kg)
+
+      Date Sold   Docket Number Qty Sold Market Avg    Price       Sales Value
+    2026-09-17 PRE*B6I17S89438*02Z  2       R 120.00        R 120.00   R 240.00
+                                    2                                  R 240.00

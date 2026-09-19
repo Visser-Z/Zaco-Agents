@@ -189,45 +189,9 @@ def parse_daily_sales(pages: list[str], filename: str) -> list[StatementRow]:
         if m := _QTY_AVAIL.search(block):
             row.opening_stock = int(m.group(1))
 
-        # Sum the consignment's docket lines. Qty Sold → Cartons Sold; the
-        # weighted price = total sales value / total qty sold recovers the
-        # sheet's Gross Total (M = J x L).
         dockets = _DOCKET.findall(block)
-        # A negative Qty Sold is a RETURN, not a sale of minus one carton: it
-        # reverses a docket already booked. Netting it off is right -- the fruit
-        # is back on the floor -- but the sale it reverses did happen, so both
-        # halves are kept instead of only their difference. Classified on the
-        # quantity's sign; a return's Sales Value prints negative alongside it
-        # and is held positive here, so "10 returned, R2,000" reads as it should.
-        returns = [(q, v) for _, q, _, _, v in dockets if int(q) < 0]
-        returned_qty = -sum(int(q) for q, _ in returns)
-        returned_value = abs(sum(_num(v) for _, v in returns))
-        total_qty = sum(int(q) for _, q, _, _, _ in dockets)
-        total_value = sum(_num(v) for _, _, _, _, v in dockets)
-        sale_dates = sorted(datetime.strptime(d, "%Y-%m-%d").date() for d, *_ in dockets)
-
-        row.cartons_sold = total_qty
-        row.market_avg = _market_avg(dockets)
-        row.cartons_returned = returned_qty
-        row.returns_total = round(returned_value, 2)
-        row.price = round(total_value / total_qty, 2) if total_qty else 0.0
-        # Exact consignment sales value (not cartons x rounded price), so it
-        # reconciles to Payment Details' Sales Total to the cent.
-        row.sales_total = round(total_value, 2)
         if not dockets:
             flags.append(Flag(field="cartons_sold", message="No sale lines found for this consignment."))
-
-        if sale_dates:
-            # Earliest sale date drives both column D (per delivery group) and
-            # column T (DD.MM). This is an assumption — Book1's column D looked
-            # like a delivery date, which this report doesn't print.
-            row.date_received = sale_dates[0]
-            row.invoice_date = sale_dates[0]
-            row.status = sale_dates[0].strftime("%d.%m")
-            # Last docket date. Against date_received this gives how long the
-            # consignment took to sell, which ranges from same-day to weeks and
-            # is one of the few forward-looking signals the reports carry.
-            row.last_sale = sale_dates[-1]
 
         # Nett Total (N) is not on this report — the operator computes the
         # deduction themselves. Leave it empty and flag for entry.
@@ -239,8 +203,62 @@ def parse_daily_sales(pages: list[str], filename: str) -> list[StatementRow]:
                 message="Nett is not on this report — enter it (the deduction isn't printed here).",
             )
         )
-
         row.flags = flags
-        rows.append(row)
+
+        # One row per day the consignment sold. A report run over several days
+        # used to sum every docket into one row dated by its LAST sale, so a
+        # 15 to 18 September report put four days of Durban grapes, R34 850, on
+        # the 18th, left the 17th showing R2 490 of its real R23 000, and added
+        # the 16th a second time on top of the 16th's own report. Split by the
+        # date each docket sold, a day holds exactly what sold that day, and a
+        # later report covering the same day collides on the same key instead
+        # of stacking. A one-day report is unchanged: it has one day.
+        by_day: dict[str, list] = {}
+        for docket in dockets:
+            by_day.setdefault(docket[0], []).append(docket)
+        # The consignment's first sale in this report stays the start of every
+        # row's run, so days to sell and days on hand still count from it
+        # rather than resetting each day.
+        first = min(by_day) if by_day else None
+        for day in sorted(by_day) or [None]:
+            one = row.model_copy(deep=True) if len(by_day) > 1 else row
+            _fill_sales(one, by_day.get(day, []), first, day)
+            rows.append(one)
 
     return rows
+
+
+def _fill_sales(row: StatementRow, dockets: list, first: str | None, day: str | None) -> None:
+    """The sales figures for one consignment on one day, from its dockets.
+
+    Qty Sold → Cartons Sold; the weighted price = total sales value / total qty
+    sold recovers the sheet's Gross Total (M = J x L).
+    """
+    # A negative Qty Sold is a RETURN, not a sale of minus one carton: it
+    # reverses a docket already booked. Netting it off is right -- the fruit
+    # is back on the floor -- but the sale it reverses did happen, so both
+    # halves are kept instead of only their difference. Classified on the
+    # quantity's sign; a return's Sales Value prints negative alongside it
+    # and is held positive here, so "10 returned, R2,000" reads as it should.
+    returns = [(q, v) for _, q, _, _, v in dockets if int(q) < 0]
+    total_qty = sum(int(q) for _, q, _, _, _ in dockets)
+    total_value = sum(_num(v) for _, _, _, _, v in dockets)
+
+    row.cartons_sold = total_qty
+    row.market_avg = _market_avg(dockets)
+    row.cartons_returned = -sum(int(q) for q, _ in returns)
+    row.returns_total = round(abs(sum(_num(v) for _, v in returns)), 2)
+    row.price = round(total_value / total_qty, 2) if total_qty else 0.0
+    # Exact sales value (not cartons x rounded price), so it reconciles to
+    # Payment Details' Sales Total to the cent.
+    row.sales_total = round(total_value, 2)
+
+    if day is not None:
+        sold_on = datetime.strptime(day, "%Y-%m-%d").date()
+        # The first sale of the consignment's run in this report: this report
+        # prints no delivery date, so it is the nearest thing to arrival.
+        row.date_received = datetime.strptime(first, "%Y-%m-%d").date()
+        # The day this row sold, which is the day it belongs to everywhere.
+        row.last_sale = sold_on
+        row.invoice_date = sold_on
+        row.status = sold_on.strftime("%d.%m")

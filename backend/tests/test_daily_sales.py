@@ -207,3 +207,42 @@ def test_the_same_consignment_on_two_days_is_two_rows_not_a_duplicate():
         rec = main._statement_record(row, user)
         keys.add((rec["market_agent"], rec["stm_no"], rec["consignment_id"], rec["group_date"]))
     assert len(keys) == 2, "the two days collapsed onto one key"
+
+
+TWO_DAYS = (Path(__file__).parent / "fixtures" / "daily_sales_two_days.txt").read_text(encoding="utf-8")
+
+
+def test_a_report_over_several_days_gives_one_row_per_day_sold():
+    """A 15 to 18 September report put four days of one consignment on the
+    18th, dated by its last sale. Each day must hold exactly what sold on it."""
+    rows = daily_sales.parse_daily_sales([TWO_DAYS], "two days.pdf")
+    cotton = [r for r in rows if r.consignment_id == 185670101]
+    assert [(r.last_sale, r.cartons_sold, r.sales_total) for r in cotton] == [
+        (date(2026, 9, 17), 8, 3600.0), (date(2026, 9, 18), 11, 2150.0)]
+    # Real figures from the 17 and 18 September reports, per day.
+    assert [r.market_avg for r in cotton] == [450.0, 195.45]
+    assert [(r.invoice_date, r.status) for r in cotton] == [
+        (date(2026, 9, 17), "17.09"), (date(2026, 9, 18), "18.09")]
+
+
+def test_every_day_row_keeps_the_start_of_the_run():
+    """Days to sell and days on hand count from the first sale, so splitting by
+    day must not reset the start to each day."""
+    rows = daily_sales.parse_daily_sales([TWO_DAYS], "two days.pdf")
+    cotton = [r for r in rows if r.consignment_id == 185670101]
+    assert {r.date_received for r in cotton} == {date(2026, 9, 17)}
+    # Everything that belongs to the delivery is repeated, not split.
+    assert {(r.dn, r.qty_received, r.market, r.product) for r in cotton} == {
+        (5004488, 120, "DURBAN MARKET", "GRAPES COTTON CANDY CLASS 1 NO SIZE (PUNNET 5kg)")}
+
+
+def test_a_consignment_that_sold_on_one_day_is_one_row_as_before():
+    rows = daily_sales.parse_daily_sales([TWO_DAYS], "two days.pdf")
+    plums = [r for r in rows if r.consignment_id == 118822602]
+    assert [(r.date_received, r.last_sale, r.sales_total) for r in plums] == [
+        (date(2026, 9, 17), date(2026, 9, 17), 240.0)]
+
+
+def test_the_days_add_up_to_the_report():
+    rows = daily_sales.parse_daily_sales([TWO_DAYS], "two days.pdf")
+    assert round(sum(r.sales_total for r in rows), 2) == 5990.0

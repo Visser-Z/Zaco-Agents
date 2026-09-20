@@ -112,30 +112,36 @@ _LINE_WRAPPED = re.compile(
     r"[ \t]*\d{5,}\s+(?P<delivered>\d+)\s+(?P<sold>-?\d+)\s+R\s*(?P<total>-?[\d,]+\.\d{2})",
     re.M,
 )
-# Inline: a line number, then everything on one line.
+# Inline: everything on one line, usually behind its line number.
 #   01    GRAPES THOMPSON SEEDLESS CLASS 1 NO SIZE PUNNET 5.00 kg 10 10 R 4000.00
 # The product itself contains numbers ("5.00 kg", "500 gms"), so the name is
 # lazy and the three numeric fields are anchored to the end of the line.
-_LINE_INLINE = re.compile(
-    r"^[ \t]*\d{1,3}[ \t]+(?P<product>[A-Z].*?)[ \t]+"
-    r"(?P<delivered>\d+)[ \t]+(?P<sold>-?\d+)[ \t]+R[ \t]*(?P<total>-?[\d,]+\.\d{2})[ \t]*$",
-    re.M,
-)
+#
 # A PDF wraps a commodity onto one line or two depending on how long the name
 # is, so a single block can contain both shapes -- and a name that fits stays
 # inline with or without the FMS id in front of it. Whichever produced the
 # layout, the numbers are the last three fields on the line.
 _LINE_INLINE_ANY = re.compile(
-    # The prefix is either a short line number ("01") or the FMS id
-    # ("6385669"), and on some rows there is none at all.
-    r"^[ \t]*(?:\d{1,8}[ \t]+)?(?P<product>[A-Z][A-Za-z0-9 ,.()/'-]*?)[ \t]+"
+    # The leading token is told apart by width: one or two digits is the Line
+    # No, which is the number that pairs a payment line with its consignment;
+    # anything longer is the FMS id printed in the same column by the wrapped
+    # layout ("6385669"). On some rows there is no prefix at all.
+    r"^[ \t]*(?:(?P<line_no>\d{1,2})[ \t]+|\d{3,8}[ \t]+)?"
+    r"(?P<product>[A-Z][A-Za-z0-9 ,.()/'-]*?)[ \t]+"
     r"(?P<delivered>\d+)[ \t]+(?P<sold>-?\d+)[ \t]+R[ \t]*(?P<total>-?[\d,]+\.\d{2})[ \t]*$",
     re.M,
 )
 
 
 def _as_line(m: re.Match) -> dict:
+    # Line numbers are sparse -- one real block runs 1, 2, 4, 5 with no 3 -- so
+    # the number is read off the line or left unknown, never counted out by
+    # position. The wrapped layout prints the FMS id in that column and no line
+    # number at all, so those lines have none to give.
+    groups = m.groupdict()
+    line_no = groups.get("line_no")
     return {
+        "line_no": int(line_no) if line_no else None,
         "product": " ".join(m.group("product").split()),
         "delivered": int(m.group("delivered")),
         "sold": int(m.group("sold")),
@@ -230,6 +236,10 @@ def parse_payment_details(pages: list[str], filename: str) -> list[dict]:
         out.append(
             {
                 **destination(h.group("acc")),
+                # The FMS id: system-generated, one per delivery, and stable
+                # across every account sale that delivery is ever paid on. It
+                # was being captured and thrown away.
+                "fms_id": h.group("fms"),
                 # Kept for audit only. It is operator-entered free text: one ref
                 # covers several deliveries, and it is sometimes a date or a
                 # single letter, so nothing may join on it.

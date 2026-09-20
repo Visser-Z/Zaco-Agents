@@ -333,3 +333,49 @@ def test_an_unknown_prefix_is_never_guessed_at():
 def test_a_tshwane_block_still_reads_as_farmers_trust():
     assert all(r["market_agent"] == "Farmers Trust" for r in _recs())
     assert all(r["market"] == "TSHWANE MARKET" for r in _recs())
+
+
+# --- the FMS id and the line numbers -------------------------------------
+
+def test_every_record_carries_its_fms_id():
+    """One per delivery, stable across every account sale it is paid on. It
+    was captured by the header pattern and thrown away."""
+    assert [r["fms_id"] for r in _n_ref()] == ["743012", "743396"]
+    assert all(r["fms_id"] for r in _recs())
+
+
+def test_inline_lines_carry_their_line_number():
+    first = _inline()[0]
+    assert [l["line_no"] for l in first["lines"]] == [1, 2, 4]
+
+
+def test_the_fms_id_in_the_line_number_column_is_not_a_line_number():
+    """The wrapped layout prints the FMS id where the Line No goes. Read as a
+    line number it would pair the payment with the wrong consignment."""
+    rec = next(r for r in pdd.parse_payment_details([MIXED], "m.pdf")
+               if r["stm_no"] == 5650429)
+    assert [l["line_no"] for l in rec["lines"]] == [None, None, None]
+    assert [l["product"][:11] for l in rec["lines"]] == [
+        "NECTARINES ", "GRANADILLAS", "GRAPES STAR"]
+
+
+SPARSE = """\
+    Report:   Payment Details
+     743401 20026*14643 PRE*BT*400118 2026-09-15 R 9,860.40 R 1,451.86 R 217.74 R 11,530.00 EFT
+     Line No              Commodity                Delivered Sold     Sales Total
+    1     GRAPES OTHER WHITE VARIETIES CLASS 2 NO SIZE PUNNET 5.00 kg 120 20 R 700.00
+    2     GRAPES CRIMSON SEEDLESS CLASS 2 NO SIZE PUNNET 5.00 kg 240 96 R 4,830.00
+    4     PLUMS OTHER CLASS 2 LARGE ECONOMIC PACK 8.00 kg 57 30 R 4,000.00
+    5     NECTARINES SKYE CLASS 2 MEDIUM CARTON 8.00 kg 40 20 R 2,000.00
+"""
+
+
+def test_line_numbers_are_read_not_counted():
+    """Sparse by nature: this block runs 1, 2, 4, 5 with no line 3. Numbering
+    the lines by position would pair every line after the gap with the wrong
+    consignment. (Shape and numbering from the September export; the amounts
+    here are illustrative.)"""
+    rec = pdd.parse_payment_details([SPARSE], "sparse.pdf")[0]
+    assert [l["line_no"] for l in rec["lines"]] == [1, 2, 4, 5]
+    assert rec["fms_id"] == "743401"
+    assert [l["line_no"] for l in rec["lines"]] != [1, 2, 3, 4]

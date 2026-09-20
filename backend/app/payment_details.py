@@ -169,17 +169,57 @@ def _num(token: str) -> float:
     return float(token.replace(",", "").replace(" ", ""))
 
 
+# Where a payment came from, read off the AccSale Number's own prefix.
+#
+# The headings in the report cannot answer this. Most of them carry no market
+# at all ("Growfresh Port Natal (Dbn)", "Subtropico (Jhb)"), and the agent is
+# spelled differently from the sales report for the same agency ("Growfresh
+# Port Natal" there, "Grow Port Natal" here), so matching header text is
+# unfixable in principle. The AccSale prefix is system-generated and exact.
+#
+# Keyed on the first two segments, and the names are the sales report's
+# spellings so that a market means the same thing on both sides of the book.
+# Two markets share the agent Subtropico, which is why nothing may ever group
+# on the agent name alone.
+DESTINATIONS = {
+    ("DUR", "13"): ("DUR", "GPN", "DURBAN MARKET", "Grow Port Natal"),
+    ("JOH", "MAR"): ("JOH", "MAR", "JOBURG MKT - BR / MAR", "Grow Marco"),
+    ("JOH", "SUB"): ("JOH", "SUB", "JOBURG MKT - TFRESH", "Subtropico"),
+    ("SPR", "SUB"): ("SPR", "SUB", "SPRINGS MARKET", "Subtropico"),
+    ("PRE", "BT"): ("PRE", "BT", "TSHWANE MARKET", "Farmers Trust"),
+}
+
+
+def destination(accsale: str) -> dict:
+    """The market and agent an account sale belongs to, from its prefix.
+
+    An unrecognised prefix is not guessed at and never falls back to the
+    heading above the block: the record says plainly that it does not know,
+    carries the prefix it saw, and is quarantined rather than filed somewhere
+    wrong. A payment under the wrong agent is worse than one nobody has placed.
+    """
+    parts = str(accsale or "").split("*")
+    prefix = tuple(parts[:2])
+    known = DESTINATIONS.get(prefix)
+    if known is None:
+        return {"market_code": None, "agent_code": None, "market": None,
+                "market_agent": None, "unknown_prefix": "*".join(prefix)}
+    market_code, agent_code, market, agent = known
+    return {"market_code": market_code, "agent_code": agent_code,
+            "market": market, "market_agent": agent, "unknown_prefix": None}
+
+
 def parse_payment_details(pages: list[str], filename: str) -> list[dict]:
     """One record per account-sale block, with its commodity lines.
 
     Each record::
 
-        {market_agent, supplier_ref, dn, accsale, stm_no, date,
+        {market_code, agent_code, market, market_agent, unknown_prefix,
+         supplier_ref, dn, accsale, stm_no, date,
          nett, gross, deductions, vat,
          lines: [{product, delivered, sold, sales_total}, ...]}
     """
     text = "\n".join(pages)
-    agent = _current_agent(text)
 
     heads = list(_HEADER.finditer(text))
     bounds = [m.start() for m in heads] + [len(text)]
@@ -189,7 +229,10 @@ def parse_payment_details(pages: list[str], filename: str) -> list[dict]:
         lines = _commodity_lines(block)
         out.append(
             {
-                "market_agent": _agent_before(text, h.start(), agent),
+                **destination(h.group("acc")),
+                # Kept for audit only. It is operator-entered free text: one ref
+                # covers several deliveries, and it is sometimes a date or a
+                # single letter, so nothing may join on it.
                 "supplier_ref": h.group("ref").strip(),
                 "dn": ref_to_dn(h.group("ref")),
                 "accsale": h.group("acc"),
@@ -203,20 +246,3 @@ def parse_payment_details(pages: list[str], filename: str) -> list[dict]:
             }
         )
     return out
-
-
-# The report groups blocks under a "MARKET   Agent (Pre)" heading; keep the
-# nearest one above each block, so a row knows which agent it belongs to.
-_AGENT = re.compile(
-    r"^\s*[A-Z][A-Z0-9 /.\-]*?\s+([A-Z][a-z][\w .'&-]*?)\s*\([^)]*\)\s*$", re.M
-)
-
-
-def _current_agent(text: str) -> str | None:
-    m = _AGENT.search(text)
-    return m.group(1).strip() if m else None
-
-
-def _agent_before(text: str, pos: int, default: str | None) -> str | None:
-    matches = [m.group(1).strip() for m in _AGENT.finditer(text, 0, pos)]
-    return matches[-1] if matches else default

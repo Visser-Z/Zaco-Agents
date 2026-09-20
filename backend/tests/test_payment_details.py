@@ -292,3 +292,44 @@ def test_both_september_payments_are_read():
     assert [r["accsale"] for r in recs] == ["DUR*13*201869", "DUR*13*202568"]
     assert round(sum(r["gross"] for r in recs), 2) == 157740.00
     assert round(sum(r["nett"] for r in recs), 2) == 134834.44
+
+
+# --- market and agent from the AccSale prefix ----------------------------
+
+def test_the_market_comes_from_the_accsale_not_the_heading():
+    """The heading above this block says "Growfresh Port Natal (Dbn)": no
+    market at all, and an agency spelled differently from the sales report.
+    The prefix DUR*13* answers both, exactly and in the sales report's own
+    words, so the two sides of the book agree."""
+    rec = next(r for r in _n_ref() if r["accsale"] == "DUR*13*202568")
+    assert (rec["market_code"], rec["agent_code"]) == ("DUR", "GPN")
+    assert rec["market"] == "DURBAN MARKET"
+    assert rec["market_agent"] == "Grow Port Natal"
+
+
+def test_ref_14576_files_under_joburg_tfresh_not_springs():
+    """Subtropico sells at Joburg TFresh and at Springs, so the agent name
+    alone cannot say which market a payment belongs to."""
+    rec = next(r for r in pdd.parse_payment_details([MIXED], "m.pdf")
+               if r["supplier_ref"] == "20026*14576")
+    assert (rec["market_code"], rec["agent_code"]) == ("JOH", "SUB")
+    assert rec["market"] == "JOBURG MKT - TFRESH"
+
+
+def test_the_two_subtropico_markets_are_told_apart():
+    assert pdd.destination("JOH*SUB*5650429/1")["market"] == "JOBURG MKT - TFRESH"
+    assert pdd.destination("SPR*SUB*46424")["market"] == "SPRINGS MARKET"
+    assert {pdd.destination(a)["market_agent"] for a in
+            ("JOH*SUB*5650429/1", "SPR*SUB*46424")} == {"Subtropico"}
+
+
+def test_an_unknown_prefix_is_never_guessed_at():
+    """Filing a payment under the wrong agent is worse than not placing it."""
+    out = pdd.destination("XXX*ZZ*12345")
+    assert out["market_code"] is None and out["market_agent"] is None
+    assert out["unknown_prefix"] == "XXX*ZZ"
+
+
+def test_a_tshwane_block_still_reads_as_farmers_trust():
+    assert all(r["market_agent"] == "Farmers Trust" for r in _recs())
+    assert all(r["market"] == "TSHWANE MARKET" for r in _recs())

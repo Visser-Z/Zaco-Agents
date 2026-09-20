@@ -1,0 +1,19 @@
+    Consignment Reports                                Zaco Agents (Pty) Ltd (20026)
+    Report:   Payment Details                               Run Date: 2026/09/20 08:12:44
+    Market:   ALL
+    Agent:    ALL
+    Date Range: 2026/09/01 - 2026/09/20
+
+    Growfresh Port Natal (Dbn)
+     FMS ID  Supplier Ref AccSale Number Date
+                                        Payments Deductions Vat  Payments Ref
+     743012 20026*4979691 DUR*13*201869 2026-09-02 R 26646.20 R 3924.17 R 588.63 R 31160.00 EFT
+     Line No              Commodity                Delivered Sold     Sales Total
+    1 GRAPES SUGRAONE CLASS 1 NO SIZE PUNNET 5.00 kg 360 82 R 31160.00
+     FMS ID  Supplier Ref AccSale Number Date
+                                        Payments Deductions Vat  Payments Ref
+     743396 20026*N DUR*13*202568 2026-09-09 R 108188.24 R 15992.50 R 2399.26 R 126580.00 EFT
+     Line No              Commodity                Delivered Sold     Sales Total
+    1 GRAPES SWEET CELEBRATION CLASS 1 NO SIZE PUNNET 5.00 kg 336 189 R 71100.00
+    2 GRAPES SUGRAONE CLASS 1 NO SIZE PUNNET 5.00 kg 360 146 R 55480.00
+    Grand Total                          R 134834.44 R 19916.67 R 2987.89 R 157740.00

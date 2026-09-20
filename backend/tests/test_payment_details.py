@@ -253,3 +253,42 @@ def test_every_record_accounts_for_its_own_gross():
 """
     rec = pdd.parse_payment_details([text], "pay.pdf")[0]
     assert sum(l["sales_total"] for l in rec["lines"]) == rec["gross"] == 7200.00
+
+
+# --- a Supplier Ref that is not a number ---------------------------------
+
+N_REF = (FIX / "payment_details_sept_n_ref.txt").read_text(encoding="utf-8")
+
+
+def _n_ref():
+    return pdd.parse_payment_details([N_REF], "sept.pdf")
+
+
+def test_a_payment_whose_ref_carries_a_letter_is_still_read():
+    """Durban delivery 1855491Z is filed under Supplier Ref "20026*N". The ref
+    pattern admitted only digits, spaces, ampersands and slashes, so the header
+    never matched: R126 580,00 of account sale DUR*13*202568 was dropped and its
+    commodity lines were absorbed into the payment above it."""
+    by_acc = {r["accsale"]: r for r in _n_ref()}
+    assert "DUR*13*202568" in by_acc, "the payment with an N ref was dropped"
+    rec = by_acc["DUR*13*202568"]
+    assert rec["nett"] == 108188.24
+    assert rec["gross"] == 126580.00
+    assert rec["supplier_ref"] == "20026*N"
+    assert len(rec["lines"]) == 2
+    assert round(sum(l["sales_total"] for l in rec["lines"]), 2) == rec["gross"]
+
+
+def test_the_payment_above_it_does_not_absorb_its_lines():
+    """The absorption is the quiet half of the fault: the record above keeps
+    its own gross while carrying lines belonging to a payment that vanished."""
+    above = next(r for r in _n_ref() if r["accsale"] == "DUR*13*201869")
+    assert len(above["lines"]) == 1
+    assert round(sum(l["sales_total"] for l in above["lines"]), 2) == above["gross"] == 31160.00
+
+
+def test_both_september_payments_are_read():
+    recs = _n_ref()
+    assert [r["accsale"] for r in recs] == ["DUR*13*201869", "DUR*13*202568"]
+    assert round(sum(r["gross"] for r in recs), 2) == 157740.00
+    assert round(sum(r["nett"] for r in recs), 2) == 134834.44

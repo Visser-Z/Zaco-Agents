@@ -1922,6 +1922,7 @@ function renderTracking() {
     ${(p.unmatched || []).length ? `<p class="trk-note warn">${p.unmatched.length} payment${p.unmatched.length === 1 ? "" : "s"} with no matching sale.</p>` : ""}
     ${(p.unattributed && p.unattributed.count) ? `<p class="trk-note">R ${fmt(p.unattributed.gross)} paid across ${p.unattributed.count} account sale${p.unattributed.count === 1 ? "" : "s"} with no product breakdown, so it can never match.</p>` : ""}
     ${(p.credits || []).length ? `<p class="trk-note">R ${fmt(-p.credit_value)} came back on ${p.credits.length} line${p.credits.length === 1 ? "" : "s"} as returns booked after the sale they reverse — nothing to collect, already taken off the total.</p>` : ""}
+    ${(p.reversals || []).length ? `<p class="trk-note warn" title="${esc(p.reversals.map(r => r.accsale + " · R " + fmt(r.gross)).join(", "))}">R ${fmt(-p.reversal_value)} clawed back by the agent on ${p.reversals.length} account sale${p.reversals.length === 1 ? "" : "s"}. Not counted above; with it, still to come would be R ${fmt(p.still_to_come_with_reversals)}.</p>` : ""}
     ${closedList(p.closed || [], "owed", r => "R " + fmt(r.owed))}`;
 
   const owedBlock = owed.length

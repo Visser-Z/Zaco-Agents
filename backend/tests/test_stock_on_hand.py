@@ -95,3 +95,36 @@ def test_a_market_groups_its_stock_by_delivery_note():
     # Inside a note, oldest first; the note is as old as its oldest line.
     assert [r["product"] for r in market["dns"][0]["lines"]] == ["PLUMS B", "NECTARINES A"]
     assert market["dns"][0]["arrived"] == "2026-08-20"
+
+
+def test_the_market_says_what_is_left():
+    """Qty Avail from the latest report is the stock on hand."""
+    sales = [_row(1, "GRAPES A", "DURBAN MARKET", 480, 100, "2026-09-10", "2026-09-15",
+                  qty_amended=360, qty_avail=120),
+             _row(1, "GRAPES A", "DURBAN MARKET", 480, 50, "2026-09-10", "2026-09-17",
+                  qty_amended=360, qty_avail=31)]
+    [line] = tracking.stock_on_hand(sales, TODAY)["markets"][0]["lines"]
+    assert (line["cartons_left"], line["cartons_sent"]) == (31, 360)
+
+
+def test_a_consignment_the_market_has_cleared_is_not_on_hand():
+    """Sent 480, amended to 360, all sold: Qty Avail 0. Worked out from what
+    was sent it would have kept 120 cartons on hand for ever."""
+    sales = [_row(1, "GRAPES A", "DURBAN MARKET", 480, 360, "2026-09-10", "2026-09-18",
+                  qty_amended=360, qty_avail=0)]
+    assert tracking.stock_on_hand(sales, TODAY)["items"] == 0
+
+
+def test_without_qty_avail_it_is_what_was_booked_less_what_sold():
+    sales = [_row(1, "GRAPES A", "DURBAN MARKET", 480, 300, "2026-09-10", qty_amended=360)]
+    [line] = tracking.stock_on_hand(sales, TODAY)["markets"][0]["lines"]
+    assert line["cartons_left"] == 60
+
+
+def test_a_paid_consignment_keeps_its_stock():
+    """118512402Z is settled and still holds 104 cartons."""
+    sales = [_row(2, "GRAPES B", "TSHWANE MARKET", 200, 96, "2026-09-10", qty_avail=104)]
+    pays = [{"accsale": "PRE*BT*5", "dn": 14002, "date": "2026-09-12", "gross": 9600.0,
+             "nett": 8160.0, "lines": [{"product": "GRAPES B", "sales_total": 9600.0}]}]
+    out = tracking.compute(sales, pays, today=TODAY)
+    assert out["stock_on_hand"]["cartons_left"] == 104

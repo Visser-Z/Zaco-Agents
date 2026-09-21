@@ -20,7 +20,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from itertools import combinations
 
-from . import analytics, integrity, reconcile
+from . import analytics, integrity, payment_details, reconcile
 
 # --- payments -------------------------------------------------------------
 
@@ -35,6 +35,27 @@ def item_ref(row: dict) -> str:
     if row.get("reference"):
         return f"ref:{row['reference']}"
     return f"{row.get('dn')}:{reconcile.normalise_product(row.get('product'))}"
+
+
+def line_ref(entry: dict) -> str:
+    """The name a line is closed under: its consignment where it has one.
+
+    Two consignments can share a delivery note and commodity, and closing one
+    must not close the other, so the consignment is the name. Lines closed
+    before this still match through ``is_closed``.
+    """
+    cid = entry.get("consignment_id")
+    return f"c:{cid}" if cid else item_ref(entry)
+
+
+def is_closed(kind: str, entry: dict, closed) -> bool:
+    """Whether a line is closed, under its name now or the one it had before.
+
+    Lines used to be named by delivery note and commodity. A line closed then
+    stays closed rather than reappearing because its name changed.
+    """
+    return (closed_key(kind, line_ref(entry)) in closed
+            or closed_key(kind, item_ref(entry)) in closed)
 
 
 # A closed item is named by its kind AND its ref, exactly as the dismissals
@@ -93,20 +114,66 @@ def _by_date(item: dict) -> tuple:
     return (item["date"] is None, item["date"] or "")
 
 
-def _payment_lines(payments: list[dict]) -> dict[tuple, list[dict]]:
-    """Every commodity line of every payment, keyed the way sales are matched.
+def _placed(payments: list[dict]) -> list[dict]:
+    """Payments carrying the market their AccSale prefix names.
+
+    Saved payments hold only the agent's name, and two markets share the
+    agent Subtropico, so the market is read off the AccSale Number again here.
+    """
+    out = []
+    for rec in payments:
+        if not rec.get("market") and rec.get("accsale"):
+            where_to = payment_details.destination(rec["accsale"])
+            rec = {**rec, "market": where_to["market"],
+                   "market_code": where_to["market_code"], "agent_code": where_to["agent_code"]}
+        out.append(rec)
+    return out
+
+
+def is_reversal(rec: dict) -> bool:
+    """An account sale worth less than nothing: the agent clawing money back.
+
+    PRE*BT*400352 is one: gross minus R7 090, nett nil. It is not a payment,
+    and netting it into what was paid would quietly mark sales as owed that the
+    operator has in fact been paid for, then clawed back from. It is kept apart
+    and reported on its own.
+    """
+    return reconcile._num(rec.get("gross")) < 0
+
+
+def _payment_lines(payments: list[dict], sales: list[dict]):
+    """Every commodity line of every payment, keyed to what it paid for.
+
+    Where the payment's FMS id is tied to its delivery (see
+    ``reconcile.bind_deliveries``) a line is keyed to its exact consignment.
+    Otherwise it falls back to the delivery note and commodity, the match used
+    before the FMS id was read -- which is also what every payment saved before
+    then still gets, until its report is dropped again.
 
     Each line carries its share of the payment's Nett, split by value exactly
     as ``reconcile.aggregate_payment`` splits it, so what settles a sale can be
     reported as the money that actually reached Zaco.
 
     A negative line (a credit the agent booked) cannot pay for anything, so it
-    comes off the latest line of the same commodity paid on or before it. What
-    each commodity was paid in total is unchanged; it is only placed.
+    comes off the latest line of the same key paid on or before it. What each
+    was paid in total is unchanged; it is only placed. A whole account sale
+    that is negative is a reversal, not a credit line, and is returned apart.
     """
+    payments = _placed(payments)
+    bound = reconcile.bind_deliveries(sales, payments)
+    products_of: dict[int, dict[int, str]] = defaultdict(dict)
+    for row in sales:
+        if (delivery := reconcile.delivery_of(row.get("consignment_id"))) is not None:
+            products_of[delivery][int(row["consignment_id"]) % 100] = \
+                reconcile.normalise_product(row.get("product"))
+
     lines: dict[tuple, list[dict]] = defaultdict(list)
     credits: list[tuple[tuple, dict]] = []
+    reversals: list[dict] = []
     for rec in payments:
+        if is_reversal(rec):
+            reversals.append(rec)
+            continue
         rec_lines = rec.get("lines") or []
         base = (sum(reconcile._num(l.get("sales_total")) for l in rec_lines)
                 or reconcile._num(rec.get("gross")))
@@ -116,9 +183,12 @@ def _payment_lines(payments: list[dict]) -> dict[tuple, list[dict]]:
             gross = reconcile._num(l.get("sales_total"))
             if not gross:
                 continue
+            cid = reconcile.line_consignment(rec, l, bound, products_of)
+            key = (("c", cid) if cid is not None
+                   else ("k", reconcile._key(rec.get("dn"), l.get("product"))))
             line = {"gross": gross, "left": gross, "date": day,
-                    "rate": nett / base if base else 0.0}
-            key = reconcile._key(rec.get("dn"), l.get("product"))
+                    "rate": nett / base if base else 0.0,
+                    "dn": rec.get("dn"), "product": l.get("product")}
             if gross < 0:
                 credits.append((key, line))
             else:
@@ -134,15 +204,25 @@ def _payment_lines(payments: list[dict]) -> dict[tuple, list[dict]]:
             credit["left"] += take
             if credit["left"] >= -0.005:
                 break
-    return lines
+    return lines, reversals, bound
+
+
+def line_key(row: dict) -> tuple:
+    """What a sale is grouped and reported under: its consignment where it has
+    one, otherwise the delivery note and commodity it always was."""
+    cid = row.get("consignment_id")
+    if cid:
+        return ("c", int(cid))
+    return ("k", reconcile._key(row.get("dn"), row.get("product")))
 
 
 def _allocate(sales: list[dict], payments: list[dict]):
     """Settle each payment against the sale it was actually for.
 
-    The Daily Sales PDF prints no reference joining a sale to its payment, so
-    the match is made on delivery note and commodity and then placed on the
-    right sale in three passes:
+    A payment line tied to its consignment through the FMS id settles that
+    consignment's own sales. The rest settle the sales of the delivery note and
+    commodity, as they always did, from whatever those sales still have owing.
+    Either way the money is placed on individual sales in three passes:
 
       1. Exact. One to three payment lines that add up to one sale's value to
          the cent, paid during that sale's run or within three weeks after it,
@@ -153,39 +233,43 @@ def _allocate(sales: list[dict], payments: list[dict]):
       3. Anything still left goes to any unpaid sale, oldest first, so a date
          that is out by a day never turns a real payment into credit.
 
-    This replaced pooling a consignment's payments and paying its sales off
-    oldest first, which moved shortfalls between months. On DN 14013 the April
-    strawberry runs were R805 short while June's R19 630 was paid to the cent
-    on 5 and 8 June, and June carried April's R805 as its own.
+    Value never decides WHETHER a line matches -- the two reports legitimately
+    disagree on what a consignment sold -- only how much of a sale it settles.
 
-    Returns (owed per sale, Nett paid per sale, leftover credit per
-    consignment, a label for each consignment), sales keyed by id.
+    Returns (owed per sale, Nett paid per sale, leftover credit per key, a label
+    per key, and a dict of what else was found: the reversals, the Gross paid
+    per sale, the FMS bindings and which keys had sales behind them).
     """
-    lines = _payment_lines(payments)
-    groups: dict[tuple, list[dict]] = defaultdict(list)
+    lines, reversals, bound = _payment_lines(payments, sales)
+    by_consignment: dict[tuple, list[dict]] = defaultdict(list)
+    by_ref: dict[tuple, list[dict]] = defaultdict(list)
     label: dict[tuple, dict] = {}
     for row in sales:
-        key = reconcile._key(row.get("dn"), row.get("product"))
-        groups[key].append(row)
-        label.setdefault(key, {"dn": row.get("dn"), "product": row.get("product")})
+        who = {"dn": row.get("dn"), "product": row.get("product")}
+        if row.get("consignment_id"):
+            key = ("c", int(row["consignment_id"]))
+            by_consignment[key].append(row)
+            label.setdefault(key, who)
+        key = ("k", reconcile._key(row.get("dn"), row.get("product")))
+        by_ref[key].append(row)
+        label.setdefault(key, who)
 
-    owed: dict[int, float] = {}
-    paid_nett: dict[int, float] = {}
-    credit: dict[tuple, float] = {}
-    for key, rows in groups.items():
+    # Returns are worth less than nothing and are owed as they stand.
+    left = {id(r): max(reconcile._num(r.get("sales_total")), 0.0) for r in sales}
+    nett = {id(r): 0.0 for r in sales}
+    gross_paid = {id(r): 0.0 for r in sales}
+
+    def pay(row: dict, line: dict, amount: float) -> None:
+        line["left"] -= amount
+        left[id(row)] -= amount
+        nett[id(row)] += amount * line["rate"]
+        gross_paid[id(row)] += amount
+
+    def settle_pool(rows: list[dict], pool: list[dict]) -> None:
         # A sale with no date cannot be placed in the order, so it settles last
         # rather than taking credit from a sale known to be older.
         rows = sorted(rows, key=lambda r: (selling_day(r) is None, selling_day(r) or ""))
-        pool = sorted(lines.get(key, []), key=_by_date)
-        # Returns are worth less than nothing and are owed as they stand.
-        left = {id(r): max(reconcile._num(r.get("sales_total")), 0.0) for r in rows}
-        nett = {id(r): 0.0 for r in rows}
-
-        def pay(row: dict, line: dict, amount: float) -> None:
-            line["left"] -= amount
-            left[id(row)] -= amount
-            nett[id(row)] += amount * line["rate"]
-
+        pool = sorted(pool, key=_by_date)
         for row in rows:
             start, end = _started(row), selling_day(row)
             if left[id(row)] <= 0 or not start or not end:
@@ -199,7 +283,6 @@ def _allocate(sales: list[dict], payments: list[dict]):
                           if abs(sum(l["left"] for l in combo) - left[id(row)]) < 0.005), ())
             for line in match:
                 pay(row, line, line["left"])
-
         for dated_only in (True, False):
             for line in pool:
                 for row in rows:
@@ -212,27 +295,44 @@ def _allocate(sales: list[dict], payments: list[dict]):
                         continue
                     pay(row, line, min(line["left"], left[id(row)]))
 
-        for row in rows:
-            value = reconcile._num(row.get("sales_total"))
-            owed[id(row)] = round(left[id(row)] if value > 0 else value, 2)
-            paid_nett[id(row)] = round(nett[id(row)], 2)
+    # The exact ties first, then the fallback on what is still owing.
+    for key, rows in by_consignment.items():
+        if key in lines:
+            settle_pool(rows, lines[key])
+    for key, rows in by_ref.items():
+        if key in lines:
+            settle_pool(rows, lines[key])
 
+    owed: dict[int, float] = {}
+    paid_nett: dict[int, float] = {}
+    for row in sales:
+        value = reconcile._num(row.get("sales_total"))
+        owed[id(row)] = round(left[id(row)] if value > 0 else value, 2)
+        paid_nett[id(row)] = round(nett[id(row)], 2)
+
+    credit: dict[tuple, float] = {}
     for key, pool in lines.items():
-        label.setdefault(key, {"dn": key[0], "product": key[1]})
+        if key not in label:
+            first = pool[0] if pool else {}
+            label[key] = {"dn": first.get("dn"), "product": first.get("product")}
         if (spare := round(sum(l["left"] for l in pool), 2)) > 0.01:
             credit[key] = spare
-    return owed, paid_nett, credit, label
+    extra = {
+        "reversals": reversals,
+        "gross_paid": {k: round(v, 2) for k, v in gross_paid.items()},
+        "bound": bound,
+        "sold_keys": set(by_consignment) | set(by_ref),
+    }
+    return owed, paid_nett, credit, label, extra
 
 
 def settle(sales: list[dict], payments: list[dict]) -> tuple[dict, dict, dict]:
     """What each individual sale still has owing on it.
 
     See ``_allocate`` for how a payment finds its sale. Returns (owed per sale
-    by id, leftover credit per consignment, a label for each consignment),
-    keyed the way ``reconcile`` matches, so a consignment means the same thing
-    here as it does on the payment panel.
+    by id, leftover credit per key, a label for each key).
     """
-    owed, _, credit, label = _allocate(sales, payments)
+    owed, _, credit, label, _ = _allocate(sales, payments)
     return owed, credit, label
 
 
@@ -288,8 +388,7 @@ def payment_status(sales: list[dict], payments: list[dict],
     """
     sales = valued(sales)
 
-    owed_by_row, paid_by_row, credit, label = _allocate(sales, payments)
-    paid = reconcile.aggregate_payment(payments)
+    owed_by_row, paid_by_row, credit, label, extra = _allocate(sales, payments)
 
     # What the agent paid in this window, by the day it arrived. Not the Paid
     # figure: a sale on the 31st is paid on the 5th, so counting by arrival
@@ -301,7 +400,8 @@ def payment_status(sales: list[dict], payments: list[dict],
     ] if (lo or hi) else payments
     paid_in_window = round(sum(float(p.get("nett") or 0) for p in in_window), 2)
 
-    # The sales this view reports, grouped the way payments match them.
+    # The sales this view reports, one line per consignment: the thing a
+    # payment settles and the thing the operator chases.
     scoped: dict[tuple, list[dict]] = defaultdict(list)
     for row in sales:
         day = selling_day(row)
@@ -309,7 +409,7 @@ def payment_status(sales: list[dict], payments: list[dict],
             continue
         if (lo and day < lo) or (hi and day > hi):
             continue
-        scoped[reconcile._key(row.get("dn"), row.get("product"))].append(row)
+        scoped[line_key(row)].append(row)
 
     # Paid means paid FOR this window's sales, whenever the money came in, so
     # the month the fruit sold in is the month that shows it paid.
@@ -326,13 +426,14 @@ def payment_status(sales: list[dict], payments: list[dict],
         entry = {
             "dn": label[key]["dn"],
             "product": label[key]["product"],
+            "consignment_id": key[1] if key[0] == "c" else None,
             "daily_total": round(sum(reconcile._num(r.get("sales_total")) for r in rows), 2),
-            "payment_gross": round(paid.get(key, {}).get("gross", 0.0), 2),
-            "payment_nett": round(paid.get(key, {}).get("nett", 0.0), 2),
+            "payment_gross": round(sum(extra["gross_paid"][id(r)] for r in rows), 2),
+            "payment_nett": round(sum(paid_by_row[id(r)] for r in rows), 2),
             "date": min(days) if days else None,
             **where(rows),
         }
-        entry["ref"] = item_ref(entry)
+        entry["ref"] = line_ref(entry)
         if owed == 0:
             matched += 1
             continue
@@ -341,7 +442,7 @@ def payment_status(sales: list[dict], payments: list[dict],
                            else "over" if entry["payment_gross"] else "unpaid")
         # A closed line stays visible on its own list with its value, so closing
         # can never quietly shrink the exposure.
-        if closed_key("owed", entry["ref"]) in closed:
+        if is_closed("owed", entry, closed):
             closed_rows.append(entry)
             continue
         # A month can come out negative on a consignment: a return booked in
@@ -363,21 +464,36 @@ def payment_status(sales: list[dict], payments: list[dict],
     # reported whichever window is open.
     overpaid_rows = [
         {"dn": label[k]["dn"], "product": label[k]["product"], "overpaid": v}
-        for k, v in credit.items() if k in label
+        for k, v in credit.items() if k in extra["sold_keys"]
     ]
 
     # Payments the sales side cannot account for. Never dropped -- either a sale
     # not imported yet, or a mismatch to chase.
-    sold_keys = {reconcile._key(r.get("dn"), r.get("product")) for r in sales}
     unmatched = [
         {
             "dn": label[k]["dn"],
             "product": label[k]["product"],
-            "paid": round(v["gross"], 2),
+            "consignment_id": k[1] if k[0] == "c" else None,
+            "paid": v,
             "reason": "paid, nothing sold matches",
         }
-        for k, v in paid.items() if k not in sold_keys
+        for k, v in credit.items() if k not in extra["sold_keys"]
     ]
+
+    # Money the agent clawed back. Reported on its own rather than netted into
+    # what was paid.
+    # TODO(product decision): whether a reversal adds to what is outstanding.
+    # Ref 14587 reads R14 080 sold and R7 090 clawed back, so its exposure is
+    # either R14 080 (the default here) or R21 170 with the claw-back added.
+    # Both figures are in this payload; the dashboard shows the first.
+    reversals = [{
+        "accsale": r.get("accsale"), "dn": r.get("dn"), "date": r.get("date"),
+        "gross": round(reconcile._num(r.get("gross")), 2),
+        "nett": round(reconcile._num(r.get("nett")), 2),
+        "products": [l.get("product") for l in r.get("lines") or []],
+    } for r in extra["reversals"]
+        if not ((lo and str(r.get("date") or "")[:10] < lo)
+                or (hi and str(r.get("date") or "")[:10] > hi))]
     unattributed = reconcile.unattributed(payments)
 
     outstanding_rows.sort(key=lambda r: r["owed"], reverse=True)
@@ -408,6 +524,14 @@ def payment_status(sales: list[dict], payments: list[dict],
         # Closed lines and what they were worth, reported rather than dropped.
         "closed": sorted(closed_rows, key=lambda r: r["owed"], reverse=True),
         "closed_value": round(sum(r["owed"] for r in closed_rows), 2),
+        "reversals": reversals,
+        "reversal_value": round(sum(r["gross"] for r in reversals), 2),
+        # Outstanding with the claw-backs added, for the product decision above.
+        "still_to_come_with_reversals": round(
+            still_to_come - sum(r["gross"] for r in reversals), 2),
+        # How many payments are tied to their delivery by FMS id, so the screen
+        # can say how much of the matching is exact.
+        "fms_bound": len(extra["bound"]),
     }
 
 
@@ -737,8 +861,10 @@ def slow_stock(sales: list[dict], today: date | None = None,
         first = group[0]
         last_moved = max((d for r in group if (d := analytics._parse_date(r.get("last_sale")))), default=None)
         out.append({
-            "ref": item_ref({"dn": first.get("dn"),
+            "ref": line_ref({"consignment_id": first.get("consignment_id"),
+                             "dn": first.get("dn"),
                              "product": analytics.product_label(first)}),
+            "consignment_id": first.get("consignment_id"),
             "product": analytics.product_label(first),
             "dn": first.get("dn"),
             **where(group),
@@ -757,8 +883,8 @@ def slow_stock(sales: list[dict], today: date | None = None,
     if lo or hi:
         out = [r for r in out
                if not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)]
-    shut = [r for r in out if closed_key("slow", r["ref"]) in closed]
-    out = [r for r in out if closed_key("slow", r["ref"]) not in closed]
+    shut = [r for r in out if is_closed("slow", r, closed)]
+    out = [r for r in out if not is_closed("slow", r, closed)]
     counts = {t: sum(1 for r in out if r["tier"] == t) for t in ("watch", "slow", "dead")}
     return {"bands": bands, "counts": counts, "items": out[:50], "flagged": len(out),
             "closed": shut, "closed_count": len(shut)}
@@ -837,6 +963,31 @@ def _by_delivery_note(lines: list[dict]) -> list[dict]:
     return out
 
 
+def on_hand(group: list[dict]) -> tuple[float, float]:
+    """(cartons delivered, cartons still on the floor) for one consignment.
+
+    The market says what is left: every Daily Sales report prints Qty Avail,
+    the stock on the floor when it was run, so the latest report's figure is
+    the answer and nothing needs working out. Only where no report has said
+    is it derived, from what the market booked in (Qty Amended To) less what
+    sold, and failing that from what was sent. Working it out from Qty Sent
+    alone kept 120 cartons of Durban grapes on hand that the market had
+    amended away.
+
+    A consignment keeps its stock whatever its payments say: being paid for
+    what sold does not sell what is left.
+    """
+    booked = max((int(r["qty_amended"]) for r in group
+                  if r.get("qty_amended") is not None), default=None)
+    sent = float(booked) if booked is not None else analytics.cartons_sent(group)
+    said = [r for r in group if r.get("qty_avail") is not None]
+    if said:
+        latest = max(said, key=lambda r: (str(r.get("last_sale") or ""),
+                                          str(r.get("created_at") or "")))
+        return sent, float(latest["qty_avail"])
+    return sent, sent - sum(analytics.row_cartons(r) for r in group)
+
+
 def stock_on_hand(sales: list[dict], today: date | None = None,
                   closed: set[str] | frozenset[str] = frozenset(),
                   lo: str | None = None, hi: str | None = None) -> dict:
@@ -856,9 +1007,7 @@ def stock_on_hand(sales: list[dict], today: date | None = None,
     today = today or date.today()
     lines: list[dict] = []
     for group in analytics.group_consignments(sales):
-        sent = analytics.cartons_sent(group)
-        sold = sum(analytics.row_cartons(r) for r in group)
-        left = sent - sold
+        sent, left = on_hand(group)
         if sent <= 0 or left <= 0:
             continue
         arrived, basis = _arrival(group)
@@ -867,8 +1016,10 @@ def stock_on_hand(sales: list[dict], today: date | None = None,
         days = max((today - arrived).days, 0)
         first = group[0]
         lines.append({
-            "ref": item_ref({"dn": first.get("dn"),
+            "ref": line_ref({"consignment_id": first.get("consignment_id"),
+                             "dn": first.get("dn"),
                              "product": analytics.product_label(first)}),
+            "consignment_id": first.get("consignment_id"),
             "product": analytics.product_label(first),
             "dn": first.get("dn"),
             **where(group),
@@ -884,8 +1035,8 @@ def stock_on_hand(sales: list[dict], today: date | None = None,
     if lo or hi:
         lines = [r for r in lines
                  if not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)]
-    shut = [r for r in lines if closed_key("slow", r["ref"]) in closed]
-    lines = [r for r in lines if closed_key("slow", r["ref"]) not in closed]
+    shut = [r for r in lines if is_closed("slow", r, closed)]
+    lines = [r for r in lines if not is_closed("slow", r, closed)]
 
     markets: dict[str, dict] = {}
     for r in lines:
@@ -992,7 +1143,7 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
     # The days are settled on the same match, so what a day shows as paid and
     # owed agrees with Outstanding to the cent.
     filled = valued(sales)
-    owed_by_row, paid_by_row, _, _ = _allocate(filled, payments)
+    owed_by_row, paid_by_row, _, _, _ = _allocate(filled, payments)
     # The all-time figure rides alongside so a month is never mistaken for the
     # total exposure. The months do now add up to it.
     if lo or hi:

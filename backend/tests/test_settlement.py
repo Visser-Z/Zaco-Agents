@@ -259,14 +259,37 @@ def test_a_payment_cannot_pay_for_fruit_that_had_not_sold_yet():
     assert owed[id(sales[1])] == 500.0
 
 
-def test_a_credit_line_on_a_payment_comes_off_what_was_paid():
+def test_a_credit_line_inside_a_payment_comes_off_what_was_paid():
+    """PRE*BT*381695, from the live book: a R5 904,88 account sale carrying one
+    commodity line of minus R105,12. A credit inside a payment reduces what
+    that payment paid for the commodity."""
     product = "GRAPES CLASS 1 NO SIZE (PUNNET 5kg)"
     sales = [_run(20026, product, 1000.0, "2026-05-20", "2026-05-21")]
     payments = [_payment(20026, product, 1000.0, "2026-05-22"),
-                _payment(20026, product, -105.12, "2026-05-25")]
+                {"accsale": "PRE*BT*381695", "dn": 20026, "date": "2026-05-25",
+                 "gross": 894.88, "nett": 760.65,
+                 "lines": [{"product": "PLUMS", "sales_total": 1000.0},
+                           {"product": product, "sales_total": -105.12}]}]
     out = tracking.payment_status(sales, payments)
     assert out["still_to_come"] == 105.12
-    assert out["overpaid"] == []
+    assert out["reversals"] == []
+
+
+def test_a_whole_account_sale_below_nil_is_a_reversal_not_a_credit():
+    """PRE*BT*400352, gross minus R7 090 and nett nil, is the agent clawing
+    money back. Netted into what was paid it would read as sales never paid
+    for. It is reported on its own, and by default does not add to what is
+    outstanding: that choice is a product decision, and both figures are given."""
+    sales = [_run(14587, GRAPES, 14080.0, "2026-09-10", "2026-09-12")]
+    payments = [_payment(14587, GRAPES, 14080.0, "2026-09-15"),
+                {**_payment(14587, GRAPES, -7090.0, "2026-09-18", nett=0.0),
+                 "accsale": "PRE*BT*400352"}]
+    out = tracking.payment_status(sales, payments)
+    assert out["still_to_come"] == 0.0
+    assert [(r["accsale"], r["gross"], r["nett"]) for r in out["reversals"]] == [
+        ("PRE*BT*400352", -7090.0, 0.0)]
+    assert out["reversal_value"] == -7090.0
+    assert out["still_to_come_with_reversals"] == 7090.0
 
 
 def test_what_is_owed_is_grouped_by_the_market_that_owes_it():

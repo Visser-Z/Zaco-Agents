@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
+from . import payment_details
+
 MATCH_TOL = 0.01  # Rand; sales value should agree to the cent when reconciled.
 
 
@@ -294,6 +296,162 @@ def fill_netts(daily_rows: list[dict], payment_records: list[dict]) -> int:
             r["nett_total"] = round(_num(pay["nett"]) * (_num(r.get("sales_total")) / dtot), 2)
             filled += 1
     return filled
+
+
+# --- FMS id to delivery ---------------------------------------------------
+#
+# Supplier Ref cannot carry the join. It is operator-entered free text: in this
+# book 20 refs cover more than one delivery, and some are a date or the single
+# letter N. The payment report's FMS id is system-generated, one per delivery,
+# and the same on every account sale that delivery is ever paid on. It is not
+# the market's Delivery ID -- they come from different systems -- but the two
+# are one-to-one, and once a payment's FMS id is tied to its delivery, every
+# line of every account sale for it lands on an exact consignment:
+#
+#     consignment = delivery * 100 + line number    (1855491, 02 -> 185549102)
+#
+# The tie is worked out from the lines both reports carry: a payment line and
+# a consignment agree when they sit at the same market, under the same line
+# number, and sell the same product. It is recomputed from the saved history on
+# every read rather than stored, so it cannot go stale, and a delivery whose
+# sales were loaded after its payment binds as soon as they arrive.
+
+
+def delivery_of(consignment_id) -> int | None:
+    """The delivery a consignment came in on: its id less the line number."""
+    try:
+        c = int(consignment_id)
+    except (TypeError, ValueError):
+        return None
+    return c // 100 if c >= 100 else None
+
+
+def consignment_of(delivery_id: int, line_no: int) -> int:
+    return int(delivery_id) * 100 + int(line_no)
+
+
+def _degenerate_ref(dn) -> bool:
+    """A supplier ref that names no delivery: blank, a producer code echoed
+    back, a truncated stub. Such a ref cannot break a tie."""
+    try:
+        n = int(dn)
+    except (TypeError, ValueError):
+        return True
+    return n < 1000 or n == 20026
+
+
+def bind_deliveries(sales: list[dict], payments: list[dict]) -> dict[str, int]:
+    """Which delivery each payment's FMS id belongs to, where that can be told.
+
+    Evidence is pooled across every account sale carrying the FMS id, then
+    each delivery at the same market is scored by how many of those numbered
+    lines it holds with the same product. A delivery with a line number the
+    payment uses but a different product there is ruled out, and so is one
+    whose booked quantity (Qty Amended To) differs from the line's Delivered
+    figure where both are known: that is what tells two deliveries apart when
+    they sit under one ref and sell the same thing on the same line. The FMS id binds
+    to the best delivery when it holds two or more agreeing lines and nothing
+    else holds as many, or when it is the only delivery that fits at all.
+
+    A tie is broken by the supplier ref only where the ref actually names a
+    delivery, and never decides a match on its own. Anything still open is
+    left unbound, and its money falls back to the old supplier ref match
+    rather than being guessed onto a consignment.
+    """
+    # market -> delivery -> line -> products sold on it
+    held: dict[str, dict[int, dict[int, set[str]]]] = defaultdict(lambda: defaultdict(dict))
+    # consignment -> what the market booked in, where the report said
+    booked: dict[int, int] = {}
+    refs_of: dict[int, set] = defaultdict(set)
+    for row in sales:
+        cid = row.get("consignment_id")
+        delivery = delivery_of(cid)
+        market = (row.get("market") or "").strip()
+        if delivery is None or not market:
+            continue
+        line = int(cid) % 100
+        held[market][delivery].setdefault(line, set()).add(normalise_product(row.get("product")))
+        if row.get("qty_amended") is not None:
+            booked[int(cid)] = int(row["qty_amended"])
+        if row.get("dn") is not None:
+            refs_of[delivery].add(_norm_dn(row.get("dn")))
+
+    # fms -> (market, {(line, product)}, refs)
+    evidence: dict[str, dict] = {}
+    for rec in payments:
+        fms = rec.get("fms_id")
+        # Where the payment was made, from its AccSale prefix: saved payments
+        # carry only the agent's name, and two markets share one agent.
+        market = rec.get("market") or payment_details.destination(rec.get("accsale"))["market"]
+        if not fms or not market:
+            continue
+        e = evidence.setdefault(str(fms), {"market": market, "lines": set(), "refs": set(),
+                                           "markets": set()})
+        e["markets"].add(market)
+        if not _degenerate_ref(rec.get("dn")):
+            e["refs"].add(_norm_dn(rec.get("dn")))
+        for line in rec.get("lines") or []:
+            if line.get("line_no") is not None:
+                e["lines"].add((int(line["line_no"]), normalise_product(line.get("product")),
+                                line.get("delivered")))
+
+    chosen: dict[str, tuple[int, int]] = {}
+    for fms, e in evidence.items():
+        if len(e["markets"]) != 1 or not e["lines"]:
+            continue
+        scored = []
+        def fits(delivery: int, n: int, qty) -> bool:
+            have = booked.get(consignment_of(delivery, n))
+            return qty is None or have is None or int(qty) == have
+
+        for delivery, lines in held.get(e["market"], {}).items():
+            agree = sum(1 for n, p, q in e["lines"]
+                        if p in lines.get(n, ()) and fits(delivery, n, q))
+            clash = sum(1 for n, p, q in e["lines"]
+                        if n in lines and (p not in lines[n] or not fits(delivery, n, q)))
+            if agree and not clash:
+                scored.append((agree, delivery))
+        if not scored:
+            continue
+        scored.sort(reverse=True)
+        best = scored[0][0]
+        top = [d for s, d in scored if s == best]
+        if len(top) > 1 and e["refs"]:
+            top = [d for d in top if refs_of[d] & e["refs"]] or top
+        if len(top) != 1:
+            continue
+        if best >= 2 or len(scored) == 1:
+            chosen[fms] = (best, top[0])
+
+    # One delivery, one FMS id. Where two claim the same delivery the stronger
+    # keeps it; an even contest binds neither rather than picking one.
+    by_delivery: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    for fms, (score, delivery) in chosen.items():
+        by_delivery[delivery].append((score, fms))
+    bound: dict[str, int] = {}
+    for delivery, claims in by_delivery.items():
+        claims.sort(reverse=True)
+        if len(claims) == 1 or claims[0][0] > claims[1][0]:
+            bound[claims[0][1]] = delivery
+    return bound
+
+
+def line_consignment(rec: dict, line: dict, bound: dict[str, int],
+                     products_of: dict[int, dict[int, str]]) -> int | None:
+    """The consignment one payment line paid for, if its FMS id is bound.
+
+    By its line number where the line carries one. A line in the wrapped
+    layout prints none, so it is placed by product among the delivery's own
+    consignments, and only where exactly one of them sells it.
+    """
+    delivery = bound.get(str(rec.get("fms_id"))) if rec.get("fms_id") else None
+    if delivery is None:
+        return None
+    if line.get("line_no") is not None:
+        return consignment_of(delivery, line["line_no"])
+    want = normalise_product(line.get("product"))
+    hits = [n for n, p in products_of.get(delivery, {}).items() if p == want]
+    return consignment_of(delivery, hits[0]) if len(hits) == 1 else None
 
 
 # --- mixed histories ------------------------------------------------------

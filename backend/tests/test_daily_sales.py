@@ -246,3 +246,31 @@ def test_a_consignment_that_sold_on_one_day_is_one_row_as_before():
 def test_the_days_add_up_to_the_report():
     rows = daily_sales.parse_daily_sales([TWO_DAYS], "two days.pdf")
     assert round(sum(r.sales_total for r in rows), 2) == 5990.0
+
+
+AMENDED = """\
+    Consignment Reports                                Zaco Agents (Pty) Ltd (20026)
+    Report:   Daily Sales Detail
+    Date Range: 2026/09/17 - 2026/09/17
+    DURBAN MARKET       Grow Port Natal (Dbn)
+    Delivery ID: 1855491Z Supplier Ref: 20026*N Qty Sent: 480 Qty Amended To: 360 Qty Avail: 0
+    Consignment ID: 185549102Z Comment:
+    Product:  GRAPES SUGRAONE CLASS 1 NO SIZE (PUNNET 5kg)
+      Date Sold   Docket Number Qty Sold Market Avg    Price       Sales Value
+    2026-09-17 DUR*B6I17CE8171*02Z  1       R 344.86        R 380.00   R 380.00
+                                    1                                 R 380.00
+"""
+
+
+def test_qty_amended_to_is_read():
+    """Sent as 480, booked by the market as 360: the payment report's Delivered
+    column says 360, and 120 cartons that never existed would otherwise sit in
+    stock for ever."""
+    [row] = daily_sales.parse_daily_sales([AMENDED], "a.pdf")
+    assert (row.qty_received, row.qty_amended, row.qty_avail) == (480, 360, 0)
+
+
+def test_a_blank_qty_amended_falls_back_to_what_was_sent(rows):
+    """Older exports print "Qty Amended To:" with nothing after it."""
+    assert all(r.qty_amended == r.qty_received for r in rows)
+    assert all(r.qty_avail is not None for r in rows)

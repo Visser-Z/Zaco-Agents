@@ -83,3 +83,16 @@ def test_selling_more_than_was_on_the_floor_is_flagged_not_hidden():
     # import would leave the operator no way to record what actually happened.
     assert rows[1].flags[0].severity == "warning"
     assert not rows[1].blocking
+
+
+def test_opening_stock_starts_from_what_the_market_booked():
+    """Sent 480, amended to 360: the floor opened with 360."""
+    from datetime import date as _d
+    from app import stock
+    from app.schemas import StatementRow
+    rows = [StatementRow(source_file="a", consignment_id=185549102, qty_received=480,
+                         qty_amended=360, cartons_sold=100, invoice_date=_d(2026, 9, 17)),
+            StatementRow(source_file="a", consignment_id=185549102, qty_received=480,
+                         qty_amended=360, cartons_sold=60, invoice_date=_d(2026, 9, 18))]
+    stock.carry_forward(rows)
+    assert [r.opening_stock for r in rows] == [360, 260]

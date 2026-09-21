@@ -54,7 +54,11 @@ def carry_forward(rows: list[StatementRow], already_sold: dict[int, int] | None 
     changed = 0
     for consignment, group in groups.items():
         group.sort(key=_order)
-        sent = next((r.qty_received for r in group if r.qty_received is not None), None)
+        # What the market booked in, where it says: a delivery amended down
+        # from 480 to 360 has 360 on the floor to start, not 480.
+        sent = next((r.qty_amended if r.qty_amended is not None else r.qty_received
+                     for r in group
+                     if r.qty_amended is not None or r.qty_received is not None), None)
         if sent is None:
             continue
         opening = sent - prior.get(consignment, 0)

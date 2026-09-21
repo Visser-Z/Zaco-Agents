@@ -41,6 +41,15 @@ class StatementRow(BaseModel):
     stm_no: int | None = None                  # ACCOUNT SALES NO
     product: str | None = None                 # PRODUCT (raw string from the PDF)
     qty_received: int | None = None            # QUANTITY RECEIVED
+    # "Qty Amended To": the delivery as the market finally booked it. The
+    # payment report's Delivered column reports this, not Qty Sent, so it is
+    # the true stock basis. Older exports leave it blank.
+    qty_amended: int | None = None
+    # "Qty Avail": what was still on the floor when the report was run. A
+    # snapshot of the consignment, not of this row, so the latest report's
+    # figure is the stock on hand. Kept apart from opening_stock, which is a
+    # running balance derived per row and used to overwrite it.
+    qty_avail: int | None = None
     opening_stock: int | None = None           # QUANTITY B/F
     cartons_sold: int | None = None            # price-table QUANTITY total
     price: float | None = None                 # AVER.PRICE

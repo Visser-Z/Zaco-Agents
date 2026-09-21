@@ -6,7 +6,7 @@ round of statements, and append those rows back into the workbook.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -388,6 +388,9 @@ _MIGRATIONS = {
     "last_sale": "0006_statements_last_sale.sql",
     "payment_refs": "0007_statements_payment_refs.sql",
     "market": "0002_statements_market.sql",
+    "fms_id": "0021_fms_and_stock_columns.sql",
+    "qty_amended": "0021_fms_and_stock_columns.sql",
+    "qty_avail": "0021_fms_and_stock_columns.sql",
 }
 
 
@@ -625,6 +628,8 @@ def _statement_record(row: StatementRow, user: User) -> dict | None:
         "product": row.product,
         "description": row.description,
         "qty_received": row.qty_received,
+        "qty_amended": row.qty_amended,
+        "qty_avail": row.qty_avail,
         "opening_stock": row.opening_stock,
         "cartons_sold": row.cartons_sold,
         # Net of returns, as cartons_sold is, so the two figures folded into it
@@ -659,30 +664,27 @@ async def persist_statements(user: User | None, rows: list[StatementRow]) -> str
     """
     if user is None:
         return None
-    records = [rec for r in rows if (rec := _statement_record(r, user)) is not None]
+    records = _one_per_sale_day(
+        [rec for r in rows if (rec := _statement_record(r, user)) is not None])
     if not records:
         return None
     try:
-        # Insert new statements; silently skip any already recorded. Deliberately
-        # NOT merge-duplicates: the statements table restricts UPDATE to admins
-        # (a processed statement is a financial record staff shouldn't overwrite),
-        # so an upsert that updates would be blocked by RLS. Re-saving a statement
-        # therefore keeps the first recorded copy rather than erroring.
-        await db_post(
-            user,
-            "statements",
-            records,
-            upsert=True,
-            # One account sale settles several consignments, each its own row,
-            # and a consignment sells over several days, each its own row too.
-            # The day here must be the day it SOLD. group_date is the
-            # consignment's date, and apply_group_dates collapses it to one
-            # value per consignment across a batch, so keyed on that a week of
-            # reports dropped together kept only the first day of each
-            # consignment and the insert discarded the rest in silence.
+        # A row already on the book is refreshed, not skipped. Dropping a report
+        # again -- or a week's report over the days already loaded from their
+        # own -- then brings every row up to what the report says, including
+        # fields the first save could not read yet. Migration 0019 opened
+        # UPDATE to signed-in staff, so this no longer trips row-level security.
+        # One account sale settles several consignments, each its own row,
+        # and a consignment sells over several days, each its own row too.
+        # The day here must be the day it SOLD. group_date is the
+        # consignment's date, and apply_group_dates collapses it to one
+        # value per consignment across a batch, so keyed on that a week of
+        # reports dropped together kept only the first day of each
+        # consignment and the insert discarded the rest in silence.
+        await _post_with_late_columns(
+            user, "statements", records,
             on_conflict="market_agent,stm_no,consignment_id,sale_day",
-            resolution="ignore-duplicates",
-        )
+            late=("qty_amended", "qty_avail"))
     except Exception as exc:  # noqa: BLE001 -- save must succeed regardless
         if (migration := _pending_migration(exc)):
             # Deliberately NOT retried without the new column: the older unique
@@ -699,6 +701,44 @@ async def persist_statements(user: User | None, rows: list[StatementRow]) -> str
         detail = getattr(exc, "detail", None) or str(exc)
         return f"Saved to Excel, but recording history for Insights failed: {detail}"
     return None
+
+
+def _one_per_sale_day(records: list[dict]) -> list[dict]:
+    """One record per (agent, statement, consignment, day sold).
+
+    Overlapping reports put the same day in one batch twice -- a day's report
+    and the week's that covers it. Refreshing a row the database already has is
+    an update, and an update may not touch the same row twice in one write, so
+    the whole save would be refused. The later copy is kept: it is the later
+    word on that day, and carries the later stock figure.
+    """
+    out: dict[tuple, dict] = {}
+    for rec in records:
+        day = rec.get("last_sale") or rec.get("group_date") or rec.get("invoice_date") \
+            or rec.get("date_received")
+        out[(rec["market_agent"], rec["stm_no"], rec["consignment_id"], day)] = rec
+    return list(out.values())
+
+
+async def _post_with_late_columns(user: User, table: str, records: list[dict],
+                                  on_conflict: str, late: tuple[str, ...]) -> None:
+    """Save, refreshing rows already present; before a migration, without it.
+
+    Columns added by a migration that has not been run yet fail the whole
+    write. Those columns only add detail, so the write is retried without them
+    rather than losing the round: the rows are saved, and dropping the report
+    again after the migration fills the detail in.
+    """
+    try:
+        await db_post(user, table, records, upsert=True, on_conflict=on_conflict,
+                      resolution="merge-duplicates")
+    except Exception as exc:  # noqa: BLE001
+        detail = str(getattr(exc, "detail", None) or exc)
+        if not any(col in detail for col in late):
+            raise
+        trimmed = [{k: v for k, v in r.items() if k not in late} for r in records]
+        await db_post(user, table, trimmed, upsert=True, on_conflict=on_conflict,
+                      resolution="merge-duplicates")
 
 
 # --- append + save --------------------------------------------------------
@@ -765,7 +805,9 @@ _ANALYTICS_COLUMNS = (
     # the net of the two.
     "cartons_returned,returns_total,"
     # What the market itself averaged, so the price can be checked against it.
-    "market_avg"
+    "market_avg,"
+    # What the market booked and what it still holds, for stock on hand.
+    "qty_amended,qty_avail"
 )
 
 # Columns that arrived with a later migration, newest group first. Asking a
@@ -774,6 +816,7 @@ _ANALYTICS_COLUMNS = (
 # column none of them strictly needs -- so each group is dropped in turn and the
 # read retried, rather than the page going dark.
 _LATE_COLUMNS = (
+    ("qty_amended", "qty_avail"),            # 0021
     ("market_avg",),                         # 0013
     ("cartons_returned", "returns_total"),   # 0012
     ("consignment_id",),                     # 0010
@@ -834,7 +877,11 @@ def _payment_record(rec: dict, user: User) -> dict | None:
         "deductions": rec.get("deductions"),
         "vat": rec.get("vat"),
         "lines": rec.get("lines") or [],
+        # One per delivery and stable across its account sales: what ties a
+        # payment to the sales it paid for. See migration 0021.
+        "fms_id": rec.get("fms_id"),
         "created_by": user.id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -843,17 +890,22 @@ async def persist_payments(user: User | None, records: list[dict]) -> str | None
 
     Best-effort, exactly like ``persist_statements``: reconciliation must still
     return even if the write fails (the table's migration not run yet, say).
-    Re-processing a report keeps the first recorded copy -- a payment is a
-    financial record staff do not overwrite -- so the insert ignores duplicates.
+
+    The same payment arriving again -- the file dropped twice, or a day's
+    report and then the week's -- is saved once. It refreshes the record
+    already held rather than being skipped, so a payment first read wrongly is
+    put right by dropping its report again: the two Durban account sales whose
+    lines were absorbed by the old parser mend themselves that way.
     """
     if user is None:
         return None
-    rows = [r for rec in records if (r := _payment_record(rec, user)) is not None]
+    rows = [r for rec in payment_details.dedupe(records)
+            if (r := _payment_record(rec, user)) is not None]
     if not rows:
         return None
     try:
-        await db_post(user, "payments", rows, upsert=True,
-                      on_conflict="accsale", resolution="ignore-duplicates")
+        await _post_with_late_columns(user, "payments", rows,
+                                      on_conflict="accsale", late=("fms_id",))
     except Exception as exc:  # noqa: BLE001 -- reconciliation must succeed regardless
         if (migration := _pending_migration(exc)):
             return (
@@ -869,13 +921,16 @@ async def _saved_payments(user: User | None) -> list[dict]:
     """Every recorded payment, read as the caller so RLS applies."""
     if user is None:
         return []
-    query = {
-        "select": "accsale,stm_no,market_agent,supplier_ref,dn,paid_on,nett,gross,lines",
-        "limit": "10000",
-    }
-    try:
-        rows = await db_get(user, "payments", query)
-    except Exception:  # noqa: BLE001 -- before migration 0015 there are none
+    columns = "accsale,stm_no,market_agent,supplier_ref,dn,paid_on,nett,gross,lines"
+    rows = None
+    # With the FMS id where migration 0021 has run, without it before.
+    for select in (columns + ",fms_id", columns):
+        try:
+            rows = await db_get(user, "payments", {"select": select, "limit": "10000"})
+            break
+        except Exception:  # noqa: BLE001 -- before migration 0015 there are none
+            continue
+    if rows is None:
         return []
     # reconcile expects a payment's date under "date" and its breakdown under
     # "lines"; the table stores the date as paid_on. Bridge the two shapes here.
@@ -1274,7 +1329,14 @@ async def _prune_dismissals(user: User) -> int:
 
     live: set[str] = set()
     for r in await _history_rows(user):
+        # Every name a line has gone by: its consignment now, and the delivery
+        # note and commodity it was closed under before. The note was read off
+        # supplier_ref here while the lists name it by dn, which is the Delivery
+        # ID wherever the ref is blank, so those closures were pruned as orphans.
         live.add(tracking.item_ref({"dn": r.get("supplier_ref"), "product": r.get("product")}))
+        live.add(tracking.item_ref({"dn": r.get("dn"), "product": r.get("product")}))
+        if r.get("consignment_id"):
+            live.add(f"c:{r['consignment_id']}")
     for p in await _saved_payments(user):
         if p.get("accsale"):
             live.add(f"ref:{p['accsale']}")
@@ -1462,6 +1524,10 @@ async def reconcile_payments(
     # Record the payments before matching, so the Tracking tab knows what is
     # outstanding across the whole period rather than only while this file is
     # open. Best-effort: a failed write must not cost the operator their match.
+    # The same payment in two files -- a day's report and the week's, or one
+    # file dropped twice -- is one payment. Counted twice it doubled the money
+    # matched against the sales on this very screen.
+    records = payment_details.dedupe(records)
     payment_warning = await persist_payments(user, records)
     if payment_warning:
         warnings.append(payment_warning)

@@ -215,6 +215,50 @@ def destination(accsale: str) -> dict:
             "market": market, "market_agent": agent, "unknown_prefix": None}
 
 
+def dedupe(records: list[dict]) -> list[dict]:
+    """One record per account sale, however many files carried it.
+
+    The same payment turns up again whenever the reports overlap: a day's
+    report and then the week's, or the same file dropped twice. Kept twice it
+    doubles the money matched against the sales; handed to the database twice
+    in one write it is refused outright.
+
+    Where two copies differ, the one that is internally consistent wins -- its
+    commodity lines add up to its own gross -- because a copy that does not is
+    one whose lines were misread or absorbed from a neighbour. Then the one
+    carrying line numbers, which newer reads have. Otherwise the later copy,
+    as the more recent word on it.
+    """
+    def quality(rec: dict) -> tuple:
+        lines = rec.get("lines") or []
+        total = round(sum(_as_float(l.get("sales_total")) for l in lines), 2)
+        consistent = bool(lines) and abs(total - _as_float(rec.get("gross"))) < 0.01
+        numbered = sum(1 for l in lines if l.get("line_no") is not None)
+        return (consistent, numbered, bool(rec.get("fms_id")))
+
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    unkeyed: list[dict] = []
+    for rec in records:
+        acc = rec.get("accsale")
+        if not acc:
+            unkeyed.append(rec)
+            continue
+        if acc not in best:
+            order.append(acc)
+            best[acc] = rec
+        elif quality(rec) >= quality(best[acc]):
+            best[acc] = rec
+    return [best[a] for a in order] + unkeyed
+
+
+def _as_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def parse_payment_details(pages: list[str], filename: str) -> list[dict]:
     """One record per account-sale block, with its commodity lines.
 

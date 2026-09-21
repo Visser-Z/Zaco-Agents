@@ -65,6 +65,10 @@ _SUPPLIER_REF = re.compile(r"Supplier\s+Ref\s*:\s*\d+\*\s*(\d+)", re.I)
 _CONSIGNMENT_ID = re.compile(r"Consignment\s+ID\s*:\s*(\S+)", re.I)
 _QTY_SENT = re.compile(r"Qty\s+Sent\s*:\s*(\d+)", re.I)
 _QTY_AVAIL = re.compile(r"Qty\s+Avail\s*:\s*(\d+)", re.I)
+# Present on every export's header line, and blank on older ones:
+#   Qty Sent: 480 Qty Amended To: 360 Qty Avail: 0
+#   Qty Sent: 71 Qty Amended To: Qty Avail: 70
+_QTY_AMENDED = re.compile(r"Qty\s+Amended\s+To\s*:\s*(\d+)", re.I)
 _PRODUCT = re.compile(r"^\s*Product\s*:\s*(.+?)\s*$", re.I | re.M)
 # The Product line runs to end of line, and on some exports a neighbouring
 # column bleeds a bare number onto it:
@@ -186,8 +190,14 @@ def parse_daily_sales(pages: list[str], filename: str) -> list[StatementRow]:
         # Opening Stock. Both are the operator's marked fields.
         if m := _QTY_SENT.search(block):
             row.qty_received = int(m.group(1))
+        # What the market finally booked, where it says; otherwise what was
+        # sent. Durban delivery 1855491Z was sent as 480 and booked as 360, and
+        # every figure built on 480 carried 120 cartons that never existed.
+        amended = _QTY_AMENDED.search(block)
+        row.qty_amended = int(amended.group(1)) if amended else row.qty_received
         if m := _QTY_AVAIL.search(block):
-            row.opening_stock = int(m.group(1))
+            row.qty_avail = int(m.group(1))
+            row.opening_stock = row.qty_avail
 
         dockets = _DOCKET.findall(block)
         if not dockets:

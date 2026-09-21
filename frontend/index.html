@@ -581,6 +581,37 @@
   .pg-items { list-style: none; margin: 0; padding: 4px 6px 10px 26px; display: flex;
               flex-direction: column; gap: 8px; }
   .pg-item .pg-v { font-weight: 600; }
+  /* Where to send it. */
+  .where-card .pg-head.where-head { grid-template-columns: minmax(180px, 40%) 1fr 130px; }
+  .where-brief { margin: 10px 0 14px; padding: 12px 14px; border-radius: 10px;
+                 background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); }
+  .where-brief .wb-text { font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+  .where-products { list-style: none; margin: 0; padding: 2px 6px 10px 26px; }
+  .where-product { border-bottom: 1px solid var(--line); }
+  .where-product:last-child { border-bottom: 0; }
+  .wp-head { width: 100%; appearance: none; border: 0; background: none; cursor: pointer; text-align: left;
+             display: grid; grid-template-columns: auto minmax(160px, 34%) 1fr; gap: 10px; align-items: center;
+             padding: 8px 2px; font-family: var(--sans); color: var(--ink); }
+  .wp-head:hover { background: var(--accent-soft); }
+  .wp-head .chev { color: var(--ink-faint); display: inline-flex; }
+  .wp-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wp-verdict { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 12px; min-width: 0; }
+  .wv { font-weight: 700; font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+  .wv.best { background: var(--ok-tint); color: var(--ok); }
+  .wv.only { background: var(--surface-2); color: var(--ink-soft); }
+  .wv.thin { background: var(--warn-tint); color: var(--warn); }
+  .wv-fig { color: var(--ink-soft); }
+  .wv-fig b { color: var(--ink); }
+  .where-table { margin: 4px 0 10px; font-size: 12px; }
+  .where-table tr.thin td { color: var(--ink-faint); }
+  .wt-sub { display: block; font-size: 11px; color: var(--ink-faint); }
+  @media (max-width: 700px) {
+    .where-card .pg-head.where-head { grid-template-columns: 1fr auto; }
+    .where-card .pg-head.where-head .pg-c { display: none; }
+    .wp-head { grid-template-columns: auto 1fr; }
+    .wp-verdict { grid-column: 2 / -1; }
+    .where-products { padding-left: 8px; }
+  }
   @media (max-width: 700px) {
     .pg-head, .pg-item { grid-template-columns: 1fr auto auto; }
     .pg-head .btrack, .pg-item .btrack, .pg-s { display: none; }
@@ -977,6 +1008,9 @@ const S = {
   // The computed outlook. Separate from the conversation because it does not
   // need an assistant key and must still be there when there is none.
   intel: { data: null, loading: false, error: null },
+  // Where to send it: the destination comparison and its written read.
+  where: { data: null, loading: false, error: null, months: 3, open: {},
+           brief: null, briefBusy: false, briefError: null },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -2403,6 +2437,144 @@ function findingsBlock(findings) {
 // on top of the numbers, not the numbers themselves -- which is deliberate: a
 // projection that only exists inside a model answer cannot be checked.
 
+async function loadWhere() {
+  const W = S.where;
+  W.loading = true; W.error = null;
+  if (!S.live) { W.loading = false; render(); return; }
+  try {
+    const r = await api(`/api/intel/where?months=${W.months}`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+    W.data = await r.json();
+  } catch (e) {
+    W.error = e.message || String(e);
+  } finally {
+    W.loading = false; render();
+  }
+}
+
+function setWhereMonths(m) {
+  const W = S.where;
+  if (W.months === m) return;
+  W.months = m; W.data = null; W.brief = null; W.briefError = null;
+  loadWhere();
+}
+
+function toggleWhere(key) {
+  S.where.open[key] = !S.where.open[key];
+  render();
+}
+
+/** Ask Claude Haiku for the written recommendation over the comparison. The
+ *  figures are computed on the server first; the model only says which of
+ *  them matter. */
+async function writeWhereBrief() {
+  const W = S.where;
+  W.briefBusy = true; W.briefError = null; render();
+  try {
+    const body = new FormData();
+    body.append("months", String(W.months));
+    const r = await api("/api/assistant/where", { method: "POST", body });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.detail || `HTTP ${r.status}`);
+    W.brief = out.text;
+  } catch (e) {
+    W.briefError = e.message || String(e);
+  } finally {
+    W.briefBusy = false; render();
+  }
+}
+
+const pctOf = v => v == null ? "—" : Math.round(v * 100) + "%";
+
+/** Where to send it: every market and agent each product has gone to, ranked
+ *  on rand back per carton sent. One collapsible group per fruit; opening a
+ *  product shows every figure behind its ranking. */
+function whereBlock(ready) {
+  const W = S.where;
+  if (W.data === null && !W.loading && W.error === null && S.live) loadWhere();
+  const range = `<div class="seg sm">${[[3, "Last 3 months"], [0, "All time"]].map(([m, l]) =>
+    `<button class="${W.months === m ? "on" : ""}" onclick="setWhereMonths(${m})">${l}</button>`).join("")}</div>`;
+  const head = `<div class="ins-card-head"><h2>Where to send it</h2>${range}</div>`;
+
+  if (W.error) return `<div class="card ins-card wide">${head}
+    <p class="ins-empty">Could not compare destinations: ${esc(W.error)}</p></div>`;
+  if (!W.data) return `<div class="card ins-card wide">${head}
+    <div class="busy"><span class="spin"></span> Comparing markets</div></div>`;
+  const d = W.data;
+  if (!d.fruits || !d.fruits.length) return `<div class="card ins-card wide">${head}
+    <p class="ins-empty">Not enough history in this period to compare destinations.</p></div>`;
+
+  const brief = ready ? `<div class="where-brief">
+      ${W.brief ? `<div class="wb-text">${mdLite(W.brief)}</div>` : ""}
+      ${W.briefError ? `<p class="trk-note warn">${esc(W.briefError)}</p>` : ""}
+      <button class="btn ${W.brief ? "ghost" : "primary"} sm" onclick="writeWhereBrief()" ${W.briefBusy ? "disabled" : ""}>
+        ${W.briefBusy ? `<span class="spin"></span> Writing` : `${icon("chat")}${W.brief ? "Write it again" : "Write the recommendation"}`}</button>
+    </div>` : `<p class="rep-note">Add a Claude Haiku key (<code>ANTHROPIC_API_KEY_INTEL</code>) in
+      Vercel to get a written recommendation on top of these figures.</p>`;
+
+  const verdict = v => {
+    const at = `${esc(v.market || "")}${v.market_agent ? " · " + esc(v.market_agent) : ""}`;
+    if (v.kind === "best") return `<span class="wv best">Send to ${at}</span>
+      <span class="wv-fig">R ${fmt(v.back_per_carton)} back per carton sent ·
+        <b>R ${fmt(v.lead_per_carton)} more</b> than ${esc(v.runner_up)}</span>`;
+    if (v.kind === "only") return `<span class="wv only">Only ever sent to ${at}</span>
+      <span class="wv-fig">${v.back_per_carton != null ? `R ${fmt(v.back_per_carton)} back per carton sent · ` : ""}nothing to compare</span>`;
+    if (v.kind === "thin") return `<span class="wv thin">Leaning ${at}</span>
+      <span class="wv-fig">too little history to call it</span>`;
+    return `<span class="wv thin">Not enough figures</span>`;
+  };
+
+  const table = p => `<div class="rep-scroll"><table class="rep-table where-table">
+      <thead><tr><th>Market · agent</th><th class="num">Cartons</th><th class="num">Per carton</th>
+        <th class="num" title="What a carton fetched against the market's own average that day">vs market</th>
+        <th class="num" title="Of what was booked in, how much sold. Counts consignments at least ${d.rules.settled_after_days} days old.">Sold of sent</th>
+        <th class="num">Days to sell</th>
+        <th class="num" title="Gross less nett, over gross, from this market's payments">Agent's cut</th>
+        <th class="num" title="Price per carton, less the agent's cut, times the share that sold">Back per carton sent</th>
+        <th class="num">Loads</th></tr></thead>
+      <tbody>${p.destinations.map(x => `<tr class="${x.enough ? "" : "thin"}">
+        <td>${esc(x.market || "—")}<span class="wt-sub">${esc(x.market_agent || "")}</span></td>
+        <td class="num">${fmtInt(x.cartons)}</td>
+        <td class="num">R ${fmt(x.price)}</td>
+        <td class="num">${pctOf(x.vs_market)}</td>
+        <td class="num">${pctOf(x.sell_through)}</td>
+        <td class="num">${x.days_to_sell == null ? "—" : x.days_to_sell}</td>
+        <td class="num" title="${x.agent_cut_known ? "" : "No payment from this market in the period, so the book's usual rate"}">${pctOf(x.agent_cut)}${x.agent_cut_known ? "" : "*"}</td>
+        <td class="num"><b>${x.back_per_carton == null ? "—" : "R " + fmt(x.back_per_carton)}</b></td>
+        <td class="num">${fmtInt(x.consignments)}</td></tr>`).join("")}</tbody></table></div>`;
+
+  const groups = d.fruits.map(f => {
+    const fOpen = !!W.open["f|" + f.label];
+    return `<li class="pgroup${fOpen ? " open" : ""}">
+      <button class="pg-head where-head" aria-expanded="${fOpen}" onclick="toggleWhere(${q("f|" + f.label)})">
+        <span class="pg-name"><span class="chev">${icon(fOpen ? "up" : "down", 12)}</span>
+          <b>${esc(f.label)}</b><em>${fmtInt(f.products.length)} product${f.products.length === 1 ? "" : "s"}</em></span>
+        <span class="pg-c">${f.clear ? `${fmtInt(f.clear)} with a clear best` : "no clear best yet"}</span>
+        <span class="pg-v num">R ${fmt(f.value)}</span>
+      </button>
+      ${fOpen ? `<ul class="where-products">${f.products.map(p => {
+        const key = "p|" + p.product;
+        const pOpen = !!W.open[key];
+        return `<li class="where-product${pOpen ? " open" : ""}">
+          <button class="wp-head" aria-expanded="${pOpen}" onclick="toggleWhere(${q(key)})">
+            <span class="chev">${icon(pOpen ? "up" : "down", 11)}</span>
+            <span class="wp-name" title="${esc(p.product)}">${esc(shortProduct(p.product))}</span>
+            <span class="wp-verdict">${verdict(p.verdict)}</span>
+          </button>
+          ${pOpen ? table(p) : ""}</li>`;
+      }).join("")}</ul>` : ""}
+    </li>`;
+  }).join("");
+
+  return `<div class="card ins-card wide where-card">${head}
+    <p class="rep-note">Ranked on <b>rand back per carton sent</b>: the price, less the agent's cut,
+      times the share of what was sent that sold. ${esc(d.window.from)} to ${esc(d.window.to)}.</p>
+    ${brief}
+    <ul class="pgroups">${groups}</ul>
+    ${(d.caveats || []).map(c => `<p class="rep-note">${esc(c)}</p>`).join("")}
+  </div>`;
+}
+
 async function loadForecast() {
   const F = S.intel;
   F.loading = true; F.error = null;
@@ -2489,34 +2661,6 @@ function projectionBlock(p) {
 /** Best outlet per product: where the same fruit fetched the most, and on how
  *  much. The volume is shown beside the price because a record price on one
  *  carton is not a market, it is an anecdote. */
-function outletBlock(outlets) {
-  if (!outlets || !outlets.length) return "";
-  const best = {};
-  for (const o of outlets) {
-    const cur = best[o.product];
-    if (!cur || o.price > cur.price) best[o.product] = o;
-  }
-  const rows = Object.values(best)
-    .sort((a, b) => b.cartons - a.cartons)
-    .slice(0, 12)
-    .map(o => `<tr>
-      <td class="rp-p" title="${esc(o.product)}">${esc(shortProduct(o.product))}</td>
-      <td>${esc(o.market || "—")}</td>
-      <td>${esc(o.market_agent || "—")}</td>
-      <td class="num">R ${fmt(o.price)}</td>
-      <td class="num">${fmtInt(o.cartons)}</td>
-    </tr>`).join("");
-  return `<div class="card ins-card">
-    <div class="ins-card-head"><h2>Where each one fetched the most</h2></div>
-    <div class="rep-scroll"><table class="rep-table">
-      <thead><tr><th>Product</th><th>Market</th><th>Agent</th>
-        <th class="num">Per carton</th><th class="num">On cartons</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
-    <p class="rep-note">Judge the price against the cartons beside it. A high price on a
-      handful is not a better outlet than a fair price on a full load.</p>
-  </div>`;
-}
-
 /** How long each agent takes to pay, so next month's sales can be read as cash. */
 function cashBlock(lag) {
   if (!lag || !lag.length) return "";
@@ -2598,7 +2742,8 @@ function renderIntel() {
 
   main.innerHTML = `<section class="screen ins">${head}
     ${projectionBlock(F.data.projection)}
-    <div class="ins-grid-2">${outletBlock(F.data.outlets)}${cashBlock(F.data.payment_lag)}</div>
+    ${whereBlock(ready)}
+    <div class="ins-grid-2">${cashBlock(F.data.payment_lag)}</div>
     ${brief}
   </section>`;
 }

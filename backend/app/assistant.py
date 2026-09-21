@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from . import analytics, forecast
+from . import analytics, forecast, scorecard
 
 # Claude Haiku 4.5, the operator's choice: they hold the key and pay for what it
 # uses. Overridable per deployment with ZACON_ASSISTANT_MODEL -- to try Sonnet if
@@ -76,12 +76,41 @@ def _uses_fallbacks(model_id: str) -> bool:
     return "haiku" not in model_id
 
 
+# Two Claude keys, one per job, so each can be watched, capped and rotated on
+# its own: the Intelligence tab (the written recommendation and the questions),
+# and the document check that reads the payment and sales reports back to
+# confirm the parser read them right. Either falls back to the one general key,
+# so a deployment with a single key still works for both.
+INTEL_KEY = "ANTHROPIC_API_KEY_INTEL"
+DOCS_KEY = "ANTHROPIC_API_KEY_DOCS"
+SHARED_KEY = "ANTHROPIC_API_KEY"
+
+
+def _key(name: str) -> str | None:
+    return (os.getenv(name) or os.getenv(SHARED_KEY) or "").strip() or None
+
+
 def api_key() -> str | None:
-    return os.getenv("ANTHROPIC_API_KEY") or None
+    """The Intelligence tab's key."""
+    return _key(INTEL_KEY)
+
+
+def docs_api_key() -> str | None:
+    """The document check's key. Nothing uses it yet; it is read here so the
+    health check can already say whether it is in place."""
+    return _key(DOCS_KEY)
 
 
 def configured() -> bool:
     return bool(api_key())
+
+
+def docs_configured() -> bool:
+    return bool(docs_api_key())
+
+
+NOT_SET_UP = (f"The assistant is not set up yet: add {INTEL_KEY} (or {SHARED_KEY}) "
+              "in Vercel under Settings, Environment Variables.")
 
 
 SYSTEM = """\
@@ -506,7 +535,110 @@ def data_block(rows: list[dict], payments: list[dict] | None = None) -> str:
     parts = [build_context(rows)]
     if rows:
         parts.append(forecast_context(rows, payments or []))
+        parts.append(where_context(scorecard.build(rows, payments or [])))
     return "\n\n".join(parts)
+
+
+def _rand(value) -> str:
+    return "n/a" if value is None else "R " + f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _pct(value) -> str:
+    return "n/a" if value is None else f"{value * 100:.0f}%"
+
+
+def where_context(card: dict) -> str:
+    """The destination comparison as the model reads it: verdicts first, then
+    the figures behind each, all computed by ``scorecard``."""
+    if not card.get("fruits"):
+        return "## Where to send it\nNot enough recorded history to compare destinations."
+    w = card["window"]
+    out = [f"## Where to send it, {w['from']} to {w['to']} (computed, do not recalculate)",
+           "Score per destination = rand back per carton sent: price per carton sold, less "
+           "the agent's cut, times the share of what was sent that sold. A destination needs "
+           f"{card['rules']['min_consignments']} consignments of a product to count.",
+           *("Caveat: " + c for c in card["caveats"])]
+    for fruit in card["fruits"]:
+        out.append(f"\n### {fruit['label']}")
+        for p in fruit["products"]:
+            v = p["verdict"]
+            where_to = f"{v.get('market')} via {v.get('market_agent')}"
+            if v["kind"] == "best":
+                verdict = (f"send to {where_to}: {_rand(v['back_per_carton'])} back per carton "
+                           f"sent, {_rand(v['lead_per_carton'])} more than {v['runner_up']}")
+            elif v["kind"] == "only":
+                verdict = f"only ever sent to {where_to}; nothing to compare"
+            elif v["kind"] == "thin":
+                verdict = f"leaning {where_to}, but too little history to call it"
+            else:
+                verdict = "figures missing"
+            out.append(f"- {p['product']} ({p['cartons']:.0f} ctn, {_rand(p['value'])}): {verdict}")
+            for d in p["destinations"]:
+                out.append(
+                    f"    {d['market']} / {d['market_agent']}: {d['cartons']:.0f} ctn, "
+                    f"{_rand(d['price'])}/ctn, vs market avg {_pct(d['vs_market'])}, "
+                    f"sold {_pct(d['sell_through'])} of sent, {d['days_to_sell'] or 'n/a'} days "
+                    f"to sell, agent cut {_pct(d['agent_cut'])}"
+                    f"{'' if d['agent_cut_known'] else ' (usual rate, none paid here)'}, "
+                    f"{_rand(d['back_per_carton'])} back per carton sent, "
+                    f"{d['consignments']} consignments")
+    return "\n".join(out)
+
+
+WHERE_SYSTEM = """You write the recommendation at the top of the "Where to send it" section of ZacoAgents, for the operator of Zaco Agents, a South African fresh-produce business that consigns fruit to market agents at several fresh-produce markets.
+
+You are given a computed comparison of every market and agent each product has gone to. Every figure in it is exact. Use only those figures: never add, average or estimate anything yourself, and never invent a destination.
+
+Write for someone deciding where this week's loads go:
+- Lead with the three to five moves that matter most, each naming the product, where to send it, and the rand figure that justifies it ("R 38 more back per carton sent than Durban").
+- The deciding figure is rand back per carton sent, not the price. Where a higher price loses because of the agent's cut or fruit that did not sell, say so.
+- Where a product has only ever gone to one place, say that trying a second market is the only way to learn whether it could do better, and only suggest it for products with real volume.
+- Where the history is too thin to call, say so plainly rather than picking one.
+- Keep it under 200 words. Plain sentences, a short list is fine, no headings. Money as "R 12 500,00"."""
+
+
+def where_brief(rows: list[dict], payments: list[dict], months: int) -> str:
+    """The written recommendation over the destination comparison.
+
+    One short call. The comparison is computed first and handed over whole;
+    the model's job is only to say which parts matter and why.
+    """
+    import anthropic
+
+    key = api_key()
+    if not key:
+        raise AssistantError(NOT_SET_UP)
+    card = scorecard.build(rows, payments, months)
+    if not card.get("fruits"):
+        raise AssistantError("There is not enough history yet to compare destinations.")
+
+    client = anthropic.Anthropic(api_key=key)
+    model_id = model()
+    try:
+        response = client.messages.create(
+            model=model_id,
+            max_tokens=2000,
+            system=WHERE_SYSTEM,
+            messages=[{"role": "user", "content": where_context(card)}],
+            **_thinking(model_id, None),
+        )
+    except anthropic.AuthenticationError as exc:
+        raise AssistantError("The server's Claude API key was rejected.") from exc
+    except anthropic.NotFoundError as exc:
+        raise AssistantError(f"The model {model_id!r} is not available to this API key.") from exc
+    except anthropic.RateLimitError as exc:
+        raise AssistantError("The assistant is busy right now. Try again shortly.") from exc
+    except anthropic.BadRequestError as exc:
+        raise AssistantError(f"The assistant could not take that request: {exc.message}") from exc
+    except anthropic.APIStatusError as exc:
+        raise AssistantError(f"The assistant service failed ({exc.status_code}). Try again.") from exc
+    except anthropic.APIConnectionError as exc:
+        raise AssistantError("Could not reach the assistant service.") from exc
+
+    text = _text_of(response)
+    if not text:
+        raise AssistantError("No recommendation came back. Try again.")
+    return text
 
 
 def ask(question: str, rows: list[dict],
@@ -517,7 +649,7 @@ def ask(question: str, rows: list[dict],
     key = api_key()
     if not key:
         raise AssistantError(
-            "The assistant is not configured yet: ANTHROPIC_API_KEY is not set on the server."
+            NOT_SET_UP
         )
 
     client = anthropic.Anthropic(api_key=key)
@@ -554,7 +686,7 @@ def ask(question: str, rows: list[dict],
         else:
             response = client.messages.create(**request)
     except anthropic.AuthenticationError as exc:
-        raise AssistantError("The server's ANTHROPIC_API_KEY was rejected.") from exc
+        raise AssistantError("The server's Claude API key was rejected.") from exc
     except anthropic.NotFoundError as exc:
         raise AssistantError(
             f"The model {model_id!r} is not available to this API key.") from exc
@@ -618,7 +750,7 @@ async def analyse(rows: list[dict], payments: list[dict] | None = None) -> dict:
     key = api_key()
     if not key:
         raise AssistantError(
-            "The assistant is not configured yet: ANTHROPIC_API_KEY is not set on the server."
+            NOT_SET_UP
         )
     if not rows:
         raise AssistantError(
@@ -677,7 +809,7 @@ async def analyse(rows: list[dict], payments: list[dict] | None = None) -> dict:
                 THINKING_BUDGET,
             )
     except anthropic.AuthenticationError as exc:
-        raise AssistantError("The server's ANTHROPIC_API_KEY was rejected.") from exc
+        raise AssistantError("The server's Claude API key was rejected.") from exc
     except anthropic.RateLimitError as exc:
         raise AssistantError("The assistant is busy right now. Try again shortly.") from exc
     except anthropic.APIConnectionError as exc:

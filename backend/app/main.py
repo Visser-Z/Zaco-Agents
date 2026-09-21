@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import (
+    scorecard,
     analytics,
     assistant,
     config,
@@ -74,6 +75,8 @@ def health() -> dict[str, object]:
         # Whether the Claude assistant has a key -- never the key itself. This
         # endpoint is open, so anything added here is public by definition.
         "assistant": assistant.configured(),
+        # The second key, for reading the reports back to check the parser.
+        "doc_check": assistant.docs_configured(),
         # The commit actually serving, so a stale deploy can be spotted from
         # outside instead of being taken on trust.
         "build": config.BUILD_SHA or "unknown",
@@ -1370,6 +1373,36 @@ async def get_forecast(user: User | None = Depends(require_user)) -> dict:
     return forecast.build(rows, payments)
 
 
+@app.get("/api/intel/where")
+async def get_where_to_send(
+    months: int = Query(scorecard.DEFAULT_MONTHS, ge=0, le=24),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Every market and agent each product has gone to, scored on rand back per
+    carton sent. Computed from the saved history; needs no Claude key. `months`
+    0 compares the whole book."""
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    return scorecard.build(rows, payments, months)
+
+
+@app.post("/api/assistant/where")
+async def write_where_to_send(
+    months: int = Form(scorecard.DEFAULT_MONTHS),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """The written recommendation over that comparison, from Claude Haiku."""
+    if not assistant.configured():
+        raise HTTPException(503, assistant.NOT_SET_UP)
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    try:
+        text = await run_in_threadpool(assistant.where_brief, rows, payments, months)
+    except assistant.AssistantError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return {"text": text, "months": months, "model": assistant.model()}
+
+
 @app.get("/api/assistant")
 async def assistant_status(user: User | None = Depends(require_user)) -> dict:
     """Whether the assistant is usable, plus example questions for the UI."""
@@ -1389,7 +1422,7 @@ async def ask_assistant(
     if not assistant.configured():
         raise HTTPException(
             503,
-            "The assistant is not set up yet: ANTHROPIC_API_KEY is missing on the server.",
+            assistant.NOT_SET_UP,
         )
 
     rows = await _history_rows(user)
@@ -1414,7 +1447,7 @@ async def run_analysis(user: User | None = Depends(require_user)) -> dict:
     if not assistant.configured():
         raise HTTPException(
             503,
-            "The assistant is not set up yet: ANTHROPIC_API_KEY is missing on the server.",
+            assistant.NOT_SET_UP,
         )
     rows = await _history_rows(user)
     payments = await _saved_payments(user)

@@ -300,8 +300,8 @@ def product_groups(rows: list[dict]) -> list[dict]:
     return out
 
 
-def market_groups(rows: list[dict]) -> list[dict]:
-    """Each market, and what sells best at it.
+def market_groups(rows: list[dict], period: str = "month") -> list[dict]:
+    """Each market, what sells best at it, and how its trade moved.
 
     The question this answers is which market is worth sending to, and then
     what that market actually pays for. So a market carries its own total, and
@@ -309,10 +309,16 @@ def market_groups(rows: list[dict]) -> list[dict]:
     The agent belongs to the product rather than to a card of its own: the same
     agency sells at more than one market, so its total across all of them says
     nothing about where to send a load.
+
+    Each market carries its own trend, bucketed like the page's (by day for a
+    week, by week for a month, by month over everything), so a market's
+    movement is read where its products are, not on a card of its own.
     """
     markets: dict[str, dict] = {}
+    rows_of: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
         name = (row.get("market") or "").strip() or UNKNOWN
+        rows_of[name].append(row)
         m = markets.setdefault(name, {"label": name, "value": 0.0, "cartons": 0.0,
                                       "lines": 0, "products": {}})
         label = product_label(row)
@@ -346,6 +352,7 @@ def market_groups(rows: list[dict]) -> list[dict]:
             "lines": m["lines"],
             "share": round(m["value"] / total, 4) if total else 0.0,
             "products": products,
+            "trend": trend(rows_of[m["label"]], period),
         })
     out.sort(key=lambda d: d["value"], reverse=True)
     return out
@@ -567,7 +574,7 @@ def compute(rows: list[dict], period: str = "week") -> dict:
         "best_sellers": best_sellers(rows),
         "product_groups": product_groups(rows),
         "by_market": _totals_by(rows, lambda r: r.get("market")),
-        "market_groups": market_groups(rows),
+        "market_groups": market_groups(rows, period),
         "by_agent": _totals_by(rows, lambda r: r.get("market_agent")),
         "trend": trend(rows, period),
         "period": period,

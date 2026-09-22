@@ -348,6 +348,8 @@
     body.printing-outstanding .trk-head,
     body.printing-outstanding .trk-note { display: none !important; }
     body.printing-outstanding .trk-grid { display: block; gap: 0; }
+    body.printing-outstanding .trk-block[data-block="owed"] { height: auto !important; }
+    body.printing-outstanding .trk-block[data-block="owed"] > .trk-body { overflow: visible !important; }
     body.printing-outstanding .trk-block[data-block="owed"] {
       border: 0; padding: 0; box-shadow: none; overflow: visible; }
     body.printing-outstanding .trk-body { padding: 0; }
@@ -397,7 +399,16 @@
      grade -- MEDIUM and LARGE both truncated to the same string. */
   .trk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; align-items: start; }
   .trk-grid > .trk-block:last-child { grid-column: 1 / -1; }
-  .trk-grid.has-open .trk-block.open { grid-column: 1 / -1; order: -1; }
+  /* Outstanding and Stock on Hand are two fixed boxes of one size, side by
+     side, whatever they hold. Their lines fill in and scroll inside the box;
+     opening one shows everything in the same place instead of growing it or
+     throwing it across the full width, which left the two never lining up. */
+  .trk-grid > .trk-block[data-block="owed"],
+  .trk-grid > .trk-block[data-block="stock"] {
+    height: 540px; display: flex; flex-direction: column; }
+  .trk-grid > .trk-block[data-block="owed"] > .trk-body,
+  .trk-grid > .trk-block[data-block="stock"] > .trk-body {
+    flex: 1; min-height: 0; overflow-y: auto; }
   .trk-block { padding: 0; overflow: hidden; }
   .trk-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px;
               cursor: pointer; border-bottom: 1px solid var(--line); }
@@ -581,6 +592,23 @@
   .pg-items { list-style: none; margin: 0; padding: 4px 6px 10px 26px; display: flex;
               flex-direction: column; gap: 8px; }
   .pg-item .pg-v { font-weight: 600; }
+  .pgroups.pg-market .pg-head, .pgroups.pg-market .pg-item {
+    grid-template-columns: minmax(200px, 42%) 1fr 118px 76px 52px 76px; }
+  .pg-head[role="button"] { cursor: pointer; }
+  .pg-head[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .pg-trend { appearance: none; justify-self: end; display: inline-flex; align-items: center; gap: 4px;
+              border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
+              border-radius: 6px; padding: 3px 8px; font: 600 11px var(--sans); cursor: pointer; white-space: nowrap; }
+  .pg-trend:hover { color: var(--ink); border-color: var(--ink-faint); }
+  .pg-trend.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pg-trend .ic { margin: 0; }
+  .pg-trendbox { padding: 8px 8px 4px 32px; }
+  .pg-trendbox.all { padding: 10px 0 6px; }
+  .pg-trendhead { font-size: 12px; font-weight: 650; color: var(--ink-soft); margin-bottom: 4px; }
+  /* Full card width would stretch the trend to twice its useful height. */
+  .pg-trendbox .chart-wrap { max-width: 760px; }
+  .pg-trendbox svg.trend { max-height: 210px; }
+  .ins-card-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   /* Where to send it. */
   .where-card .pg-head.where-head { grid-template-columns: minmax(180px, 40%) 1fr 130px; }
   .where-brief { margin: 10px 0 14px; padding: 12px 14px; border-radius: 10px;
@@ -614,6 +642,8 @@
   }
   @media (max-width: 700px) {
     .pg-head, .pg-item { grid-template-columns: 1fr auto auto; }
+    .pgroups.pg-market .pg-head, .pgroups.pg-market .pg-item { grid-template-columns: 1fr auto auto auto; }
+    .pg-trendbox { padding-left: 8px; }
     .pg-head .btrack, .pg-item .btrack, .pg-s { display: none; }
     .pg-items { padding-left: 12px; }
   }
@@ -1900,8 +1930,8 @@ function renderTracking() {
     </section>`;
   };
 
-  const emptyBlock = (title, summary, message) => `
-    <section class="trk-block card">
+  const emptyBlock = (key, title, summary, message) => `
+    <section class="trk-block card" data-block="${key}">
       <header class="trk-head"><div class="trk-title"><h2>${title}</h2>
         <span class="trk-sum">${summary}</span></div></header>
       <div class="trk-body"><p class="ins-empty">${message}</p></div></section>`;
@@ -1972,7 +2002,7 @@ function renderTracking() {
            p.credit_value ? `R ${fmt(-p.credit_value)} credited back` : ""].filter(Boolean).join(" · "),
           `<p class="ins-empty">Nothing is open.${p.closed_value ? ` ${fmtInt((p.closed || []).length)} closed line${(p.closed || []).length === 1 ? " is" : "s are"} held off the total.` : ""}${p.credit_value ? ` Returns booked in this period reverse sales made earlier, so it comes to R ${fmt(p.still_to_come)}.` : ""}</p>`,
           owedFull, "")
-      : emptyBlock("Outstanding", "nothing owed", "Everything sold has been paid for.");
+      : emptyBlock("owed", "Outstanding", "nothing owed", "Everything sold has been paid for.");
 
   // --- stock on hand -------------------------------------------------------
   const soh = T.data.stock_on_hand || { markets: [], items: 0, cartons_left: 0, counts: {}, closed: [] };
@@ -2033,7 +2063,7 @@ function renderTracking() {
            ? ` ${fmtInt(soh.dated_by_first_sale)} of ${fmtInt(soh.items)} line${soh.items === 1 ? " is" : "s are"} counted from the day ${
              soh.items === 1 ? "it" : "they"} first sold, because the Daily Sales report prints no arrival date.` : ""}</p>
          ${closedList(soh.closed || [], "slow", r => fmtInt(r.cartons_left) + " of " + fmtInt(r.cartons_sent))}`)
-    : emptyBlock("Stock on Hand", "nothing unsold", "Everything sent to market has sold.");
+    : emptyBlock("stock", "Stock on Hand", "nothing unsold", "Everything sent to market has sold.");
 
   // --- sales per day -------------------------------------------------------
   const span = T.data.span || {};
@@ -2111,7 +2141,7 @@ function renderTracking() {
                     : `<p class="ins-empty">No sales in that range.</p>`,
         days.length ? dayTable : `<p class="ins-empty">No sales in that range.</p>`,
         pickers)
-    : emptyBlock("Sales per day", "nothing recorded", "No sales recorded yet.");
+    : emptyBlock("sales", "Sales per day", "nothing recorded", "No sales recorded yet.");
 
   main.innerHTML = `
     <section class="screen ins">
@@ -2132,7 +2162,7 @@ function renderTracking() {
              ? ` · R ${fmt(p.still_to_come_all_time)} all time` : ""),
           undefined, { tone: "warn", icon: "clock" })}
       </div>
-      <div class="trk-grid${open ? " has-open" : ""}">
+      <div class="trk-grid">
         ${owedBlock}${stockBlock}${salesBlock}
       </div>
     </section>`;
@@ -3318,24 +3348,38 @@ function productGroupList(groups, metric, kind) {
   const byMetric = (a, b) => b[metric] - a[metric];
   const ranked = [...groups].sort(byMetric);
   const top = Math.max(...ranked.map(g => g[metric]), 0) || 1;
+  // Markets carry a Trend button and their own trend, in a column of their
+  // own so the figures still line up down the card.
+  const markets = kind === "market";
+  const trends = S.insights.trends || {};
+  const periodWord = { day: "Daily", week: "Weekly", month: "Monthly" }[
+    (S.insights.data || {}).period] || "";
   const width = (v, max) => Math.max(2, Math.round((v / max) * 100));
   const abcClass = { A: "a", B: "b", C: "c" };
   const figures = x => `<span class="pg-v num">R ${fmt(x.value)}</span>
       <span class="pg-c num">${fmtInt(x.cartons)} ctn</span>`;
 
-  return `<ul class="pgroups">${ranked.map(g => {
+  return `<ul class="pgroups${markets ? " pg-market" : ""}">${ranked.map(g => {
     const isOpen = !!open[kind + "|" + g.label];
     const products = [...(g.products || [])].sort(byMetric);
     const inner = Math.max(...products.map(p => p[metric]), 0) || 1;
     const count = products.length;
+    const trendOn = markets && !!trends[g.label];
     return `<li class="pgroup${isOpen ? " open" : ""}">
-      <button class="pg-head" aria-expanded="${isOpen}" onclick="toggleProductGroup(${q(kind)}, ${q(g.label)})">
+      <div class="pg-head" role="button" tabindex="0" aria-expanded="${isOpen}"
+        onclick="toggleProductGroup(${q(kind)}, ${q(g.label)})"
+        onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
         <span class="pg-name"><span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
           <b>${esc(g.label)}</b><em>${fmtInt(count)} product${count === 1 ? "" : "s"}</em></span>
         <span class="btrack"><span class="bfill" style="width:${width(g[metric], top)}%"></span></span>
         ${figures(g)}
         <span class="pg-s num">${(g.share * 100).toFixed(1)}%</span>
-      </button>
+        ${markets ? `<button class="pg-trend${trendOn ? " on" : ""}" title="How ${esc(g.label)} traded over the period"
+          onclick="event.stopPropagation(); toggleMarketTrend(${q(g.label)})">${icon("chart", 12)}Trend</button>` : ""}
+      </div>
+      ${isOpen && trendOn ? `<div class="pg-trendbox">
+        <div class="pg-trendhead">${esc(periodWord)} trend at ${esc(g.label)}</div>
+        ${trendChart(g.trend || [])}</div>` : ""}
       ${isOpen ? `<ul class="pg-items">${products.map(p => `<li class="pg-item">
         <span class="pg-name" title="${esc(p.label)}">${p.abc
           ? `<span class="abc ${abcClass[p.abc] || ""}" title="Class ${esc(p.abc)} across the whole period">${esc(p.abc)}</span>` : ""}
@@ -3343,10 +3387,25 @@ function productGroupList(groups, metric, kind) {
           (p.agents || []).length ? `<em class="pg-ag" title="Sold by ${esc(p.agents.join(", "))}">${esc(p.agents.join(" · "))}</em>` : ""}</span>
         <span class="btrack"><span class="bfill" style="width:${width(p[metric], inner)}%"></span></span>
         ${figures(p)}
-        <span class="pg-s num"></span>
+        <span class="pg-s num"></span>${markets ? `<span></span>` : ""}
       </li>`).join("")}</ul>` : ""}
     </li>`;
   }).join("")}</ul>`;
+}
+
+/** Show or hide one market's trend. Showing it opens the market too, so the
+ *  trend and the products that made it are read together. */
+function toggleMarketTrend(label) {
+  const I = S.insights;
+  const trends = I.trends || (I.trends = {});
+  trends[label] = !trends[label];
+  if (trends[label]) (I.openGroups || (I.openGroups = {}))["market|" + label] = true;
+  render();
+}
+
+function toggleAllTrend() {
+  S.insights.allTrend = !S.insights.allTrend;
+  render();
 }
 
 function renderInsights() {
@@ -3452,14 +3511,13 @@ function renderInsights() {
           ${productGroupList(d.product_groups, metric, "fruit")}
         </div>
 
-        <div class="card ins-card">
-          <div class="ins-card-head"><h2>${trendTitle} trend</h2></div>
-          ${trendChart(d.trend)}
-        </div>
 
         <div class="card ins-card wide">
           <div class="ins-card-head"><h2>By market</h2>
-            <span class="rep-c">open a market to see what sells there</span></div>
+            <span class="ins-card-tools"><span class="rep-c">open a market to see what sells there</span>
+              <button class="pg-trend${I.allTrend ? " on" : ""}" onclick="toggleAllTrend()">${icon("chart", 12)}Trend, all markets</button></span></div>
+          ${I.allTrend ? `<div class="pg-trendbox all">
+            <div class="pg-trendhead">${esc(trendTitle)} trend, all markets</div>${trendChart(d.trend)}</div>` : ""}
           ${productGroupList(d.market_groups, metric, "market")}
         </div>
       </div>
@@ -3737,6 +3795,17 @@ function demoAnalytics(month, week) {
       return [...byMarket.values()].map(m => ({
         label: m.label, value: round2(m.value), cartons: round2(m.cartons), lines: m.lines,
         share: round4(m.value / whole),
+        trend: (() => {
+          const by = new Map();
+          for (const r of rows.filter(x => (x.market || "Unknown") === m.label)) {
+            const pk = periodKey(r.group_date, period);
+            if (!pk) continue;
+            const o = by.get(pk) || { period: pk, value: 0, cartons: 0 };
+            o.value += val(r); o.cartons += car(r); by.set(pk, o);
+          }
+          return [...by.values()].map(o => ({ ...o, value: round2(o.value), cartons: round2(o.cartons) }))
+            .sort((a, b) => a.period < b.period ? -1 : 1);
+        })(),
         products: [...m.products.values()].map(p => ({
           label: p.label, value: round2(p.value), cartons: round2(p.cartons), lines: p.lines,
           agents: [...p.agents].sort(), share: round4(p.value / (m.value || 1)),

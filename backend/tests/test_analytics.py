@@ -413,3 +413,14 @@ def test_markets_add_up_to_the_period():
 def test_a_row_with_no_market_is_named_not_dropped():
     [m] = analytics.market_groups([_at(None, "Farmers Trust", "GRAPES SUGRAONE", 1, 100.0)])
     assert m["label"] == analytics.UNKNOWN
+
+
+def test_each_market_carries_its_own_trend():
+    rows = [_at("TSHWANE MARKET", "Farmers Trust", "GRAPES SUGRAONE", 10, 380.0),
+            {**_at("TSHWANE MARKET", "Farmers Trust", "GRAPES SUGRAONE", 5, 380.0), "last_sale": "2026-09-03"},
+            _at("DURBAN MARKET", "Grow Port Natal", "GRAPES SUGRAONE", 4, 400.0)]
+    markets = {m["label"]: m for m in analytics.market_groups(rows, "month")}
+    assert markets["TSHWANE MARKET"]["trend"] == [
+        {"period": "2026-08", "value": 3800.0, "cartons": 10.0},
+        {"period": "2026-09", "value": 1900.0, "cartons": 5.0}]
+    assert [p["period"] for p in markets["DURBAN MARKET"]["trend"]] == ["2026-08"]

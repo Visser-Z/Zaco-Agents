@@ -151,3 +151,110 @@ def test_a_weak_month_crowns_nobody():
     out = procurement.build(weak, PAYS, today=TODAY)
     assert [l["priority"] for l in out["lines"]] == ["hold"]
     assert [g["key"] for g in out["priorities"]] == ["hold"]
+
+
+# --- growing it: room to grow, and a market worth trying ---------------------
+
+def test_a_market_that_took_everything_fast_at_the_going_rate_is_asked_for_more():
+    """Replacing what sold can never grow the book. Grapes sell out in a day at
+    the market average three months running, so the plan asks for a fifth more
+    again, and says in the line's own figures why."""
+    grow = _line(procurement.build(ROWS, PAYS, today=TODAY), GRAPES)["headroom"]
+    assert grow["cartons"] == 30           # 100 expected, all of it sold, rising
+    assert grow["share"] == 0.30           # a fifth, and a tenth on top for rising
+    assert grow["market"] == "TSHWANE MARKET"
+    assert grow["worth"] > 0
+    assert "sold every carton sent, 3 months running" in grow["why"]
+    assert "cleared in 2 days" in grow["why"]
+    assert "up on last month" in grow["why"]
+
+
+def test_nothing_is_stretched_while_it_is_still_sitting_on_the_floor():
+    """Plums leave half the load unsold. However they are priced, a market
+    sitting on stock is not a market short of the fruit."""
+    assert _line(procurement.build(ROWS, PAYS, today=TODAY), PLUMS)["headroom"] is None
+
+
+def test_selling_out_under_the_market_average_earns_no_stretch():
+    """Everything sold, fast, but at four fifths of what the floor was paying:
+    the way to sell more of that is to cut the price again, not a plan."""
+    cheap = [_month(7001 + i * 100, "PEACHES KEISIE CLASS 1 LARGE (CARTON 5kg)",
+                    "TSHWANE MARKET", "Farmers Trust", 100, 20000.0, m, of_market=0.8)
+             for i, m in enumerate(("07", "08", "09"))]
+    out = procurement.build(ROWS + cheap, PAYS, today=TODAY)
+    line = _line(out, "PEACHES KEISIE CLASS 1 LARGE (CARTON 5kg)")
+    assert line["sell_through"] == 1.0 and line["vs_market"] == 0.8
+    assert line["headroom"] is None
+
+
+def test_a_month_of_history_is_not_enough_to_ask_for_more():
+    one = [_month(7301, "PEARS PACKHAMS CLASS 1 LARGE (CARTON 12kg)",
+                  "TSHWANE MARKET", "Farmers Trust", 80, 24000.0, "09")]
+    out = procurement.build(ROWS + one, PAYS, today=TODAY)
+    assert _line(out, "PEARS PACKHAMS CLASS 1 LARGE (CARTON 12kg)")["headroom"] is None
+
+
+def test_the_plan_adds_up_what_there_is_room_to_grow():
+    out = procurement.build(ROWS, PAYS, today=TODAY)
+    grow = _line(out, GRAPES)["headroom"]
+    assert out["totals"]["growth_lines"] == 1
+    assert out["totals"]["growth_cartons"] == grow["cartons"]
+    assert out["totals"]["growth_worth"] == grow["worth"]
+
+
+# A second grape line that has only ever gone to Durban, where the same fruit
+# gives back far less of the going rate than it does at Tshwane.
+ONLY = "GRAPES SONITA CLASS 1 NO SIZE (PUNNET 5kg)"
+STUCK = [_month(8001 + i * 100, ONLY, "DURBAN MARKET", "Grow Port Natal",
+                80, 24000.0, m, of_market=0.6)
+         for i, m in enumerate(("07", "08", "09"))]
+
+
+def test_a_product_that_has_only_seen_one_market_is_offered_a_test_load():
+    out = procurement.build(ROWS + STUCK, PAYS, today=TODAY)
+    line = _line(out, ONLY)
+    assert line["where_kind"] == "only"
+    trial = line["trial"]
+    assert trial["market"] == "TSHWANE MARKET"
+    assert trial["cartons"] == 12          # a sixth of the 80 it is expected to sell
+    assert trial["holds"] > trial["holds_here"]
+    assert trial["worth"] > 0
+    assert "of the going rate on grapes" in trial["why"]
+
+
+def test_what_a_test_load_is_worth_is_this_product_lifted_by_the_gap():
+    """Never the other market's rand per carton: the fruit it sells there may
+    simply be dearer fruit. Sonita at 60% of the going rate against Crimson at
+    100% is a two thirds lift on Sonita's own figure, not Crimson's."""
+    out = procurement.build(ROWS + STUCK, PAYS, today=TODAY)
+    line = _line(out, ONLY)
+    trial = line["trial"]
+    lift = trial["holds"] / trial["holds_here"] - 1
+    assert trial["per_carton"] == round(line["back_per_carton"] * lift, 2)
+    assert trial["per_carton"] < line["back_per_carton"]
+    assert out["totals"]["trials"] == 1
+    assert out["totals"]["trial_cartons"] == trial["cartons"]
+
+
+def test_no_test_load_where_the_other_market_is_no_better():
+    """Tshwane and Durban both give back the going rate on this fruit, so
+    freighting it across the country proves nothing."""
+    level = [_month(8501 + i * 100, ONLY, "DURBAN MARKET", "Grow Port Natal",
+                    80, 24000.0, m) for i, m in enumerate(("07", "08", "09"))]
+    out = procurement.build(ROWS + level, PAYS, today=TODAY)
+    assert _line(out, ONLY)["trial"] is None
+
+
+def test_no_test_load_on_a_product_too_small_to_read_a_result_off():
+    small = [_month(8801 + i * 100, ONLY, "DURBAN MARKET", "Grow Port Natal",
+                    10, 3000.0, m, of_market=0.6) for i, m in enumerate(("07", "08", "09"))]
+    out = procurement.build(ROWS + small, PAYS, today=TODAY)
+    line = _line(out, ONLY)
+    assert line["expected_cartons"] < procurement.TRIAL_WORTH_TESTING
+    assert line["trial"] is None
+
+
+def test_the_plan_says_what_the_growth_figures_assume():
+    out = procurement.build(ROWS + STUCK, PAYS, today=TODAY)
+    assert any("Room to grow" in c for c in out["caveats"])
+    assert any("test load" in c for c in out["caveats"])

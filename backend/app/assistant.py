@@ -614,14 +614,15 @@ PLAN_SYSTEM = """You write the buy plan at the top of the Procurement screen in 
 
 How the business works: Zaco takes fruit from growers on consignment, sends it to a market agent at a fresh-produce market, and earns a commission on what the market returns. There is no purchase price anywhere in this data, so never talk about margin, cost or profit: every rand figure you are given is what the market is expected to return.
 
-You are given the plan already computed: every product worth taking on, its priority, how many cartons to take on (what is expected to sell, less what is already sitting on the floor), where it pays best, and the figures behind each. Use only those figures. Never add, average or estimate anything yourself, and never name a product or a destination that is not in the list.
+You are given the plan already computed: every product worth taking on, its priority, how many cartons to take on (what is expected to sell, less what is already sitting on the floor), where it pays best, and the figures behind each. Some lines also carry room to grow: extra cartons on top of the expectation, where that market took everything sent, took it within a couple of days and paid about the going rate, and test loads at a market a product has never been to. Use only those figures. Never add, average or estimate anything yourself, and never name a product or a destination that is not in the list. Never suggest more of something the plan does not say there is room for.
 
 Write it the way the operator will act on it:
 - Open with the shape of it in one line: how many lines to take on, how many cartons, and what the market is expected to return.
 - Then the Critical and High lines, each in one sentence: how much of what, where to send it, and the single figure that justifies it.
+- Then the growth, which is the part that makes the month bigger than last month: name the lines with room to grow, how many extra cartons and what they should return, and the test loads worth taking a chance on, each with what it is worth and what to watch.
 - Call out anything that still has stock on the floor, where taking on more would add to what is already unsold.
 - Say plainly where the history is too thin to be sure, and where a product has only ever gone to one market so there is nothing to compare.
-- Under 220 words. Plain sentences, a short list is fine, no headings. Money as "R 12 500,00"."""
+- Under 260 words. Plain sentences, a short list is fine, no headings. Money as "R 12 500,00"."""
 
 
 def plan_context(plan: dict) -> str:
@@ -634,6 +635,9 @@ def plan_context(plan: dict) -> str:
            f"{t['lines']} lines. Expected back from the market: {_rand(t['expected_value'])}. "
            f"Already on the floor: {t['on_hand']} cartons. "
            f"{t['untested']} products have only ever gone to one market.",
+           f"Room to grow: {t['growth_cartons']} extra cartons across {t['growth_lines']} lines, "
+           f"worth about {_rand(t['growth_worth'])} more, plus {t['trials']} test loads "
+           f"({t['trial_cartons']} cartons) worth about {_rand(t['trial_worth'])} more.",
            *("Caveat: " + c for c in plan.get("caveats", []))]
     for group in plan["priorities"]:
         out.append(f"\n### {group['key'].title()} ({len(group['lines'])} lines, "
@@ -649,8 +653,26 @@ def plan_context(plan: dict) -> str:
                 f"(expects {l['expected_cartons']:.0f}, {l['on_hand']} on the floor), "
                 f"send to {where_to}{lead}. Expected {_rand(l['expected_value'])} "
                 f"({_rand(l['expected_low'])} to {_rand(l['expected_high'])}, "
-                f"{l['confidence']}). {'; '.join(l['reasons'])}.")
+                f"{l['confidence']}). {'; '.join(l['reasons'])}."
+                + _growth_note(l))
     return "\n".join(out)
+
+
+def _growth_note(line: dict) -> str:
+    """The room the plan sees in a line, in its own figures, for the write-up."""
+    out = ""
+    if h := line.get("headroom"):
+        worth = f", worth about {_rand(h['worth'])} more" if h["worth"] is not None else ""
+        out += (f" ROOM TO GROW: {h['cartons']} cartons on top of the "
+                f"{line['expected_cartons']:.0f} expected{worth} from {h['market']} "
+                f"({'; '.join(h['why'])}).")
+    if t := line.get("trial"):
+        out += (f" WORTH A TRY: a test load of {t['cartons']} cartons to {t['market']}"
+                f"{' via ' + t['market_agent'] if t['market_agent'] else ''}, worth about "
+                f"{_rand(t['worth'])} more than the same cartons where it goes now "
+                f"({t['why']}); watch what it fetches against the market average and how "
+                f"long it takes to clear.")
+    return out
 
 
 def plan_brief(rows: list[dict], payments: list[dict], months: int) -> str:

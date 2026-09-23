@@ -88,3 +88,25 @@ def test_ask_without_a_key_is_a_clear_error(monkeypatch):
     import pytest
     with pytest.raises(assistant.AssistantError, match="ANTHROPIC_API_KEY"):
         assistant.ask("what sold best?", [_row()])
+
+
+def test_the_written_plan_is_handed_the_room_to_grow_with_the_figures():
+    """The write-up cannot find growth of its own, so the context has to carry
+    it: the extra cartons, what they are worth, and why the line earned them."""
+    from datetime import date
+
+    from app import procurement
+    from tests.test_procurement import PAYS, ROWS, GRAPES, TODAY
+
+    plan = procurement.build(ROWS, PAYS, today=TODAY)
+    text = assistant.plan_context(plan)
+    grow = next(l for l in plan["lines"] if l["product"] == GRAPES)["headroom"]
+    assert "Room to grow:" in text
+    assert f"ROOM TO GROW: {grow['cartons']} cartons" in text
+    assert "sold every carton sent" in text
+    assert f"worth about {assistant._rand(grow['worth'])} more" in text
+
+
+def test_the_plan_prompt_tells_the_model_not_to_invent_growth():
+    assert "Never suggest more of something the plan does not say there is room for" \
+        in assistant.PLAN_SYSTEM

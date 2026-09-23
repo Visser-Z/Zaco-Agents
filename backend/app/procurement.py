@@ -18,6 +18,17 @@ a margin, and the screen has to say so.
 floor.** A product with two hundred cartons sitting unsold at the market does
 not need two hundred more, however well it normally does.
 
+**Replacing what sold is not a plan for growing.** That rule on its own can
+never ask for more than the book already does, so the plan also says where
+there is room to put more in. A line that sold every carton sent, cleared it
+within a couple of days and held the market average was a market asking for
+more, and it gets a stretch above the expectation with the reason attached. A
+product that has only ever gone to one market gets a small test load at the
+market that pays its fruit best, sized so that being wrong costs little. Both
+carry what they are worth in rand. Neither is offered where the fruit did not
+sell out, where it fetched under the market average, or where stock is still
+sitting on the floor.
+
 **A priority means the same thing every month.** The bands are fixed marks on
 the score, not a ranking within the month, so a quiet month can have no
 Critical lines at all and a strong one can be full of them. That is the point:
@@ -66,6 +77,24 @@ CRITICAL_AT, HIGH_AT, STEADY_AT = 0.85, 0.75, 0.60
 # a reason, but it is not a full one either.
 THIN_BASE, THIN_STEP = 0.6, 0.2
 
+# What a market asking for more looks like: it took everything sent, it took it
+# within a couple of days, and it paid about what the floor was paying. Short
+# of all three, more cartons is a guess wearing a plan's clothes.
+SOLD_OUT, FAST_DAYS, HELD_PRICE = 0.98, 3.0, 0.95
+
+# How much more to ask for: a fifth again on a line that meets the bar, a tenth
+# on top where it is also rising, another where it cleared the same day.
+STRETCH_BASE, STRETCH_RISING, STRETCH_SAME_DAY = 0.20, 0.10, 0.10
+
+# A test load at an untried market: a sixth of the month, never fewer than ten
+# cartons, and only for products moving enough to read a result off.
+TRIAL_SHARE, TRIAL_MIN, TRIAL_WORTH_TESTING = 0.15, 10, 40
+
+# The market being tried has to beat the one in use by this much on rand back
+# per carton, over at least this many loads of that fruit, before it is worth
+# the freight and the risk.
+TRIAL_MARGIN, MIN_TRIAL_LOADS = 1.05, 2
+
 
 def _direction(basis: dict[str, float]) -> tuple[str, float]:
     """Which way a product is going, from the months it actually traded."""
@@ -91,6 +120,134 @@ def on_hand_by_product(rows: list[dict]) -> dict[str, float]:
         if sent > 0 and left > 0:
             out[analytics.product_label(group[0])] += left
     return dict(out)
+
+
+def _strength(d: dict) -> float | None:
+    """What a destination gives back as a share of the going rate.
+
+    Rand per carton cannot be compared across products -- a punnet of Sweet
+    Celebration and a carton of loose whites are not the same trade -- so a
+    market that looks generous may simply have had the dearer fruit. Dividing
+    what came back by what the commodity was fetching on the floor that day
+    takes the product out of it and leaves the market: 0,82 is eighty-two cents
+    back in the hand for every rand the market was paying, after the agent has
+    taken his cut and after whatever did not sell.
+    """
+    if d["back_per_carton"] is None or not d["market_avg"]:
+        return None
+    return d["back_per_carton"] / d["market_avg"]
+
+
+def fruit_markets(card: dict) -> dict[str, dict[str, dict]]:
+    """Per fruit, how much of the going rate each market gives back on it.
+
+    A product that has only ever gone to one market has nothing of its own to
+    compare against, but its fruit usually does: if every other grape line does
+    better at Durban, that is the market to try this one at. Weighted by
+    cartons, so a market known from one small load does not outrank one known
+    from a season.
+    """
+    out: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(
+        lambda: {"weighted": 0.0, "cartons": 0.0, "consignments": 0, "agent": None}))
+    for fruit in card.get("fruits", []):
+        for product in fruit["products"]:
+            for d in product["destinations"]:
+                held = _strength(d)
+                if held is None or not d["market"] or d["cartons"] <= 0:
+                    continue
+                cell = out[fruit["label"]][d["market"]]
+                cell["weighted"] += held * d["cartons"]
+                cell["cartons"] += d["cartons"]
+                cell["consignments"] += d["consignments"]
+                cell["agent"] = cell["agent"] or d["market_agent"]
+    return {fruit: {m: {"holds": round(c["weighted"] / c["cartons"], 4),
+                        "cartons": round(c["cartons"]),
+                        "consignments": c["consignments"],
+                        "market_agent": c["agent"]}
+                    for m, c in markets.items()}
+            for fruit, markets in out.items()}
+
+
+def _headroom(line: dict) -> dict | None:
+    """Where a market asked for more than it was sent, and how much more.
+
+    Only where all three held: everything sent sold, it went within a couple of
+    days, and it fetched about what the market was paying. Stock still on the
+    floor rules the line out on its own -- that market is not short of it.
+    """
+    if line["on_hand"] or len(line["months_used"]) < 2:
+        return None
+    through, days, vs = line["sell_through"], line["days_to_clear"], line["vs_market"]
+    if through is None or through < SOLD_OUT:
+        return None
+    if days is None or days > FAST_DAYS:
+        return None
+    if vs is None or vs < HELD_PRICE:
+        return None
+    share = STRETCH_BASE
+    if line["direction"] == "rising":
+        share += STRETCH_RISING
+    if days <= 1:
+        share += STRETCH_SAME_DAY
+    cartons = round(line["expected_cartons"] * share)
+    if cartons < 1:
+        return None
+    why = [f"sold every carton sent, {len(line['months_used'])} months running",
+           "cleared the same day" if days <= 1 else f"cleared in {days:.0f} days",
+           f"held {vs * 100:.0f}% of the market average"]
+    if line["direction"] == "rising":
+        why.append("up on last month")
+    back = line["back_per_carton"]
+    return {
+        "cartons": cartons,
+        "share": round(share, 2),
+        "worth": round(cartons * back, 2) if back is not None else None,
+        "market": line["market"],
+        "market_agent": line["market_agent"],
+        "why": why,
+    }
+
+
+def _trial(line: dict, by_fruit: dict[str, dict[str, dict]]) -> dict | None:
+    """A small load at a market this product has never been to.
+
+    Offered only where the product has gone to exactly one market, is moving
+    enough to read a result off, and another market pays its fruit clearly
+    better. The size is what can be got wrong without it mattering.
+    """
+    here_back = line["back_per_carton"]
+    if line["where_kind"] != "only" or not here_back or here_back <= 0:
+        return None
+    if line["expected_cartons"] < TRIAL_WORTH_TESTING:
+        return None
+    mine = next((d for d in line["destinations"] if d["market"] == line["market"]), None)
+    held_here = _strength(mine) if mine else None
+    if not held_here:
+        return None
+    rivals = [(m, c) for m, c in by_fruit.get(line["fruit"], {}).items()
+              if m != line["market"] and c["consignments"] >= MIN_TRIAL_LOADS
+              and c["holds"] >= held_here * TRIAL_MARGIN]
+    if not rivals:
+        return None
+    market, cell = max(rivals, key=lambda pair: pair[1]["holds"])
+    cartons = max(round(line["expected_cartons"] * TRIAL_SHARE), TRIAL_MIN)
+    # What the trial is worth is this product's own rand per carton lifted by
+    # the gap between the two markets, never the other market's rand per
+    # carton: the fruit there may simply be dearer fruit.
+    per_carton = here_back * (cell["holds"] / held_here - 1)
+    return {
+        "cartons": cartons,
+        "market": market,
+        "market_agent": cell["market_agent"],
+        "holds": cell["holds"],
+        "holds_here": round(held_here, 4),
+        "per_carton": round(per_carton, 2),
+        "worth": round(per_carton * cartons, 2),
+        "loads": cell["consignments"],
+        "why": (f"{market} gives back {cell['holds'] * 100:.0f}% of the going rate on "
+                f"{line['fruit'].lower()}, against {held_here * 100:.0f}% here, over "
+                f"{cell['consignments']} loads"),
+    }
 
 
 def band(score: float) -> str:
@@ -196,6 +353,12 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
             line["priority"] = band(line["score"])
             line["reasons"] = _reasons(line)
 
+    # Where there is room to put more in, and where something new is worth a try.
+    by_fruit = fruit_markets(card)
+    for line in lines:
+        line["headroom"] = _headroom(line)
+        line["trial"] = _trial(line, by_fruit)
+
     # Grouped for the screen's dropdowns: priority first, fruit within it.
     groups: dict[str, list[dict]] = defaultdict(list)
     for line in lines:
@@ -223,6 +386,15 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
             "on_hand": round(sum(l["on_hand"] for l in lines)),
             "no_destination": sum(1 for l in lines if l["where_kind"] in ("unknown", "thin")),
             "untested": sum(1 for l in lines if l["where_kind"] == "only"),
+            # Growing it: the cartons the markets have room for, the loads
+            # worth trying somewhere new, and what each is worth if it holds.
+            "growth_lines": sum(1 for l in lines if l["headroom"]),
+            "growth_cartons": round(sum(l["headroom"]["cartons"] for l in lines if l["headroom"])),
+            "growth_worth": round(sum(l["headroom"]["worth"] or 0
+                                      for l in lines if l["headroom"]), 2),
+            "trials": sum(1 for l in lines if l["trial"]),
+            "trial_cartons": round(sum(l["trial"]["cartons"] for l in lines if l["trial"])),
+            "trial_worth": round(sum(l["trial"]["worth"] for l in lines if l["trial"]), 2),
         },
         "bands": {"critical": CRITICAL_AT, "high": HIGH_AT, "steady": STEADY_AT},
         "caveats": projection["caveats"] + [
@@ -234,6 +406,13 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
             "the market is expected to return, not a margin.",
             "How much to take on is what is expected to sell next month less what is "
             "still on the floor now.",
+            "Room to grow is only offered where a product sold every carton sent, cleared "
+            "within a couple of days, held the market average and has nothing left on the "
+            "floor. What a stretch is worth assumes the extra cartons fetch what the "
+            "product has been fetching, which a market taking more of it may not.",
+            "A test load is a small one at the market that pays that fruit best, for a "
+            "product that has only ever gone to one market. What it is worth holds only "
+            "if this product behaves there like the rest of its fruit does.",
         ] + card.get("caveats", []),
         "agent_cut": card.get("agent_cut", {}),
         # How long each agent takes to pay, so a plan can be read as cash.

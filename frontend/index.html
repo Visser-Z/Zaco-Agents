@@ -647,6 +647,9 @@
   .plan-chip.t-crit { border-color: color-mix(in srgb, var(--crit) 45%, var(--line)); color: var(--crit); }
   .plan-chip.t-warn { border-color: color-mix(in srgb, var(--warn-mark) 45%, var(--line)); color: var(--warn); }
   .plan-chip.t-ok { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); color: var(--ok); }
+  .plan-chip.t-grow { border-color: color-mix(in srgb, var(--accent-strong) 45%, var(--line));
+                      color: var(--accent-strong); }
+  .plan-chip.on.t-grow { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
   .plan-chip.on.t-crit { background: var(--crit); border-color: var(--crit); color: #fff; }
   .plan-chip.on.t-warn { background: var(--warn-mark); border-color: var(--warn-mark); color: #fff; }
   .plan-chip.on.t-ok { background: var(--ok); border-color: var(--ok); color: #fff; }
@@ -658,12 +661,15 @@
   .plan-dot.t-mut { background: var(--line-strong); }
   /* The report table right-aligns everything and fixes a wide first column;
      the plan needs the opposite, so it says so rather than inheriting it. */
-  table.rep-table.plan-table { min-width: 760px; table-layout: fixed; }
+  /* Seven columns, five of them fixed: below this the product and the
+     destination have nothing left to show. */
+  table.rep-table.plan-table { min-width: 920px; table-layout: fixed; }
   table.rep-table.plan-table th, table.rep-table.plan-table td { text-align: left; padding: 8px 10px; }
   table.rep-table.plan-table th.num, table.rep-table.plan-table td.num { text-align: right; }
   table.rep-table.plan-table th:first-child, table.rep-table.plan-table td:first-child { width: auto; }
   .plan-table col.c-pri { width: 108px; }
   .plan-table col.c-n { width: 132px; }
+  .plan-table col.c-grow { width: 148px; }
   .plan-table col.c-open { width: 34px; }
   .plan-table th.sortable { cursor: pointer; user-select: none; }
   .plan-table th.sortable:hover { color: var(--ink); }
@@ -693,6 +699,18 @@
   .pl-why { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .pl-chip { font-size: 11px; color: var(--ink-soft); background: var(--surface-2);
              border-radius: 999px; padding: 2px 9px; }
+  /* Room to grow: the one column that asks for more than the book already
+     does, so it is the one thing on the row allowed to be green. */
+  .grow-more { display: block; font-size: 13px; font-weight: 650; color: var(--ok); }
+  .grow-try { display: block; font-size: 12px; font-weight: 600; color: var(--accent-strong);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grow-none { color: var(--ink-faint); }
+  .pl-grow { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px;
+             background: var(--surface-2); font-size: 12px; line-height: 1.5; }
+  .pl-grow + .pl-grow { margin-top: -4px; }
+  .pl-grow b { color: var(--ink); }
+  .pl-grow .gm { color: var(--ok); font-weight: 650; }
+  .pl-grow .gt { color: var(--accent-strong); font-weight: 650; }
   @media (max-width: 700px) { .plan-card { padding: 14px 12px 10px; } }
   /* Nine columns of figures: below this they stop being readable, so the
      table scrolls in its own box instead of squeezing the headings together. */
@@ -2592,6 +2610,11 @@ const BANDS = {
 };
 const BAND_ORDER = ["critical", "high", "steady", "hold"];
 
+/** Lines the plan sees room in: more cartons where the market ran out, or a
+ *  load worth trying at a market this product has never been to. */
+const hasGrowth = l => !!(l.headroom || l.trial);
+const growthWorth = l => (l.headroom && l.headroom.worth || 0) + (l.trial && l.trial.worth || 0);
+
 function setPlanFilter(key) { S.procure.filter = key; render(); }
 function setPlanGroup(key) { S.procure.groupBy = key; render(); }
 
@@ -2608,6 +2631,7 @@ const PLAN_SORTS = {
   product: l => l.product,
   take_on: l => l.take_on,
   expected_value: l => l.expected_value,
+  growth: growthWorth,
   market: l => (l.market || "~") + (l.market_agent || ""),
 };
 
@@ -2635,12 +2659,14 @@ function marketSections(lines) {
     const [market, agent] = key.split("|");
     const cartons = rows.reduce((n, l) => n + l.take_on, 0);
     const value = rows.reduce((n, l) => n + l.expected_value, 0);
+    const room = rows.reduce((n, l) => n + (l.headroom ? l.headroom.cartons : 0), 0);
     const worst = BAND_ORDER.find(b => rows.some(l => l.priority === b)) || "hold";
-    return `<tr class="plan-market"><td colspan="6">
+    return `<tr class="plan-market"><td colspan="7">
         <span class="plan-dot t-${BANDS[worst].tone}"></span>
         <b>${esc(market)}</b>${agent ? `<em>${esc(agent)}</em>` : ""}
         <span class="pm-sum">${fmtInt(rows.length)} line${rows.length === 1 ? "" : "s"} ·
-          ${fmtInt(cartons)} cartons to take on · R ${fmt(value)} expected</span>
+          ${fmtInt(cartons)} cartons to take on · R ${fmt(value)} expected${
+          room ? ` · room for ${fmtInt(room)} more` : ""}</span>
       </td></tr>` + rows.map(planRow).join("");
   }).join("");
 }
@@ -2665,16 +2691,47 @@ function planRow(l) {
       <td class="num"><b>R ${fmt(l.expected_value)}</b><span class="pl-sub">${
         l.expected_low === l.expected_high ? "one month only"
           : `R ${fmt(l.expected_low)} to R ${fmt(l.expected_high)}`}</span></td>
+      <td class="pl-cell">${growCell(l)}</td>
       <td class="pl-cell">${S.procure.groupBy === "market" ? stands
         : `<span class="pl-prod">${esc(l.market || "—")}</span>
            <span class="pl-sub">${esc(l.market_agent || "no destination on record")}</span>`}</td>
       <td class="pl-open"><span class="chev">${icon(open ? "up" : "down", 12)}</span></td>
-    </tr>${open ? `<tr class="plan-detail"><td colspan="6">${planDetail(l)}</td></tr>` : ""}`;
+    </tr>${open ? `<tr class="plan-detail"><td colspan="7">${planDetail(l)}</td></tr>` : ""}`;
+}
+
+/** Where the plan sees room for more, in one cell: cartons the market ran
+ *  short of, or a load worth trying somewhere new, with what it is worth. */
+function growCell(l) {
+  const h = l.headroom, t = l.trial;
+  if (!h && !t) return `<span class="pl-sub grow-none">—</span>`;
+  return (h ? `<span class="grow-more">+${fmtInt(h.cartons)} ctn</span>
+      <span class="pl-sub">${h.worth == null ? "sold out every time"
+        : "about R " + fmt(h.worth) + " more"}</span>` : "")
+    + (t ? `<span class="grow-try" title="${esc(t.market)}">Try ${fmtInt(t.cartons)} at ${esc(shortMarket(t.market))}</span>
+      <span class="pl-sub">R ${fmt(t.worth)} if it holds</span>` : "");
+}
+
+/** Market names are long and the column is narrow, but the branch after the
+ *  dash is the whole point of a trial -- Joburg via BR / MAR is not Joburg via
+ *  Tfresh -- so only the word "market" itself comes out. */
+function shortMarket(name) {
+  return String(name || "").replace(/\s*\b(MARKET|MKT)\b\s*/i, " ").replace(/\s+/g, " ").trim();
 }
 
 function planDetail(l) {
   const dests = l.destinations || [];
+  const h = l.headroom, t = l.trial;
+  const grow = (h ? `<p class="pl-grow"><span class="gm">Room to grow:
+      +${fmtInt(h.cartons)} cartons</span> on top of the ${fmtInt(l.expected_cartons)} expected,
+      ${h.worth == null ? "" : `worth about <b>R ${fmt(h.worth)}</b> more back from
+      ${esc(h.market || "the same market")}`}. ${esc(h.why.join("; "))}.</p>` : "")
+    + (t ? `<p class="pl-grow"><span class="gt">Worth a try:
+      ${fmtInt(t.cartons)} cartons to ${esc(t.market)}</span>${t.market_agent
+        ? ` (${esc(t.market_agent)})` : ""}, worth about <b>R ${fmt(t.worth)}</b> more than the
+      same cartons here if it behaves like the rest of its fruit. ${esc(t.why)}.
+      Watch what it fetches against the market average and how long it takes to clear.</p>` : "");
   return `<div class="pl-body">
+      ${grow}
       <div class="pl-why">${(l.reasons || []).map(r => `<span class="pl-chip">${esc(r)}</span>`).join("")}
         <span class="pl-chip">${esc(l.confidence)} · ${(l.months_used || []).map(monthLabel).join(", ")}</span></div>
       ${dests.length ? `<div class="rep-scroll"><table class="rep-table where-table">
@@ -2747,8 +2804,10 @@ function renderProcure() {
         `expected over ${esc(monthLabel(d.month))}`, undefined, { tone: "ok", icon: "rand" })}
       ${kpiCard("Already on the floor", fmtInt(t.on_hand) + " ctn",
         "taken off what to take on", undefined, { tone: "warn", icon: "clock" })}
-      ${kpiCard("Never compared", fmtInt(t.untested),
-        "products sent to one market only", undefined, { icon: "pin" })}
+      ${kpiCard("Room to grow", "+" + fmtInt(t.growth_cartons + t.trial_cartons) + " ctn",
+        `R ${fmt(t.growth_worth + t.trial_worth)} more · ${fmtInt(t.trials)} test load${
+          t.trials === 1 ? "" : "s"} of ${fmtInt(t.untested)} never compared`,
+        undefined, { tone: "ok", icon: "pin" })}
     </div>`;
 
   const brief = `<div class="where-brief">
@@ -2762,12 +2821,15 @@ function renderProcure() {
 
   const counts = { all: d.lines.length };
   BAND_ORDER.forEach(k => { counts[k] = d.lines.filter(l => l.priority === k).length; });
+  counts.growth = d.lines.filter(hasGrowth).length;
   const chips = [["all", "All", ""]].concat(BAND_ORDER.map(k => [k, BANDS[k].label, BANDS[k].tone]))
+    .concat([["growth", "Room to grow", "grow"]])
     .filter(([k]) => k === "all" || counts[k])
     .map(([k, label, tone]) => `<button class="plan-chip${tone ? " t-" + tone : ""}${P.filter === k ? " on" : ""}"
         onclick="setPlanFilter(${q(k)})">${esc(label)}<em>${fmtInt(counts[k])}</em></button>`).join("");
 
   const shown = sortedPlan(P.filter === "all" ? d.lines
+    : P.filter === "growth" ? d.lines.filter(hasGrowth)
     : d.lines.filter(l => l.priority === P.filter));
 
   const col = (key, label, cls) => `<th class="${cls || ""} sortable${P.sort === key ? " on" : ""}"
@@ -2785,19 +2847,21 @@ function renderProcure() {
         </div>
       </div>
       <div class="rep-scroll"><table class="rep-table plan-table">
-        <colgroup><col class="c-pri"><col><col class="c-n"><col class="c-n"><col><col class="c-open"></colgroup>
+        <colgroup><col class="c-pri"><col><col class="c-n"><col class="c-n"><col class="c-grow"><col><col class="c-open"></colgroup>
         <thead><tr>
           ${col("priority", "Priority")}
           ${col("product", "Product")}
           ${col("take_on", "Take on", "num")}
           ${col("expected_value", "Should return", "num")}
+          ${col("growth", "Room to grow")}
           ${P.groupBy === "market" ? "<th>Where it stands</th>" : col("market", "Send to")}
           <th></th>
         </tr></thead>
-        <tbody>${body || `<tr><td colspan="6" class="ins-empty">Nothing in this band.</td></tr>`}</tbody>
+        <tbody>${body || `<tr><td colspan="7" class="ins-empty">Nothing in this band.</td></tr>`}</tbody>
       </table></div>
       <p class="rep-note">Take on is what is expected to sell next month less what is still on the
-        floor. Colours are the priority: ${BAND_ORDER.map(k =>
+        floor. Room to grow is more than that: cartons a market ran short of, or a test load at a
+        market the product has never been to. Colours are the priority: ${BAND_ORDER.map(k =>
           `<span class="plan-dot t-${BANDS[k].tone}"></span> ${BANDS[k].label.toLowerCase()}`).join(", ")}.</p>
     </div>`;
 

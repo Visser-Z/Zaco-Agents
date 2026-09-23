@@ -9,16 +9,21 @@ PLUMS = "PLUMS FORTUNE CLASS 2 LARGE (ECONOMIC PACK 8kg)"
 TODAY = date(2026, 9, 22)
 
 
-def _row(cid, product, market, agent, sold, value, day, received, qty):
+def _row(cid, product, market, agent, sold, value, day, received, qty, of_market=1.0):
+    """One consignment. `of_market` is what it fetched against the market's own
+    average for that commodity, which is what the price half of the score reads."""
+    price = value / sold
     return {"consignment_id": cid, "product": product, "market": market, "market_agent": agent,
-            "cartons_sold": sold, "price": value / sold, "sales_total": value,
+            "cartons_sold": sold, "price": price, "sales_total": value,
+            "market_avg": round(price / of_market, 2),
             "last_sale": day, "date_received": received, "group_date": received,
             "qty_received": qty, "qty_amended": qty, "dn": cid // 100}
 
 
-def _month(cid, product, market, agent, sold, value, month, qty=None, day="10", start="01"):
+def _month(cid, product, market, agent, sold, value, month, qty=None, day="03", start="01",
+           of_market=1.0):
     return _row(cid, product, market, agent, sold, value,
-                f"2026-{month}-{day}", f"2026-{month}-{start}", qty or sold)
+                f"2026-{month}-{day}", f"2026-{month}-{start}", qty or sold, of_market)
 
 
 def _pay(acc, gross, nett, day):
@@ -31,9 +36,12 @@ ROWS = [
     _month(1001, GRAPES, "TSHWANE MARKET", "Farmers Trust", 100, 40000.0, "07"),
     _month(1101, GRAPES, "TSHWANE MARKET", "Farmers Trust", 100, 42000.0, "08"),
     _month(1201, GRAPES, "TSHWANE MARKET", "Farmers Trust", 100, 50000.0, "09"),
-    _month(2001, PLUMS, "DURBAN MARKET", "Grow Port Natal", 50, 10000.0, "07", qty=100),
-    _month(2101, PLUMS, "DURBAN MARKET", "Grow Port Natal", 50, 9000.0, "08", qty=100),
-    _month(2201, PLUMS, "DURBAN MARKET", "Grow Port Natal", 50, 6000.0, "09", qty=100),
+    _month(2001, PLUMS, "DURBAN MARKET", "Grow Port Natal", 50, 10000.0, "07", qty=100,
+           day="12", of_market=0.7),
+    _month(2101, PLUMS, "DURBAN MARKET", "Grow Port Natal", 50, 9000.0, "08", qty=100,
+           day="12", of_market=0.7),
+    _month(2201, PLUMS, "DURBAN MARKET", "Grow Port Natal", 50, 6000.0, "09", qty=100,
+           day="12", of_market=0.7),
 ]
 PAYS = [_pay("PRE*BT*1", 10000.0, 8500.0, "2026-09-15"),
         _pay("DUR*13*1", 10000.0, 8500.0, "2026-09-15")]
@@ -121,3 +129,25 @@ def test_a_line_already_covered_by_stock_sits_under_the_ones_to_act_on():
 def test_same_day_selling_reads_as_same_day():
     out = procurement.build(ROWS, PAYS, today=TODAY)
     assert all("clears in 0 days" not in r for l in out["lines"] for r in l["reasons"])
+
+
+def test_a_band_is_a_fixed_mark_on_the_score():
+    """The same score is the same priority in any month, so this month's plan
+    can be read against last month's."""
+    assert procurement.band(1.0) == procurement.band(0.85) == "critical"
+    assert procurement.band(0.849) == procurement.band(0.75) == "high"
+    assert procurement.band(0.749) == procurement.band(0.60) == "steady"
+    assert procurement.band(0.599) == procurement.band(0.0) == "hold"
+    # A one-line plan is not a plan of one Critical line: the mark is the mark.
+    assert procurement.band(0.62) == "steady"
+
+
+def test_a_weak_month_crowns_nobody():
+    """Ranked bands always put something at the top. Half-selling plums that
+    take a fortnight to clear are not the week's Critical line just because
+    nothing better was on offer."""
+    weak = [_month(6001, PLUMS, "DURBAN MARKET", "Grow Port Natal", 20, 1000.0, m, qty=100,
+                   day="14", of_market=0.8) for m in ("07", "08", "09")]
+    out = procurement.build(weak, PAYS, today=TODAY)
+    assert [l["priority"] for l in out["lines"]] == ["hold"]
+    assert [g["key"] for g in out["priorities"]] == ["hold"]

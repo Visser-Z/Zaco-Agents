@@ -105,6 +105,31 @@ def configured() -> bool:
     return bool(api_key())
 
 
+# Every Anthropic API key starts with this. A value that does not is something
+# else that was pasted into the box: an OAuth token, a project id, a name.
+KEY_PREFIX = "sk-ant-"
+
+
+def key_rejected() -> str:
+    """What to tell the operator when Anthropic refuses the key.
+
+    Says what is wrong with the value that was set without ever printing it:
+    which variable it came from, whether it even looks like an API key, and how
+    long it is, which is enough to spot a truncated paste or the wrong string
+    entirely. The key itself never leaves the server.
+    """
+    key = api_key() or ""
+    where = INTEL_KEY if os.getenv(INTEL_KEY) else SHARED_KEY
+    if not key.startswith(KEY_PREFIX):
+        return (f"Anthropic refused the key. The value in {where} does not look like an API "
+                f"key: it should start with \"{KEY_PREFIX}\" and this one does not. Create one "
+                f"at console.anthropic.com under API keys, paste it in Vercel, and redeploy.")
+    return (f"Anthropic refused the key in {where} (it starts with \"{KEY_PREFIX}\" and is "
+            f"{len(key)} characters). It may have been revoked, pasted incompletely, or "
+            f"belong to an organisation this app is not billed through. Create a fresh key "
+            f"at console.anthropic.com under API keys, paste it in Vercel, and redeploy.")
+
+
 def docs_configured() -> bool:
     return bool(docs_api_key())
 
@@ -683,7 +708,7 @@ def _short_answer(system: str, prompt: str) -> str:
             **_thinking(model_id, None),
         )
     except anthropic.AuthenticationError as exc:
-        raise AssistantError("The server's Claude API key was rejected.") from exc
+        raise AssistantError(key_rejected()) from exc
     except anthropic.NotFoundError as exc:
         raise AssistantError(f"The model {model_id!r} is not available to this API key.") from exc
     except anthropic.RateLimitError as exc:
@@ -746,7 +771,7 @@ def ask(question: str, rows: list[dict],
         else:
             response = client.messages.create(**request)
     except anthropic.AuthenticationError as exc:
-        raise AssistantError("The server's Claude API key was rejected.") from exc
+        raise AssistantError(key_rejected()) from exc
     except anthropic.NotFoundError as exc:
         raise AssistantError(
             f"The model {model_id!r} is not available to this API key.") from exc
@@ -869,7 +894,7 @@ async def analyse(rows: list[dict], payments: list[dict] | None = None) -> dict:
                 THINKING_BUDGET,
             )
     except anthropic.AuthenticationError as exc:
-        raise AssistantError("The server's Claude API key was rejected.") from exc
+        raise AssistantError(key_rejected()) from exc
     except anthropic.RateLimitError as exc:
         raise AssistantError("The assistant is busy right now. Try again shortly.") from exc
     except anthropic.APIConnectionError as exc:

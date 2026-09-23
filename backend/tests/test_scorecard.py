@@ -129,3 +129,18 @@ def test_the_written_recommendation_needs_a_key(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(assistant.AssistantError):
         assistant.where_brief(ROWS, PAYS, 3)
+
+
+def test_a_rejected_key_says_what_is_wrong_with_it_without_printing_it(monkeypatch):
+    """A 401 is usually the wrong string in the box. The message has to be
+    enough to spot that, and must never carry the key itself."""
+    from app import assistant
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY_INTEL", "ZACO_PROCURMENT")
+    said = assistant.key_rejected()
+    assert "does not look like an API key" in said and "ANTHROPIC_API_KEY_INTEL" in said
+    assert "ZACO_PROCURMENT" not in said.replace("ANTHROPIC_API_KEY_INTEL", "")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY_INTEL", "sk-ant-" + "x" * 95)
+    said = assistant.key_rejected()
+    assert "102 characters" in said and "x" * 10 not in said

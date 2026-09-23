@@ -630,46 +630,70 @@
   .wv.thin { background: var(--warn-tint); color: var(--warn); }
   .wv-fig { color: var(--ink-soft); }
   .wv-fig b { color: var(--ink); }
-  /* The buy plan: one band per block, one line per product inside it. */
-  .plan-groups { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
-  .plan-group .trk-title h2 { display: flex; align-items: baseline; gap: 8px; }
-  .pl-note { font-size: 11px; font-weight: 500; color: var(--ink-faint); }
-  .trk-mark.t-ok { background: var(--ok-tint); color: var(--ok); }
-  .trk-mark.t-mut { background: var(--surface-2); color: var(--ink-faint); }
-  .plan-lines { list-style: none; margin: 0; padding: 0; }
-  .plan-line { border-bottom: 1px solid var(--line); }
-  .plan-line:last-child { border-bottom: 0; }
-  .pl-head { width: 100%; appearance: none; border: 0; background: none; cursor: pointer;
-             text-align: left; font-family: var(--sans); color: var(--ink); padding: 10px 2px;
-             display: grid; gap: 12px; align-items: center;
-             grid-template-columns: auto minmax(150px, 26%) 120px minmax(180px, 1fr) 140px; }
-  .pl-head:hover { background: var(--accent-soft); }
-  .plan-line.open > .pl-head { background: var(--surface-2); }
-  .pl-head .chev { color: var(--ink-faint); display: inline-flex; }
-  .pl-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden;
+  /* The buy plan: one table, filtered by priority, grouped by market or flat.
+     Fixed column widths with ellipsis, because the old grid let a long market
+     name run under the figures beside it. */
+  .plan-card { padding: 16px 18px 12px; margin-bottom: 16px; }
+  .plan-bar { display: flex; align-items: center; justify-content: space-between;
+              gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .plan-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .plan-chip { appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+               border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
+               border-radius: 999px; padding: 4px 11px; font: 600 12px var(--sans); }
+  .plan-chip em { font-style: normal; font-size: 11px; color: var(--ink-faint); }
+  .plan-chip:hover { border-color: var(--ink-faint); color: var(--ink); }
+  .plan-chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .plan-chip.on em { color: #fff; opacity: .75; }
+  .plan-chip.t-crit { border-color: color-mix(in srgb, var(--crit) 45%, var(--line)); color: var(--crit); }
+  .plan-chip.t-warn { border-color: color-mix(in srgb, var(--warn-mark) 45%, var(--line)); color: var(--warn); }
+  .plan-chip.t-ok { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); color: var(--ok); }
+  .plan-chip.on.t-crit { background: var(--crit); border-color: var(--crit); color: #fff; }
+  .plan-chip.on.t-warn { background: var(--warn-mark); border-color: var(--warn-mark); color: #fff; }
+  .plan-chip.on.t-ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .plan-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none;
+              background: var(--ink-faint); }
+  .plan-dot.t-crit { background: var(--crit-mark); }
+  .plan-dot.t-warn { background: var(--warn-mark); }
+  .plan-dot.t-ok { background: var(--ok-mark); }
+  .plan-dot.t-mut { background: var(--line-strong); }
+  /* The report table right-aligns everything and fixes a wide first column;
+     the plan needs the opposite, so it says so rather than inheriting it. */
+  table.rep-table.plan-table { min-width: 760px; table-layout: fixed; }
+  table.rep-table.plan-table th, table.rep-table.plan-table td { text-align: left; padding: 8px 10px; }
+  table.rep-table.plan-table th.num, table.rep-table.plan-table td.num { text-align: right; }
+  table.rep-table.plan-table th:first-child, table.rep-table.plan-table td:first-child { width: auto; }
+  .plan-table col.c-pri { width: 108px; }
+  .plan-table col.c-n { width: 132px; }
+  .plan-table col.c-open { width: 34px; }
+  .plan-table th.sortable { cursor: pointer; user-select: none; }
+  .plan-table th.sortable:hover { color: var(--ink); }
+  .plan-table th.sortable.on { color: var(--accent-strong); }
+  .sortmark { margin-left: 4px; font-size: 9px; }
+  .plan-table td { vertical-align: top; }
+  .plan-row { cursor: pointer; }
+  .plan-row:hover > td { background: var(--accent-soft); }
+  .plan-row.open > td { background: var(--surface-2); }
+  .plan-row > td:first-child { box-shadow: inset 3px 0 0 var(--line-strong); }
+  .plan-row.t-crit > td:first-child { box-shadow: inset 3px 0 0 var(--crit-mark); }
+  .plan-row.t-warn > td:first-child { box-shadow: inset 3px 0 0 var(--warn-mark); }
+  .plan-row.t-ok > td:first-child { box-shadow: inset 3px 0 0 var(--ok-mark); }
+  .plan-row .pri { display: flex; align-items: center; gap: 7px; }
+  .pri-word { font-size: 11px; font-weight: 650; color: var(--ink-soft); }
+  .pl-cell { min-width: 0; }
+  .pl-prod { display: block; font-size: 13px; font-weight: 600; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
-  .pl-name em { display: block; font-style: normal; font-size: 11px; color: var(--ink-faint);
-                text-transform: uppercase; letter-spacing: .04em; }
-  .pl-take, .pl-money { text-align: right; font-size: 13px; white-space: nowrap; }
-  .pl-take em, .pl-money em { display: block; font-style: normal; font-size: 11px;
-                              color: var(--ink-faint); }
-  .pl-where { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .pl-where .wv { align-self: flex-start; max-width: 100%; overflow: hidden;
-                  text-overflow: ellipsis; }
-  .pl-body { padding: 2px 4px 12px 26px; }
+  .pl-sub { display: block; font-size: 11px; color: var(--ink-faint); font-weight: 400;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plan-market > td { background: var(--surface-2); font-size: 12px; padding: 8px 11px; }
+  .plan-market b { font-size: 12.5px; margin-left: 7px; }
+  .plan-market em { font-style: normal; color: var(--ink-soft); margin-left: 6px; }
+  .pm-sum { color: var(--ink-faint); margin-left: 10px; }
+  .plan-detail > td { background: var(--surface); padding: 0 11px 12px 30px; }
+  .pl-body { padding: 2px 0 0; }
   .pl-why { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .pl-chip { font-size: 11px; color: var(--ink-soft); background: var(--surface-2);
              border-radius: 999px; padding: 2px 9px; }
-  @media (max-width: 900px) {
-    /* Narrow: the name and the cartons on one line, then where it goes and
-       what it should return on their own, rather than overlapping. */
-    .pl-head { grid-template-columns: auto 1fr auto; row-gap: 4px; }
-    .pl-name { grid-column: 2; }
-    .pl-take { grid-column: 3; }
-    .pl-where, .pl-money { grid-column: 2 / -1; text-align: left; }
-    .pl-money em { display: inline; margin-left: 6px; }
-    .pl-body { padding-left: 8px; }
-  }
+  @media (max-width: 700px) { .plan-card { padding: 14px 12px 10px; } }
   /* Nine columns of figures: below this they stop being readable, so the
      table scrolls in its own box instead of squeezing the headings together. */
   .where-table { margin: 4px 0 10px; font-size: 12px; min-width: 680px; }
@@ -1081,7 +1105,10 @@ const S = {
   // need an assistant key and must still be there when there is none.
   // The buy plan: what to take on, how much, and where to send it.
   procure: { data: null, loading: false, error: null, months: 3, open: {},
-             brief: null, briefBusy: false, briefError: null },
+             brief: null, briefBusy: false, briefError: null,
+             // The plan is one table: which priorities to show, whether to
+             // group it by market, and what it is sorted on.
+             filter: "all", groupBy: "market", sort: "priority", dir: -1 },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -2555,45 +2582,99 @@ async function writePlan() {
 
 const pctOf = v => v == null ? "—" : Math.round(v * 100) + "%";
 
-// The four bands a line can sit in, hardest first. Critical and High open on
-// arrival: they are what the buyer acts on this week.
+// The four bands, hardest first. A line shows its band as a colour on the
+// row; the filter chips carry the words, so they double as the legend.
 const BANDS = {
   critical: { label: "Critical", tone: "crit", note: "back these first" },
   high:     { label: "High",     tone: "warn", note: "worth taking on" },
   steady:   { label: "Steady",   tone: "ok",   note: "keep them coming" },
   hold:     { label: "Hold",     tone: "mut",  note: "only if it is cheap" },
 };
+const BAND_ORDER = ["critical", "high", "steady", "hold"];
 
-/** Where a line's fruit goes, as a chip: the verdict, then the figure. */
-function planWhere(l) {
-  if (!l.market) return `<span class="wv thin">No destination on record</span>`;
-  const at = `${esc(l.market)}${l.market_agent ? " · " + esc(l.market_agent) : ""}`;
-  const tone = l.where_kind === "best" ? "best" : l.where_kind === "only" ? "only" : "thin";
-  const note = l.where_kind === "best"
-    ? `R ${fmt(l.lead_per_carton)} a carton better than the next market`
-    : l.where_kind === "only" ? "only market tried so far"
-    : "too little history to be sure";
-  return `<span class="wv ${tone}">${at}</span><span class="wv-fig">${note}</span>`;
+function setPlanFilter(key) { S.procure.filter = key; render(); }
+function setPlanGroup(key) { S.procure.groupBy = key; render(); }
+
+/** Sort the plan on a column. The same column again reverses it. */
+function sortPlan(key) {
+  const P = S.procure;
+  P.dir = P.sort === key ? -P.dir : (key === "product" || key === "market" ? 1 : -1);
+  P.sort = key;
+  render();
 }
 
-/** One line of the plan, and everything behind it once opened. */
-function planLine(l) {
+const PLAN_SORTS = {
+  priority: l => -BAND_ORDER.indexOf(l.priority) + l.score,
+  product: l => l.product,
+  take_on: l => l.take_on,
+  expected_value: l => l.expected_value,
+  market: l => (l.market || "~") + (l.market_agent || ""),
+};
+
+function sortedPlan(lines) {
+  const P = S.procure;
+  const read = PLAN_SORTS[P.sort] || PLAN_SORTS.priority;
+  return [...lines].sort((a, b) => {
+    const x = read(a), y = read(b);
+    if (x === y) return b.score - a.score;
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * P.dir;
+  });
+}
+
+/** The plan's lines under one market heading each, in the order given. */
+function marketSections(lines) {
+  const seen = [];
+  const by = new Map();
+  for (const l of lines) {
+    const key = [l.market || "No destination on record", l.market_agent || ""].join("|");
+    if (!by.has(key)) { by.set(key, []); seen.push(key); }
+    by.get(key).push(l);
+  }
+  return seen.map(key => {
+    const rows = by.get(key);
+    const [market, agent] = key.split("|");
+    const cartons = rows.reduce((n, l) => n + l.take_on, 0);
+    const value = rows.reduce((n, l) => n + l.expected_value, 0);
+    const worst = BAND_ORDER.find(b => rows.some(l => l.priority === b)) || "hold";
+    return `<tr class="plan-market"><td colspan="6">
+        <span class="plan-dot t-${BANDS[worst].tone}"></span>
+        <b>${esc(market)}</b>${agent ? `<em>${esc(agent)}</em>` : ""}
+        <span class="pm-sum">${fmtInt(rows.length)} line${rows.length === 1 ? "" : "s"} ·
+          ${fmtInt(cartons)} cartons to take on · R ${fmt(value)} expected</span>
+      </td></tr>` + rows.map(planRow).join("");
+  }).join("");
+}
+
+/** One line of the plan: a row, and its workings in the row beneath once opened. */
+function planRow(l) {
   const key = "l|" + l.product;
   const open = !!S.procure.open[key];
+  const band = BANDS[l.priority] || BANDS.hold;
+  const stands = l.where_kind === "best"
+      ? `<span class="wv best">Best of ${fmtInt((l.destinations || []).length)}</span>
+         <span class="wv-fig">R ${fmt(l.lead_per_carton)} a carton better</span>`
+    : l.where_kind === "only" ? `<span class="wv only">Only market tried</span>`
+    : l.where_kind === "thin" ? `<span class="wv thin">Too little history</span>`
+    : `<span class="wv thin">No destination</span>`;
+  return `<tr class="plan-row t-${band.tone}${open ? " open" : ""}" onclick="togglePlan(${q(key)})">
+      <td class="pri"><span class="plan-dot t-${band.tone}" title="${esc(band.label)}: ${esc(band.note)}"></span>
+        <span class="pri-word">${esc(band.label)}</span></td>
+      <td class="pl-cell"><span class="pl-prod" title="${esc(l.product)}">${esc(shortProduct(l.product))}</span>
+        <span class="pl-sub">${esc(l.fruit)}${l.on_hand ? ` · ${fmtInt(l.on_hand)} on the floor` : ""}</span></td>
+      <td class="num"><b>${fmtInt(l.take_on)}</b><span class="pl-sub">${fmtInt(l.expected_cartons)} expected</span></td>
+      <td class="num"><b>R ${fmt(l.expected_value)}</b><span class="pl-sub">${
+        l.expected_low === l.expected_high ? "one month only"
+          : `R ${fmt(l.expected_low)} to R ${fmt(l.expected_high)}`}</span></td>
+      <td class="pl-cell">${S.procure.groupBy === "market" ? stands
+        : `<span class="pl-prod">${esc(l.market || "—")}</span>
+           <span class="pl-sub">${esc(l.market_agent || "no destination on record")}</span>`}</td>
+      <td class="pl-open"><span class="chev">${icon(open ? "up" : "down", 12)}</span></td>
+    </tr>${open ? `<tr class="plan-detail"><td colspan="6">${planDetail(l)}</td></tr>` : ""}`;
+}
+
+function planDetail(l) {
   const dests = l.destinations || [];
-  return `<li class="plan-line${open ? " open" : ""}">
-    <button class="pl-head" aria-expanded="${open}" onclick="togglePlan(${q(key)})">
-      <span class="chev">${icon(open ? "up" : "down", 11)}</span>
-      <span class="pl-name" title="${esc(l.product)}">${esc(shortProduct(l.product))}
-        <em>${esc(l.fruit)}</em></span>
-      <span class="pl-take num"><b>${fmtInt(l.take_on)}</b> ctn
-        <em>${fmtInt(l.expected_cartons)} expected${l.on_hand ? ` · ${fmtInt(l.on_hand)} on the floor` : ""}</em></span>
-      <span class="pl-where">${planWhere(l)}</span>
-      <span class="pl-money num"><b>R ${fmt(l.expected_value)}</b>
-        <em>${l.expected_low === l.expected_high ? "one month only"
-          : `R ${fmt(l.expected_low)} to R ${fmt(l.expected_high)}`}</em></span>
-    </button>
-    ${open ? `<div class="pl-body">
+  return `<div class="pl-body">
       <div class="pl-why">${(l.reasons || []).map(r => `<span class="pl-chip">${esc(r)}</span>`).join("")}
         <span class="pl-chip">${esc(l.confidence)} · ${(l.months_used || []).map(monthLabel).join(", ")}</span></div>
       ${dests.length ? `<div class="rep-scroll"><table class="rep-table where-table">
@@ -2609,8 +2690,7 @@ function planLine(l) {
           <td class="num"><b>${x.back_per_carton == null ? "—" : "R " + fmt(x.back_per_carton)}</b></td>
           <td class="num">${fmtInt(x.consignments)}</td></tr>`).join("")}</tbody></table></div>`
         : `<p class="ins-empty">No destination on record for this product yet.</p>`}
-    </div>` : ""}
-  </li>`;
+    </div>`;
 }
 
 function renderProcure() {
@@ -2680,24 +2760,46 @@ function renderProcure() {
             to get this plan written out in words.</p>`}
     </div>`;
 
-  const groups = d.priorities.map(g => {
-    const band = BANDS[g.key] || { label: g.key, tone: "mut", note: "" };
-    const key = "g|" + g.key;
-    const open = S.procure.open[key] === undefined
-      ? (g.key === "critical" || g.key === "high") : S.procure.open[key];
-    return `<section class="card trk-block plan-group${open ? " open" : ""}">
-      <header class="trk-head" onclick="togglePlan(${q(key)})">
-        <span class="trk-mark t-${band.tone}">${icon(band.tone === "crit" ? "alert" : "box", 15)}</span>
-        <div class="trk-title"><h2>${band.label}<span class="pl-note">${esc(band.note)}</span></h2>
-          <span class="trk-sum">${fmtInt(g.lines.length)} line${g.lines.length === 1 ? "" : "s"} ·
-            ${fmtInt(g.cartons)} cartons to take on · R ${fmt(g.expected_value)} expected</span></div>
-        <div class="trk-tools"><button class="trk-toggle" aria-expanded="${open}"
-          onclick="event.stopPropagation(); togglePlan(${q(key)})">${open ? "Close" : "Open"}
-          <span class="chev">${icon(open ? "up" : "down", 13)}</span></button></div>
-      </header>
-      ${open ? `<div class="trk-body"><ul class="plan-lines">${g.lines.map(planLine).join("")}</ul></div>` : ""}
-    </section>`;
-  }).join("");
+  const counts = { all: d.lines.length };
+  BAND_ORDER.forEach(k => { counts[k] = d.lines.filter(l => l.priority === k).length; });
+  const chips = [["all", "All", ""]].concat(BAND_ORDER.map(k => [k, BANDS[k].label, BANDS[k].tone]))
+    .filter(([k]) => k === "all" || counts[k])
+    .map(([k, label, tone]) => `<button class="plan-chip${tone ? " t-" + tone : ""}${P.filter === k ? " on" : ""}"
+        onclick="setPlanFilter(${q(k)})">${esc(label)}<em>${fmtInt(counts[k])}</em></button>`).join("");
+
+  const shown = sortedPlan(P.filter === "all" ? d.lines
+    : d.lines.filter(l => l.priority === P.filter));
+
+  const col = (key, label, cls) => `<th class="${cls || ""} sortable${P.sort === key ? " on" : ""}"
+      onclick="sortPlan(${q(key)})">${esc(label)}<span class="sortmark">${
+      P.sort === key ? (P.dir === 1 ? "▲" : "▼") : ""}</span></th>`;
+
+  const body = P.groupBy === "market" ? marketSections(shown) : shown.map(planRow).join("");
+
+  const table = `<div class="card ins-card wide plan-card">
+      <div class="plan-bar">
+        <div class="plan-chips">${chips}</div>
+        <div class="seg sm">
+          <button class="${P.groupBy === "market" ? "on" : ""}" onclick="setPlanGroup('market')">By market</button>
+          <button class="${P.groupBy === "none" ? "on" : ""}" onclick="setPlanGroup('none')">One list</button>
+        </div>
+      </div>
+      <div class="rep-scroll"><table class="rep-table plan-table">
+        <colgroup><col class="c-pri"><col><col class="c-n"><col class="c-n"><col><col class="c-open"></colgroup>
+        <thead><tr>
+          ${col("priority", "Priority")}
+          ${col("product", "Product")}
+          ${col("take_on", "Take on", "num")}
+          ${col("expected_value", "Should return", "num")}
+          ${P.groupBy === "market" ? "<th>Where it stands</th>" : col("market", "Send to")}
+          <th></th>
+        </tr></thead>
+        <tbody>${body || `<tr><td colspan="6" class="ins-empty">Nothing in this band.</td></tr>`}</tbody>
+      </table></div>
+      <p class="rep-note">Take on is what is expected to sell next month less what is still on the
+        floor. Colours are the priority: ${BAND_ORDER.map(k =>
+          `<span class="plan-dot t-${BANDS[k].tone}"></span> ${BANDS[k].label.toLowerCase()}`).join(", ")}.</p>
+    </div>`;
 
   const log = A.log.map(m => m.role === "q"
     ? `<div class="ask-q">${esc(m.text)}</div>`
@@ -2725,7 +2827,7 @@ function renderProcure() {
     ${head}
     ${kpis}
     ${brief}
-    <div class="plan-groups">${groups}</div>
+    ${table}
     ${(d.caveats || []).length ? `<div class="banner warn caveats"><span class="bi">${icon("alert", 14)}</span>
       <div><b>Read these with the figures.</b><ul>${d.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul></div></div>` : ""}
     <div class="ins-grid-2">${cashBlock(d.payment_lag)}</div>

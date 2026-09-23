@@ -630,7 +630,49 @@
   .wv.thin { background: var(--warn-tint); color: var(--warn); }
   .wv-fig { color: var(--ink-soft); }
   .wv-fig b { color: var(--ink); }
-  .where-table { margin: 4px 0 10px; font-size: 12px; }
+  /* The buy plan: one band per block, one line per product inside it. */
+  .plan-groups { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+  .plan-group .trk-title h2 { display: flex; align-items: baseline; gap: 8px; }
+  .pl-note { font-size: 11px; font-weight: 500; color: var(--ink-faint); }
+  .trk-mark.t-ok { background: var(--ok-tint); color: var(--ok); }
+  .trk-mark.t-mut { background: var(--surface-2); color: var(--ink-faint); }
+  .plan-lines { list-style: none; margin: 0; padding: 0; }
+  .plan-line { border-bottom: 1px solid var(--line); }
+  .plan-line:last-child { border-bottom: 0; }
+  .pl-head { width: 100%; appearance: none; border: 0; background: none; cursor: pointer;
+             text-align: left; font-family: var(--sans); color: var(--ink); padding: 10px 2px;
+             display: grid; gap: 12px; align-items: center;
+             grid-template-columns: auto minmax(150px, 26%) 120px minmax(180px, 1fr) 140px; }
+  .pl-head:hover { background: var(--accent-soft); }
+  .plan-line.open > .pl-head { background: var(--surface-2); }
+  .pl-head .chev { color: var(--ink-faint); display: inline-flex; }
+  .pl-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+  .pl-name em { display: block; font-style: normal; font-size: 11px; color: var(--ink-faint);
+                text-transform: uppercase; letter-spacing: .04em; }
+  .pl-take, .pl-money { text-align: right; font-size: 13px; white-space: nowrap; }
+  .pl-take em, .pl-money em { display: block; font-style: normal; font-size: 11px;
+                              color: var(--ink-faint); }
+  .pl-where { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pl-where .wv { align-self: flex-start; max-width: 100%; overflow: hidden;
+                  text-overflow: ellipsis; }
+  .pl-body { padding: 2px 4px 12px 26px; }
+  .pl-why { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .pl-chip { font-size: 11px; color: var(--ink-soft); background: var(--surface-2);
+             border-radius: 999px; padding: 2px 9px; }
+  @media (max-width: 900px) {
+    /* Narrow: the name and the cartons on one line, then where it goes and
+       what it should return on their own, rather than overlapping. */
+    .pl-head { grid-template-columns: auto 1fr auto; row-gap: 4px; }
+    .pl-name { grid-column: 2; }
+    .pl-take { grid-column: 3; }
+    .pl-where, .pl-money { grid-column: 2 / -1; text-align: left; }
+    .pl-money em { display: inline; margin-left: 6px; }
+    .pl-body { padding-left: 8px; }
+  }
+  /* Nine columns of figures: below this they stop being readable, so the
+     table scrolls in its own box instead of squeezing the headings together. */
+  .where-table { margin: 4px 0 10px; font-size: 12px; min-width: 680px; }
   .where-table tr.thin td { color: var(--ink-faint); }
   .wt-sub { display: block; font-size: 11px; color: var(--ink-faint); }
   @media (max-width: 700px) {
@@ -991,7 +1033,7 @@
     <button class="tab" data-module="tracking" onclick="setModule('tracking')">Tracking</button>
     <button class="tab" data-module="insights" onclick="setModule('insights')">Insights</button>
     <button class="tab" data-module="reports" onclick="setModule('reports')">Reports</button>
-    <button class="tab" data-module="intel" onclick="setModule('intel')">Intelligence</button>
+    <button class="tab" data-module="procure" onclick="setModule('procure')">Procurement</button>
   </nav>
 
   <div class="body">
@@ -1037,10 +1079,9 @@ const S = {
                busyLabel: "", draft: "" },
   // The computed outlook. Separate from the conversation because it does not
   // need an assistant key and must still be there when there is none.
-  intel: { data: null, loading: false, error: null },
-  // Where to send it: the destination comparison and its written read.
-  where: { data: null, loading: false, error: null, months: 3, open: {},
-           brief: null, briefBusy: false, briefError: null },
+  // The buy plan: what to take on, how much, and where to send it.
+  procure: { data: null, loading: false, error: null, months: 3, open: {},
+             brief: null, briefBusy: false, briefError: null },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -1442,7 +1483,7 @@ function setModule(m) {
   // Tracking, which had not failed, kept working -- and the history looked
   // missing from one page and present on the other.
   const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking
-             : m === "reports" ? S.reports : m === "intel" ? S.intel : null;
+             : m === "reports" ? S.reports : m === "procure" ? S.procure : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
   render();
   main.scrollTo(0, 0);
@@ -1453,7 +1494,7 @@ function render() {
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
   if (S.module === "reports") return renderReports();
-  if (S.module === "intel") return renderIntel();
+  if (S.module === "procure") return renderProcure();
   if (S.busy) return renderBusy();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
@@ -2467,231 +2508,231 @@ function findingsBlock(findings) {
 // on top of the numbers, not the numbers themselves -- which is deliberate: a
 // projection that only exists inside a model answer cannot be checked.
 
-async function loadWhere() {
-  const W = S.where;
-  W.loading = true; W.error = null;
-  if (!S.live) { W.loading = false; render(); return; }
+async function loadProcurement() {
+  const P = S.procure;
+  P.loading = true; P.error = null;
+  if (!S.live) { P.loading = false; render(); return; }
   try {
-    const r = await api(`/api/intel/where?months=${W.months}`);
+    const r = await api(`/api/procurement?months=${P.months}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
-    W.data = await r.json();
+    P.data = await r.json();
   } catch (e) {
-    W.error = e.message || String(e);
+    P.error = e.message || String(e);
   } finally {
-    W.loading = false; render();
+    P.loading = false; render();
   }
 }
 
-function setWhereMonths(m) {
-  const W = S.where;
-  if (W.months === m) return;
-  W.months = m; W.data = null; W.brief = null; W.briefError = null;
-  loadWhere();
+function setPlanMonths(m) {
+  const P = S.procure;
+  if (P.months === m) return;
+  P.months = m; P.data = null; P.brief = null; P.briefError = null;
+  loadProcurement();
 }
 
-function toggleWhere(key) {
-  S.where.open[key] = !S.where.open[key];
+function togglePlan(key) {
+  S.procure.open[key] = !S.procure.open[key];
   render();
 }
 
-/** Ask Claude Haiku for the written recommendation over the comparison. The
- *  figures are computed on the server first; the model only says which of
- *  them matter. */
-async function writeWhereBrief() {
-  const W = S.where;
-  W.briefBusy = true; W.briefError = null; render();
+/** The written plan, from Claude Haiku over the computed figures. */
+async function writePlan() {
+  const P = S.procure;
+  P.briefBusy = true; P.briefError = null; render();
   try {
     const body = new FormData();
-    body.append("months", String(W.months));
-    const r = await api("/api/assistant/where", { method: "POST", body });
+    body.append("months", String(P.months));
+    const r = await api("/api/assistant/plan", { method: "POST", body });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.detail || `HTTP ${r.status}`);
-    W.brief = out.text;
+    P.brief = out.text;
   } catch (e) {
-    W.briefError = e.message || String(e);
+    P.briefError = e.message || String(e);
   } finally {
-    W.briefBusy = false; render();
+    P.briefBusy = false; render();
   }
 }
 
 const pctOf = v => v == null ? "—" : Math.round(v * 100) + "%";
 
-/** Where to send it: every market and agent each product has gone to, ranked
- *  on rand back per carton sent. One collapsible group per fruit; opening a
- *  product shows every figure behind its ranking. */
-function whereBlock(ready) {
-  const W = S.where;
-  if (W.data === null && !W.loading && W.error === null && S.live) loadWhere();
-  const range = `<div class="seg sm">${[[3, "Last 3 months"], [0, "All time"]].map(([m, l]) =>
-    `<button class="${W.months === m ? "on" : ""}" onclick="setWhereMonths(${m})">${l}</button>`).join("")}</div>`;
-  const head = `<div class="ins-card-head"><h2>Where to send it</h2>${range}</div>`;
-
-  if (W.error) return `<div class="card ins-card wide">${head}
-    <p class="ins-empty">Could not compare destinations: ${esc(W.error)}</p></div>`;
-  if (!W.data) return `<div class="card ins-card wide">${head}
-    <div class="busy"><span class="spin"></span> Comparing markets</div></div>`;
-  const d = W.data;
-  if (!d.fruits || !d.fruits.length) return `<div class="card ins-card wide">${head}
-    <p class="ins-empty">Not enough history in this period to compare destinations.</p></div>`;
-
-  const brief = ready ? `<div class="where-brief">
-      ${W.brief ? `<div class="wb-text">${mdLite(W.brief)}</div>` : ""}
-      ${W.briefError ? `<p class="trk-note warn">${esc(W.briefError)}</p>` : ""}
-      <button class="btn ${W.brief ? "ghost" : "primary"} sm" onclick="writeWhereBrief()" ${W.briefBusy ? "disabled" : ""}>
-        ${W.briefBusy ? `<span class="spin"></span> Writing` : `${icon("chat")}${W.brief ? "Write it again" : "Write the recommendation"}`}</button>
-    </div>` : `<p class="rep-note">Add a Claude Haiku key (<code>ANTHROPIC_API_KEY_INTEL</code>) in
-      Vercel to get a written recommendation on top of these figures.</p>`;
-
-  const verdict = v => {
-    const at = `${esc(v.market || "")}${v.market_agent ? " · " + esc(v.market_agent) : ""}`;
-    if (v.kind === "best") return `<span class="wv best">Send to ${at}</span>
-      <span class="wv-fig">R ${fmt(v.back_per_carton)} back per carton sent ·
-        <b>R ${fmt(v.lead_per_carton)} more</b> than ${esc(v.runner_up)}</span>`;
-    if (v.kind === "only") return `<span class="wv only">Only ever sent to ${at}</span>
-      <span class="wv-fig">${v.back_per_carton != null ? `R ${fmt(v.back_per_carton)} back per carton sent · ` : ""}nothing to compare</span>`;
-    if (v.kind === "thin") return `<span class="wv thin">Leaning ${at}</span>
-      <span class="wv-fig">too little history to call it</span>`;
-    return `<span class="wv thin">Not enough figures</span>`;
-  };
-
-  const table = p => `<div class="rep-scroll"><table class="rep-table where-table">
-      <thead><tr><th>Market · agent</th><th class="num">Cartons</th><th class="num">Per carton</th>
-        <th class="num" title="What a carton fetched against the market's own average that day">vs market</th>
-        <th class="num" title="Of what was booked in, how much sold. Counts consignments at least ${d.rules.settled_after_days} days old.">Sold of sent</th>
-        <th class="num">Days to sell</th>
-        <th class="num" title="Gross less nett, over gross, from this market's payments">Agent's cut</th>
-        <th class="num" title="Price per carton, less the agent's cut, times the share that sold">Back per carton sent</th>
-        <th class="num">Loads</th></tr></thead>
-      <tbody>${p.destinations.map(x => `<tr class="${x.enough ? "" : "thin"}">
-        <td>${esc(x.market || "—")}<span class="wt-sub">${esc(x.market_agent || "")}</span></td>
-        <td class="num">${fmtInt(x.cartons)}</td>
-        <td class="num">R ${fmt(x.price)}</td>
-        <td class="num">${pctOf(x.vs_market)}</td>
-        <td class="num">${pctOf(x.sell_through)}</td>
-        <td class="num">${x.days_to_sell == null ? "—" : x.days_to_sell}</td>
-        <td class="num" title="${x.agent_cut_known ? "" : "No payment from this market in the period, so the book's usual rate"}">${pctOf(x.agent_cut)}${x.agent_cut_known ? "" : "*"}</td>
-        <td class="num"><b>${x.back_per_carton == null ? "—" : "R " + fmt(x.back_per_carton)}</b></td>
-        <td class="num">${fmtInt(x.consignments)}</td></tr>`).join("")}</tbody></table></div>`;
-
-  const groups = d.fruits.map(f => {
-    const fOpen = !!W.open["f|" + f.label];
-    return `<li class="pgroup${fOpen ? " open" : ""}">
-      <button class="pg-head where-head" aria-expanded="${fOpen}" onclick="toggleWhere(${q("f|" + f.label)})">
-        <span class="pg-name"><span class="chev">${icon(fOpen ? "up" : "down", 12)}</span>
-          <b>${esc(f.label)}</b><em>${fmtInt(f.products.length)} product${f.products.length === 1 ? "" : "s"}</em></span>
-        <span class="pg-c">${f.clear ? `${fmtInt(f.clear)} with a clear best` : "no clear best yet"}</span>
-        <span class="pg-v num">R ${fmt(f.value)}</span>
-      </button>
-      ${fOpen ? `<ul class="where-products">${f.products.map(p => {
-        const key = "p|" + p.product;
-        const pOpen = !!W.open[key];
-        return `<li class="where-product${pOpen ? " open" : ""}">
-          <button class="wp-head" aria-expanded="${pOpen}" onclick="toggleWhere(${q(key)})">
-            <span class="chev">${icon(pOpen ? "up" : "down", 11)}</span>
-            <span class="wp-name" title="${esc(p.product)}">${esc(shortProduct(p.product))}</span>
-            <span class="wp-verdict">${verdict(p.verdict)}</span>
-          </button>
-          ${pOpen ? table(p) : ""}</li>`;
-      }).join("")}</ul>` : ""}
-    </li>`;
-  }).join("");
-
-  return `<div class="card ins-card wide where-card">${head}
-    <p class="rep-note">Ranked on <b>rand back per carton sent</b>: the price, less the agent's cut,
-      times the share of what was sent that sold. ${esc(d.window.from)} to ${esc(d.window.to)}.</p>
-    ${brief}
-    <ul class="pgroups">${groups}</ul>
-    ${(d.caveats || []).map(c => `<p class="rep-note">${esc(c)}</p>`).join("")}
-  </div>`;
-}
-
-async function loadForecast() {
-  const F = S.intel;
-  F.loading = true; F.error = null;
-  if (!S.live) { F.loading = false; F.data = null; render(); return; }
-  try {
-    F.data = await (await api("/api/forecast")).json();
-  } catch (e) {
-    F.error = e.message || String(e);
-  } finally {
-    F.loading = false; render();
-  }
-}
-
-const CONF_WORD = {
-  "fair": "three months behind it",
-  "low": "only two months behind it",
-  "single month": "one month only, so a reading not a forecast",
+// The four bands a line can sit in, hardest first. Critical and High open on
+// arrival: they are what the buyer acts on this week.
+const BANDS = {
+  critical: { label: "Critical", tone: "crit", note: "back these first" },
+  high:     { label: "High",     tone: "warn", note: "worth taking on" },
+  steady:   { label: "Steady",   tone: "ok",   note: "keep them coming" },
+  hold:     { label: "Hold",     tone: "mut",  note: "only if it is cheap" },
 };
 
-/** A range, written as a range. The middle figure never travels alone. */
-function rangeCell(r) {
-  if (r.low === r.high) return `R ${fmt(r.estimate)}`;
-  return `R ${fmt(r.low)} <span class="rng-to">to</span> R ${fmt(r.high)}`;
+/** Where a line's fruit goes, as a chip: the verdict, then the figure. */
+function planWhere(l) {
+  if (!l.market) return `<span class="wv thin">No destination on record</span>`;
+  const at = `${esc(l.market)}${l.market_agent ? " · " + esc(l.market_agent) : ""}`;
+  const tone = l.where_kind === "best" ? "best" : l.where_kind === "only" ? "only" : "thin";
+  const note = l.where_kind === "best"
+    ? `R ${fmt(l.lead_per_carton)} a carton better than the next market`
+    : l.where_kind === "only" ? "only market tried so far"
+    : "too little history to be sure";
+  return `<span class="wv ${tone}">${at}</span><span class="wv-fig">${note}</span>`;
 }
 
-function projectionBlock(p) {
-  const t = p.total;
-  const monthName = monthLabel(p.month);
-  const caveats = (p.caveats || []).map(c => `<li>${esc(c)}</li>`).join("");
-
-  const rows = (p.products || []).map(x => `<tr>
-      <td class="rp-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}</td>
-      <td class="num est"><b>R ${fmt(x.estimate)}</b>
-        ${x.low === x.high ? "" : `<span class="rng">${rangeCell(x)}</span>`}</td>
-      <td class="num">${fmtInt(x.cartons_estimate)}</td>
-      <td class="num">${x.cartons_per_day == null ? "—" : fmtInt(x.cartons_per_day) + "/day"}</td>
-      <td class="num">${x.days_to_clear == null ? "—" : x.days_to_clear + "d"}</td>
-      <td><span class="conf c-${esc(x.confidence.replace(/\s+/g, "-"))}"
-            title="${esc(x.months_used.join(", "))}">${esc(x.confidence)}</span></td>
-    </tr>`).join("");
-
-  return `
-    <div class="kpis kpis-2">
-      ${kpiCard(`Expected in ${monthName}`, "R " + fmt(t.estimate),
-        `between R ${fmt(t.low)} and R ${fmt(t.high)}`, undefined,
-        { tone: "accent", icon: "rand" })}
-      ${kpiCard("Built from", (p.window || []).length + " month" + ((p.window || []).length === 1 ? "" : "s"),
-        (p.window || []).map(monthLabel).join(", ") || "nothing yet", undefined,
-        { icon: "table" })}
-    </div>
-
-    ${caveats ? `<div class="banner warn caveats"><span class="bi">${icon("alert", 14)}</span>
-      <div><b>Read these with the numbers.</b><ul>${caveats}</ul></div></div>` : ""}
-
-    ${rows ? `<div class="card ins-card">
-      <div class="ins-card-head"><h2>Product by product</h2>
-        <span class="rep-c">${fmtInt((p.products || []).length)} projected</span></div>
-      <div class="rep-scroll"><table class="rep-table intel-table">
-        <thead><tr><th>Product</th><th class="num">Expected</th>
-          <th class="num">Cartons</th><th class="num">Sells at</th><th class="num">Clears in</th>
-          <th>Confidence</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-      <p class="rep-note">Expected is the middle of the months this product actually traded;
-        the range is its worst and best of those months. Nothing is extrapolated past what
-        the book has seen.</p>
-    </div>` : `<div class="card placeholder"><div class="pi">${icon("clock", 22)}</div>
-      <h2>Nothing to project yet</h2>
-      <p>Save a couple of months of sales and this fills in.</p></div>`}
-
-    ${(p.resting || []).length ? `<div class="card ins-card">
-      <div class="ins-card-head"><h2>Resting</h2>
-        <span class="rep-c">${fmtInt(p.resting.length)} not projected</span></div>
-      <p class="rep-note">Nothing sold on these lately, which usually means the season is
-        over rather than that they failed. They are counted at nothing rather than averaged
-        back to life.</p>
-      <ul class="trk-list">${p.resting.slice(0, 12).map(r => `<li>
-        ${nameCell(r, shortProduct(r.product))}
-        <span class="trk-d">last traded ${esc(monthLabel(r.last_traded))}</span>
-        <span class="trk-n num"></span></li>`).join("")}</ul>
-    </div>` : ""}`;
+/** One line of the plan, and everything behind it once opened. */
+function planLine(l) {
+  const key = "l|" + l.product;
+  const open = !!S.procure.open[key];
+  const dests = l.destinations || [];
+  return `<li class="plan-line${open ? " open" : ""}">
+    <button class="pl-head" aria-expanded="${open}" onclick="togglePlan(${q(key)})">
+      <span class="chev">${icon(open ? "up" : "down", 11)}</span>
+      <span class="pl-name" title="${esc(l.product)}">${esc(shortProduct(l.product))}
+        <em>${esc(l.fruit)}</em></span>
+      <span class="pl-take num"><b>${fmtInt(l.take_on)}</b> ctn
+        <em>${fmtInt(l.expected_cartons)} expected${l.on_hand ? ` · ${fmtInt(l.on_hand)} on the floor` : ""}</em></span>
+      <span class="pl-where">${planWhere(l)}</span>
+      <span class="pl-money num"><b>R ${fmt(l.expected_value)}</b>
+        <em>${l.expected_low === l.expected_high ? "one month only"
+          : `R ${fmt(l.expected_low)} to R ${fmt(l.expected_high)}`}</em></span>
+    </button>
+    ${open ? `<div class="pl-body">
+      <div class="pl-why">${(l.reasons || []).map(r => `<span class="pl-chip">${esc(r)}</span>`).join("")}
+        <span class="pl-chip">${esc(l.confidence)} · ${(l.months_used || []).map(monthLabel).join(", ")}</span></div>
+      ${dests.length ? `<div class="rep-scroll"><table class="rep-table where-table">
+        <thead><tr><th>Market · agent</th><th class="num">Cartons</th><th class="num">Per carton</th>
+          <th class="num">vs market</th><th class="num">Sold of sent</th><th class="num">Days to sell</th>
+          <th class="num">Agent's cut</th><th class="num">Back per carton sent</th><th class="num">Loads</th></tr></thead>
+        <tbody>${dests.map(x => `<tr class="${x.enough ? "" : "thin"}">
+          <td>${esc(x.market || "—")}<span class="wt-sub">${esc(x.market_agent || "")}</span></td>
+          <td class="num">${fmtInt(x.cartons)}</td><td class="num">R ${fmt(x.price)}</td>
+          <td class="num">${pctOf(x.vs_market)}</td><td class="num">${pctOf(x.sell_through)}</td>
+          <td class="num">${x.days_to_sell == null ? "—" : x.days_to_sell}</td>
+          <td class="num">${pctOf(x.agent_cut)}${x.agent_cut_known ? "" : "*"}</td>
+          <td class="num"><b>${x.back_per_carton == null ? "—" : "R " + fmt(x.back_per_carton)}</b></td>
+          <td class="num">${fmtInt(x.consignments)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="ins-empty">No destination on record for this product yet.</p>`}
+    </div>` : ""}
+  </li>`;
 }
 
-/** Best outlet per product: where the same fruit fetched the most, and on how
- *  much. The volume is shown beside the price because a record price on one
- *  carton is not a market, it is an anecdote. */
-/** How long each agent takes to pay, so next month's sales can be read as cash. */
+function renderProcure() {
+  const P = S.procure, A = S.assistant;
+  if (P.data === null && !P.loading && P.error === null && S.live) loadProcurement();
+  if (A.status === null && !A.loading && S.live) loadAssistant();
+  const ready = !!(A.status && A.status.configured);
+  const d = P.data;
+
+  const head = `<div class="head ins-head">
+      <div><h1>Procurement</h1>
+        <p class="head-sub">What to take on${d ? " for " + esc(monthLabel(d.month)) : ""}, how much of it,
+          and where to send it. Every rand figure is what the market is expected to return,
+          never a margin: nothing here knows what the fruit costs.</p></div>
+      <div class="ins-actions">
+        <div class="seg sm">${[[3, "Last 3 months"], [0, "All time"]].map(([m, l]) =>
+          `<button class="${P.months === m ? "on" : ""}" onclick="setPlanMonths(${m})">${l}</button>`).join("")}</div>
+        <button class="btn ghost sm refresh" onclick="loadProcurement()">${icon("refresh")}Refresh</button>
+      </div>
+    </div>`;
+
+  if (!S.live) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card placeholder"><div class="pi">${icon("chart", 22)}</div>
+        <h2>Needs the live app</h2>
+        <p>This reads your saved history, so it only works signed in.</p></div></section>`;
+    return;
+  }
+  if (P.error) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="banner bad"><span class="bi">!</span><span><b>Could not work out the plan.</b>
+        ${esc(P.error)}</span></div></section>`;
+    return;
+  }
+  if (!d) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card"><div class="busy"><span class="spin"></span> Working out the plan</div></div></section>`;
+    return;
+  }
+  if (!d.lines.length) {
+    main.innerHTML = `<section class="screen">${head}
+      <div class="card placeholder"><div class="pi">${icon("clock", 22)}</div>
+        <h2>Nothing to plan yet</h2>
+        <p>Save a few months of sales and this fills in.</p></div></section>`;
+    return;
+  }
+
+  const t = d.totals;
+  const kpis = `<div class="kpis kpis-4">
+      ${kpiCard("To take on", fmtInt(t.cartons) + " ctn",
+        `${fmtInt(t.to_take_on)} of ${fmtInt(t.lines)} lines`, undefined,
+        { tone: "accent", icon: "box" })}
+      ${kpiCard(`Market should return`, "R " + fmt(t.expected_value),
+        `expected over ${esc(monthLabel(d.month))}`, undefined, { tone: "ok", icon: "rand" })}
+      ${kpiCard("Already on the floor", fmtInt(t.on_hand) + " ctn",
+        "taken off what to take on", undefined, { tone: "warn", icon: "clock" })}
+      ${kpiCard("Never compared", fmtInt(t.untested),
+        "products sent to one market only", undefined, { icon: "pin" })}
+    </div>`;
+
+  const brief = `<div class="where-brief">
+      ${P.brief ? `<div class="wb-text">${mdLite(P.brief)}</div>` : ""}
+      ${P.briefError ? `<p class="trk-note warn">${esc(P.briefError)}</p>` : ""}
+      ${ready ? `<button class="btn ${P.brief ? "ghost" : "primary"} sm" onclick="writePlan()" ${P.briefBusy ? "disabled" : ""}>
+          ${P.briefBusy ? `<span class="spin"></span> Writing` : `${icon("chat")}${P.brief ? "Write it again" : "Write the plan"}`}</button>`
+        : `<p class="rep-note">Add a Claude Haiku key (<code>ANTHROPIC_API_KEY_INTEL</code>) in Vercel
+            to get this plan written out in words.</p>`}
+    </div>`;
+
+  const groups = d.priorities.map(g => {
+    const band = BANDS[g.key] || { label: g.key, tone: "mut", note: "" };
+    const key = "g|" + g.key;
+    const open = S.procure.open[key] === undefined
+      ? (g.key === "critical" || g.key === "high") : S.procure.open[key];
+    return `<section class="card trk-block plan-group${open ? " open" : ""}">
+      <header class="trk-head" onclick="togglePlan(${q(key)})">
+        <span class="trk-mark t-${band.tone}">${icon(band.tone === "crit" ? "alert" : "box", 15)}</span>
+        <div class="trk-title"><h2>${band.label}<span class="pl-note">${esc(band.note)}</span></h2>
+          <span class="trk-sum">${fmtInt(g.lines.length)} line${g.lines.length === 1 ? "" : "s"} ·
+            ${fmtInt(g.cartons)} cartons to take on · R ${fmt(g.expected_value)} expected</span></div>
+        <div class="trk-tools"><button class="trk-toggle" aria-expanded="${open}"
+          onclick="event.stopPropagation(); togglePlan(${q(key)})">${open ? "Close" : "Open"}
+          <span class="chev">${icon(open ? "up" : "down", 13)}</span></button></div>
+      </header>
+      ${open ? `<div class="trk-body"><ul class="plan-lines">${g.lines.map(planLine).join("")}</ul></div>` : ""}
+    </section>`;
+  }).join("");
+
+  const log = A.log.map(m => m.role === "q"
+    ? `<div class="ask-q">${esc(m.text)}</div>`
+    : `<div class="ask-a${m.failed ? " failed" : ""}">${m.failed ? `<p>${esc(m.text)}</p>` : mdLite(m.text)}${findingsBlock(m.findings)}</div>`
+  ).join("");
+  const busy = A.busy
+    ? `<div class="ask-a"><div class="busy"><span class="spin"></span> ${esc(A.busyLabel)}</div></div>` : "";
+  const ask = ready
+    ? `<div class="card ask-card">
+        <div class="ins-card-head"><h2>Ask about any of it</h2>
+          ${A.log.length && !A.busy ? `<button class="linklike" onclick="clearAssistant()">Clear</button>` : ""}</div>
+        ${log || busy ? `<div class="ask-log">${log}${busy}</div>` : `
+          <div class="ask-chips">${(A.status.suggestions || []).map(x =>
+            `<button class="ask-chip" data-q="${esc(x)}" onclick="askAssistant(this.dataset.q)">${esc(x)}</button>`).join("")}</div>`}
+        <form class="ask-bar" onsubmit="event.preventDefault(); askAssistant(this.q.value)">
+          <input class="ask-input" name="q" autocomplete="off" maxlength="2000"
+            placeholder="Ask about a product, a market, next month" value="${esc(A.draft)}"
+            oninput="S.assistant.draft = this.value" ${A.busy ? "disabled" : ""}>
+          <button class="btn primary sm" ${A.busy ? "disabled" : ""}>Ask</button>
+        </form>
+      </div>`
+    : "";
+
+  main.innerHTML = `<section class="screen ins">
+    ${head}
+    ${kpis}
+    ${brief}
+    <div class="plan-groups">${groups}</div>
+    ${(d.caveats || []).length ? `<div class="banner warn caveats"><span class="bi">${icon("alert", 14)}</span>
+      <div><b>Read these with the figures.</b><ul>${d.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul></div></div>` : ""}
+    <div class="ins-grid-2">${cashBlock(d.payment_lag)}</div>
+    ${ask}
+  </section>`;
+}
+
 function cashBlock(lag) {
   if (!lag || !lag.length) return "";
   const slowest = Math.max(...lag.map(l => l.days_to_pay), 1);
@@ -2706,76 +2747,6 @@ function cashBlock(lag) {
       it, across ${fmtInt(lag.reduce((n, l) => n + l.payments, 0))} payments. Slowest single
       settlement: ${fmtInt(Math.max(...lag.map(l => l.slowest_days)))} days.</p>
   </div>`;
-}
-
-function renderIntel() {
-  const F = S.intel, A = S.assistant;
-  if (F.data === null && !F.loading && F.error === null && S.live) loadForecast();
-  if (A.status === null && !A.loading && S.live) loadAssistant();
-  const ready = !!(A.status && A.status.configured);
-
-  const head = `<div class="head ins-head">
-      <div><h1>Intelligence</h1>
-        <p class="head-sub">What the book expects next month, how fast each line moves,
-          and where it pays best. Every figure is computed from your saved sales.</p></div>
-      <div class="ins-actions">
-        <button class="btn ghost sm refresh" onclick="loadForecast()">${icon("refresh")}Refresh</button>
-        ${ready ? `<button class="btn primary sm" onclick="runAnalysis()" ${A.busy ? "disabled" : ""}>${icon("chat")}Written brief</button>` : ""}
-      </div>
-    </div>`;
-
-  if (!S.live) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="card placeholder"><div class="pi">${icon("chart", 22)}</div>
-        <h2>Needs the live app</h2>
-        <p>This reads your saved history, so it only works signed in.</p></div></section>`;
-    return;
-  }
-  if (F.error) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="banner bad"><span class="bi">!</span><span><b>Could not work out the outlook.</b>
-        ${esc(F.error)}</span></div></section>`;
-    return;
-  }
-  if (!F.data) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="card"><div class="busy"><span class="spin"></span> Reading the book</div></div></section>`;
-    return;
-  }
-
-  const log = A.log.map(m => m.role === "q"
-    ? `<div class="ask-q">${esc(m.text)}</div>`
-    : `<div class="ask-a${m.failed ? " failed" : ""}">${m.failed ? `<p>${esc(m.text)}</p>` : mdLite(m.text)}${findingsBlock(m.findings)}</div>`
-  ).join("");
-  const busy = A.busy
-    ? `<div class="ask-a"><div class="busy"><span class="spin"></span> ${esc(A.busyLabel)}</div></div>` : "";
-
-  const brief = ready
-    ? `<div class="card ask-card">
-        <div class="ins-card-head"><h2>Ask about any of it</h2>
-          ${A.log.length && !A.busy ? `<button class="linklike" onclick="clearAssistant()">Clear</button>` : ""}</div>
-        ${log || busy ? `<div class="ask-log">${log}${busy}</div>` : `
-          <div class="ask-chips">${(A.status.suggestions || []).map(s =>
-            `<button class="ask-chip" data-q="${esc(s)}" onclick="askAssistant(this.dataset.q)">${esc(s)}</button>`).join("")}</div>`}
-        <form class="ask-bar" onsubmit="event.preventDefault(); askAssistant(this.q.value)">
-          <input class="ask-input" name="q" autocomplete="off" maxlength="2000"
-            placeholder="Ask about next month, a product, an agent" value="${esc(A.draft)}"
-            oninput="S.assistant.draft = this.value" ${A.busy ? "disabled" : ""}>
-          <button class="btn primary sm" ${A.busy ? "disabled" : ""}>Ask</button>
-        </form>
-      </div>`
-    : `<div class="card placeholder"><div class="pi">${icon("chat", 22)}</div>
-        <h2>The written brief is not set up</h2>
-        <p>The figures above are worked out on the server and do not need it. Adding
-          <code>ANTHROPIC_API_KEY</code> in Vercel under Settings, Environment Variables
-          adds a written read of them: what to buy, how much, and where to send it.</p></div>`;
-
-  main.innerHTML = `<section class="screen ins">${head}
-    ${projectionBlock(F.data.projection)}
-    ${whereBlock(ready)}
-    <div class="ins-grid-2">${cashBlock(F.data.payment_lag)}</div>
-    ${brief}
-  </section>`;
 }
 
 function renderAssistant() {

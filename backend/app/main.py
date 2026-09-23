@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import (
+    procurement,
     scorecard,
     analytics,
     assistant,
@@ -1373,31 +1374,34 @@ async def get_forecast(user: User | None = Depends(require_user)) -> dict:
     return forecast.build(rows, payments)
 
 
-@app.get("/api/intel/where")
-async def get_where_to_send(
+@app.get("/api/procurement")
+async def get_procurement(
     months: int = Query(scorecard.DEFAULT_MONTHS, ge=0, le=24),
     user: User | None = Depends(require_user),
 ) -> dict:
-    """Every market and agent each product has gone to, scored on rand back per
-    carton sent. Computed from the saved history; needs no Claude key. `months`
-    0 compares the whole book."""
+    """The buy plan: what to take on next month, how much, and where to send it.
+
+    Computed from the saved history, so it answers with or without a Claude
+    key; the key only buys the written plan on top. `months` sets the window
+    the destinations are compared over, 0 for the whole book.
+    """
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    return scorecard.build(rows, payments, months)
+    return procurement.build(rows, payments, months)
 
 
-@app.post("/api/assistant/where")
-async def write_where_to_send(
+@app.post("/api/assistant/plan")
+async def write_procurement_plan(
     months: int = Form(scorecard.DEFAULT_MONTHS),
     user: User | None = Depends(require_user),
 ) -> dict:
-    """The written recommendation over that comparison, from Claude Haiku."""
+    """The written buy plan over those figures, from Claude Haiku."""
     if not assistant.configured():
         raise HTTPException(503, assistant.NOT_SET_UP)
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
     try:
-        text = await run_in_threadpool(assistant.where_brief, rows, payments, months)
+        text = await run_in_threadpool(assistant.plan_brief, rows, payments, months)
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
     return {"text": text, "months": months, "model": assistant.model()}

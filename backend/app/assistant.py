@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from . import analytics, forecast, scorecard
+from . import analytics, forecast, procurement, scorecard
 
 # Claude Haiku 4.5, the operator's choice: they hold the key and pay for what it
 # uses. Overridable per deployment with ZACON_ASSISTANT_MODEL -- to try Sonnet if
@@ -585,6 +585,57 @@ def where_context(card: dict) -> str:
     return "\n".join(out)
 
 
+PLAN_SYSTEM = """You write the buy plan at the top of the Procurement screen in ZacoAgents, for the operator of Zaco Agents, a South African fresh-produce business.
+
+How the business works: Zaco takes fruit from growers on consignment, sends it to a market agent at a fresh-produce market, and earns a commission on what the market returns. There is no purchase price anywhere in this data, so never talk about margin, cost or profit: every rand figure you are given is what the market is expected to return.
+
+You are given the plan already computed: every product worth taking on, its priority, how many cartons to take on (what is expected to sell, less what is already sitting on the floor), where it pays best, and the figures behind each. Use only those figures. Never add, average or estimate anything yourself, and never name a product or a destination that is not in the list.
+
+Write it the way the operator will act on it:
+- Open with the shape of it in one line: how many lines to take on, how many cartons, and what the market is expected to return.
+- Then the Critical and High lines, each in one sentence: how much of what, where to send it, and the single figure that justifies it.
+- Call out anything that still has stock on the floor, where taking on more would add to what is already unsold.
+- Say plainly where the history is too thin to be sure, and where a product has only ever gone to one market so there is nothing to compare.
+- Under 220 words. Plain sentences, a short list is fine, no headings. Money as "R 12 500,00"."""
+
+
+def plan_context(plan: dict) -> str:
+    """The computed plan as the model reads it: the totals, then line by line."""
+    if not plan.get("lines"):
+        return "## The buy plan\nNot enough recorded history to plan anything yet."
+    t = plan["totals"]
+    out = [f"## Buy plan for {plan['month']} (computed, do not recalculate)",
+           f"To take on: {t['cartons']} cartons across {t['to_take_on']} of "
+           f"{t['lines']} lines. Expected back from the market: {_rand(t['expected_value'])}. "
+           f"Already on the floor: {t['on_hand']} cartons. "
+           f"{t['untested']} products have only ever gone to one market.",
+           *("Caveat: " + c for c in plan.get("caveats", []))]
+    for group in plan["priorities"]:
+        out.append(f"\n### {group['key'].title()} ({len(group['lines'])} lines, "
+                   f"{group['cartons']} cartons to take on)")
+        for l in group["lines"]:
+            where_to = (f"{l['market']} via {l['market_agent']}" if l["market"]
+                        else "no destination on record")
+            lead = (f", {_rand(l['lead_per_carton'])} a carton better than the next market"
+                    if l["where_kind"] == "best"
+                    else ", only ever sent there" if l["where_kind"] == "only" else "")
+            out.append(
+                f"- {l['product']}: take on {l['take_on']} cartons "
+                f"(expects {l['expected_cartons']:.0f}, {l['on_hand']} on the floor), "
+                f"send to {where_to}{lead}. Expected {_rand(l['expected_value'])} "
+                f"({_rand(l['expected_low'])} to {_rand(l['expected_high'])}, "
+                f"{l['confidence']}). {'; '.join(l['reasons'])}.")
+    return "\n".join(out)
+
+
+def plan_brief(rows: list[dict], payments: list[dict], months: int) -> str:
+    """The written buy plan over the computed one."""
+    plan = procurement.build(rows, payments, months)
+    if not plan.get("lines"):
+        raise AssistantError("There is not enough history yet to plan a buy.")
+    return _short_answer(PLAN_SYSTEM, plan_context(plan))
+
+
 WHERE_SYSTEM = """You write the recommendation at the top of the "Where to send it" section of ZacoAgents, for the operator of Zaco Agents, a South African fresh-produce business that consigns fruit to market agents at several fresh-produce markets.
 
 You are given a computed comparison of every market and agent each product has gone to. Every figure in it is exact. Use only those figures: never add, average or estimate anything yourself, and never invent a destination.
@@ -603,23 +654,32 @@ def where_brief(rows: list[dict], payments: list[dict], months: int) -> str:
     One short call. The comparison is computed first and handed over whole;
     the model's job is only to say which parts matter and why.
     """
+    card = scorecard.build(rows, payments, months)
+    if not card.get("fruits"):
+        raise AssistantError("There is not enough history yet to compare destinations.")
+    return _short_answer(WHERE_SYSTEM, where_context(card))
+
+
+def _short_answer(system: str, prompt: str) -> str:
+    """One short call: the figures are computed, the model only writes them up.
+
+    Handed a whole computed block rather than the rows, so there is nothing for
+    it to add up, and no way for a figure it prints to have come from anywhere
+    but the block.
+    """
     import anthropic
 
     key = api_key()
     if not key:
         raise AssistantError(NOT_SET_UP)
-    card = scorecard.build(rows, payments, months)
-    if not card.get("fruits"):
-        raise AssistantError("There is not enough history yet to compare destinations.")
-
     client = anthropic.Anthropic(api_key=key)
     model_id = model()
     try:
         response = client.messages.create(
             model=model_id,
             max_tokens=2000,
-            system=WHERE_SYSTEM,
-            messages=[{"role": "user", "content": where_context(card)}],
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
             **_thinking(model_id, None),
         )
     except anthropic.AuthenticationError as exc:

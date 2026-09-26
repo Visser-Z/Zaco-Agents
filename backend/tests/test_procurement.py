@@ -258,3 +258,72 @@ def test_the_plan_says_what_the_growth_figures_assume():
     out = procurement.build(ROWS + STUCK, PAYS, today=TODAY)
     assert any("Room to grow" in c for c in out["caveats"])
     assert any("test load" in c for c in out["caveats"])
+
+
+# --- how long the order is for --------------------------------------------
+
+def test_a_month_is_what_the_plan_gives_when_nothing_is_asked_for():
+    out = procurement.build(ROWS, PAYS, today=TODAY)
+    assert out["horizon"] == {"days": 30, "label": "the next month",
+                              "scale": 1.0, "is_month": True}
+
+
+def test_a_week_s_order_is_a_week_s_worth():
+    """Grapes sell 100 cartons a month, so seven days of them is about 23."""
+    month = _line(procurement.build(ROWS, PAYS, today=TODAY), GRAPES)
+    week = _line(procurement.build(ROWS, PAYS, today=TODAY, days=7), GRAPES)
+    assert week["expected_cartons"] == round(month["expected_cartons"] * 7 / 30, 1)
+    assert week["expected_value"] == round(month["expected_value"] * 7 / 30, 2)
+    assert week["take_on"] == round(week["expected_cartons"])
+
+
+def test_stock_on_the_floor_is_not_scaled_with_the_order():
+    """A week's order still has to come off the whole 150 cartons sitting at
+    Durban: stock is stock, however long you are buying for."""
+    week = _line(procurement.build(ROWS, PAYS, today=TODAY, days=7), PLUMS)
+    month = _line(procurement.build(ROWS, PAYS, today=TODAY), PLUMS)
+    assert week["on_hand"] == month["on_hand"] == 150
+    assert week["take_on"] == 0
+
+
+def test_the_priority_does_not_move_with_the_horizon():
+    """How a product trades is not a function of how much of it is being
+    bought, so the same line keeps its mark whatever period is chosen."""
+    for days in (7, 14, 30, 90):
+        out = procurement.build(ROWS, PAYS, today=TODAY, days=days)
+        assert _line(out, GRAPES)["priority"] == "critical"
+        assert _line(out, GRAPES)["score"] == _line(
+            procurement.build(ROWS, PAYS, today=TODAY), GRAPES)["score"]
+
+
+def test_a_short_order_says_it_is_a_rate_not_a_forecast():
+    out = procurement.build(ROWS, PAYS, today=TODAY, days=7)
+    assert any("cut to 7 days" in c for c in out["caveats"])
+    assert any("the next 7 days" in c for c in out["caveats"])
+    # A month's plan carries no such note, because nothing was scaled.
+    assert not any("cut to" in c for c in procurement.build(ROWS, PAYS, today=TODAY)["caveats"])
+
+
+def test_a_quarter_asks_for_three_months_of_it():
+    quarter = _line(procurement.build(ROWS, PAYS, today=TODAY, days=90), GRAPES)
+    month = _line(procurement.build(ROWS, PAYS, today=TODAY), GRAPES)
+    assert quarter["expected_cartons"] == round(month["expected_cartons"] * 3, 1)
+    assert quarter["take_on"] == round(quarter["expected_cartons"])
+
+
+def test_a_test_load_is_judged_on_the_month_not_on_the_slice_being_bought():
+    """A week's worth of a good line is a small number, which is no reason not
+    to try it at a second market."""
+    rows = ROWS + STUCK
+    week = _line(procurement.build(rows, PAYS, today=TODAY, days=7), ONLY)
+    assert week["expected_cartons"] < procurement.TRIAL_WORTH_TESTING
+    assert week["monthly_cartons"] >= procurement.TRIAL_WORTH_TESTING
+    assert week["trial"] is not None
+    # Sized off the week, with the floor holding it up.
+    assert week["trial"]["cartons"] == procurement.TRIAL_MIN
+
+
+def test_an_odd_number_of_days_still_works():
+    out = procurement.build(ROWS, PAYS, today=TODAY, days=21)
+    assert out["horizon"]["label"] == "the next 21 days"
+    assert out["horizon"]["scale"] == 0.7

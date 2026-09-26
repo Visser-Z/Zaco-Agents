@@ -134,9 +134,13 @@ def _header(plan: dict, st: dict, today: date, prepared_for: str | None) -> list
     # Written out rather than strftime'd: "%-d" is not a thing on Windows, and
     # this runs on the operator's laptop as well as in the function.
     prepared = f"{today.day} {MONTHS[today.month - 1]} {today.year}"
+    # A month's order is named after its month; a week's is not, because the
+    # days it covers straddle two of them and naming one would mislead.
+    covers = horizon(plan)
+    if (plan.get("horizon") or {}).get("is_month", True):
+        covers += f" ({month_label(plan.get('month'))})"
     left = [Paragraph("Procurement order", st["title"]),
-            Paragraph(f"{month_label(plan.get('month'))} &middot; prepared {prepared}",
-                      st["sub"])]
+            Paragraph(f"For {covers} &middot; prepared {prepared}", st["sub"])]
     who = prepared_for.strip() if prepared_for else ""
     left.append(Paragraph(f"For: <b>{who}</b>" if who
                           else "For: ______________________________", st["sub"]))
@@ -153,16 +157,21 @@ def _header(plan: dict, st: dict, today: date, prepared_for: str | None) -> list
     return [band, Spacer(1, 7)]
 
 
+def horizon(plan: dict) -> str:
+    """What the order covers, in words. Older plans carry only a month."""
+    return (plan.get("horizon") or {}).get("label") or "the next month"
+
+
 def _lede(plan: dict, st: dict) -> Paragraph:
     t = plan.get("totals", {})
     return Paragraph(
         f"Order <b>{_int(t.get('cartons'))} cartons</b> across "
-        f"<b>{_int(t.get('to_take_on'))} lines</b>, which the markets are expected to return "
-        f"<b>{rand(t.get('expected_value'))}</b> on. Quantities are what each market is "
-        f"expected to sell next month less the {_int(t.get('on_hand'))} cartons already "
-        f"sitting on its floor. Room to grow is extra on top of the order, offered only "
-        f"where the market sold every carton sent, cleared it within a couple of days and "
-        f"held the market average.", st["lede"])
+        f"<b>{_int(t.get('to_take_on'))} lines</b> for <b>{horizon(plan)}</b>, which the "
+        f"markets are expected to return <b>{rand(t.get('expected_value'))}</b> on. "
+        f"Quantities are what each market is expected to sell over that time less the "
+        f"{_int(t.get('on_hand'))} cartons already sitting on its floor. Room to grow is "
+        f"extra on top of the order, offered only where the market sold every carton sent, "
+        f"cleared it within a couple of days and held the market average.", st["lede"])
 
 
 def _market_table(market: str, agent: str, rows: list[dict], st: dict, width: float) -> KeepTogether:
@@ -245,8 +254,14 @@ def _footer(plan: dict, st: dict, width: float) -> list:
 
 
 def filename(plan: dict) -> str:
-    """What the file is called once it lands in his downloads."""
-    return f"zaco-procurement-{plan.get('month') or 'plan'}.pdf"
+    """What the file is called once it lands in his downloads.
+
+    The period is in the name: two sheets for the same month, one for a week
+    and one for the whole of it, must not land on top of each other.
+    """
+    days = (plan.get("horizon") or {}).get("days")
+    span = f"-{days}d" if days and days != 30 else ""
+    return f"zaco-procurement-{plan.get('month') or 'plan'}{span}.pdf"
 
 
 def build(plan: dict, today: date | None = None, prepared_for: str | None = None) -> bytes:
@@ -261,7 +276,7 @@ def build(plan: dict, today: date | None = None, prepared_for: str | None = None
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=15 * mm, rightMargin=15 * mm, topMargin=14 * mm, bottomMargin=16 * mm,
-        title=f"Procurement order, {month_label(plan.get('month'))}",
+        title=f"Procurement order, {horizon(plan)}",
         author="Zaco Agents (Pty) Ltd", subject="What to take on, and where to send it")
     width = doc.width
 
@@ -285,7 +300,7 @@ def build(plan: dict, today: date | None = None, prepared_for: str | None = None
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(MUTED)
         canvas.drawString(15 * mm, 9 * mm,
-                          f"Zaco Agents procurement order · {month_label(plan.get('month'))}")
+                          f"Zaco Agents procurement order · {horizon(plan)}")
         canvas.drawRightString(A4[0] - 15 * mm, 9 * mm, f"Page {document.page}")
         canvas.restoreState()
 

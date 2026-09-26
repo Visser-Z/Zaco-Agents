@@ -1379,22 +1379,25 @@ async def get_forecast(user: User | None = Depends(require_user)) -> dict:
 @app.get("/api/procurement")
 async def get_procurement(
     months: int = Query(scorecard.DEFAULT_MONTHS, ge=0, le=24),
+    days: int = Query(procurement.DEFAULT_DAYS, ge=1, le=365),
     user: User | None = Depends(require_user),
 ) -> dict:
-    """The buy plan: what to take on next month, how much, and where to send it.
+    """The buy plan: what to take on, how much, and where to send it.
 
     Computed from the saved history, so it answers with or without a Claude
     key; the key only buys the written plan on top. `months` sets the window
-    the destinations are compared over, 0 for the whole book.
+    the destinations are compared over, 0 for the whole book. `days` sets how
+    long the order is for: the two are different questions.
     """
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    return procurement.build(rows, payments, months)
+    return procurement.build(rows, payments, months, days=days)
 
 
 @app.get("/api/procurement/sheet.pdf")
 async def get_order_sheet(
     months: int = Query(scorecard.DEFAULT_MONTHS, ge=0, le=24),
+    days: int = Query(procurement.DEFAULT_DAYS, ge=1, le=365),
     prepared_for: str | None = Query(None, max_length=80),
     user: User | None = Depends(require_user),
 ) -> Response:
@@ -1407,7 +1410,7 @@ async def get_order_sheet(
     """
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    plan = procurement.build(rows, payments, months)
+    plan = procurement.build(rows, payments, months, days=days)
     pdf = await run_in_threadpool(order_sheet.build, plan, None, prepared_for)
     return Response(
         pdf, media_type="application/pdf",
@@ -1419,6 +1422,7 @@ async def get_order_sheet(
 @app.post("/api/assistant/plan")
 async def write_procurement_plan(
     months: int = Form(scorecard.DEFAULT_MONTHS),
+    days: int = Form(procurement.DEFAULT_DAYS),
     user: User | None = Depends(require_user),
 ) -> dict:
     """The written buy plan over those figures, from Claude Haiku."""

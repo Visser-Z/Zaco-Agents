@@ -636,6 +636,10 @@
   .plan-card { padding: 16px 18px 12px; margin-bottom: 16px; }
   .plan-bar { display: flex; align-items: center; justify-content: space-between;
               gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  /* Two timeframes side by side, each labelled, because "3 months" means
+     something different in each of them. */
+  .plan-for { display: flex; align-items: center; gap: 7px; font-size: 11px;
+              color: var(--ink-faint); font-weight: 600; }
   .plan-chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .plan-chip { appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
                border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
@@ -1255,7 +1259,11 @@ const S = {
              // The plan is one table: which priorities to show, whether to
              // group it by market, and what it is sorted on.
              filter: "all", groupBy: "market", sort: "priority", dir: -1,
-             savingPdf: false, pdfError: null },
+             savingPdf: false, pdfError: null,
+             // Two different timeframes: `months` is how far back the
+             // destinations are compared over, `days` is how long the order
+             // itself is for. Fruit is perishable, so a week is a real answer.
+             days: 30 },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -2869,7 +2877,7 @@ async function loadProcurement() {
   P.loading = true; P.error = null;
   if (!S.live) { P.loading = false; render(); return; }
   try {
-    const r = await api(`/api/procurement?months=${P.months}`);
+    const r = await api(`/api/procurement?months=${P.months}&days=${P.days}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
     P.data = await r.json();
   } catch (e) {
@@ -2877,6 +2885,18 @@ async function loadProcurement() {
   } finally {
     P.loading = false; render();
   }
+}
+
+/** What the buyer is ordering for. A week at a time is how the markets
+ *  actually work; a month is for planning. */
+const PLAN_DAYS = [[7, "A week"], [14, "2 weeks"], [30, "A month"], [90, "3 months"]];
+
+function setPlanDays(days) {
+  if (S.procure.days === days) return;
+  S.procure.days = days;
+  S.procure.data = null;
+  S.procure.brief = null;
+  loadProcurement();
 }
 
 function setPlanMonths(m) {
@@ -2898,6 +2918,7 @@ async function writePlan() {
   try {
     const body = new FormData();
     body.append("months", String(P.months));
+    body.append("days", String(P.days));
     const r = await api("/api/assistant/plan", { method: "POST", body });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.detail || `HTTP ${r.status}`);
@@ -3163,7 +3184,7 @@ async function saveOrderSheet() {
   P.savingPdf = true; P.pdfError = null; render();
   let url = null;
   try {
-    const qs = new URLSearchParams({ months: String(P.months) });
+    const qs = new URLSearchParams({ months: String(P.months), days: String(P.days) });
     const res = await api(`/api/procurement/sheet.pdf?${qs}`);
     const blob = await res.blob();
     const name = (res.headers.get("Content-Disposition") || "")
@@ -3206,6 +3227,14 @@ function printOrderSheet() {
   setTimeout(done, 1000);   // afterprint does not fire everywhere
 }
 
+/** What the open plan covers, in words: "the next 7 days", or the month by
+ *  name when the order is for a whole one. */
+function planHorizon(d) {
+  const h = d && d.horizon;
+  if (!h) return monthLabel(d && d.month);
+  return h.is_month ? monthLabel(d.month) : h.label;
+}
+
 function renderProcure() {
   const P = S.procure, A = S.assistant;
   if (P.data === null && !P.loading && P.error === null && S.live) loadProcurement();
@@ -3215,12 +3244,18 @@ function renderProcure() {
 
   const head = `<div class="head ins-head">
       <div><h1>Procurement</h1>
-        <p class="head-sub">What to take on${d ? " for " + esc(monthLabel(d.month)) : ""}, how much of it,
+        <p class="head-sub">What to take on${d ? " for " + esc(planHorizon(d)) : ""}, how much of it,
           and where to send it. Every rand figure is what the market is expected to return,
           never a margin: nothing here knows what the fruit costs.</p></div>
       <div class="ins-actions">
-        <div class="seg sm">${[[3, "Last 3 months"], [0, "All time"]].map(([m, l]) =>
-          `<button class="${P.months === m ? "on" : ""}" onclick="setPlanMonths(${m})">${l}</button>`).join("")}</div>
+        <label class="plan-for">Buying for
+          <div class="seg sm">${PLAN_DAYS.map(([n, l]) =>
+            `<button class="${P.days === n ? "on" : ""}" onclick="setPlanDays(${n})">${l}</button>`).join("")}</div>
+        </label>
+        <label class="plan-for">Compared over
+          <div class="seg sm">${[[3, "3 months"], [0, "All time"]].map(([m, l]) =>
+            `<button class="${P.months === m ? "on" : ""}" onclick="setPlanMonths(${m})">${l}</button>`).join("")}</div>
+        </label>
         <button class="btn ghost sm" onclick="saveOrderSheet()" ${P.savingPdf ? "disabled" : ""}>${
           P.savingPdf ? `<span class="spin"></span>Building` : `${icon("download")}Save as PDF`}</button>
         <button class="btn ghost sm" onclick="printOrderSheet()">${icon("print")}Print</button>
@@ -3260,7 +3295,7 @@ function renderProcure() {
         `${fmtInt(t.to_take_on)} of ${fmtInt(t.lines)} lines`, undefined,
         { tone: "accent", icon: "box" })}
       ${kpiCard(`Market should return`, "R " + fmt(t.expected_value),
-        `expected over ${esc(monthLabel(d.month))}`, undefined, { tone: "ok", icon: "rand" })}
+        `expected over ${esc(planHorizon(d))}`, undefined, { tone: "ok", icon: "rand" })}
       ${kpiCard("Already on the floor", fmtInt(t.on_hand) + " ctn",
         "taken off what to take on", undefined, { tone: "warn", icon: "clock" })}
       ${kpiCard("Room to grow", "+" + fmtInt(t.growth_cartons + t.trial_cartons) + " ctn",

@@ -4,7 +4,8 @@ This is the one screen that asks for a decision rather than reporting one. It
 answers three things in the order a buyer asks them:
 
   1. What should I take on, most pressing first.
-  2. How many cartons, given what is already sitting on the floor.
+  2. How many cartons, given what is already sitting on the floor, for however
+     long is being bought for.
   3. Which market and agent to send it to when it arrives.
 
 Three rules it works to, each learned the hard way on this book:
@@ -28,6 +29,17 @@ market that pays its fruit best, sized so that being wrong costs little. Both
 carry what they are worth in rand. Neither is offered where the fruit did not
 sell out, where it fetched under the market average, or where stock is still
 sitting on the floor.
+
+**How long you are buying for is a separate question from how far back you
+are reading.** The history window (`months`) decides what the destinations are
+compared over; the horizon (`days`) decides how much fruit the order is for.
+Fruit is perishable and a market clears a load in days, so an order is usually
+for the coming week, not for a month, and the screen has to be able to say
+either. Everything the book knows is monthly, so a shorter horizon is the
+month's expectation cut down to that many days -- said plainly in the caveats,
+because nothing in the book says how a month's sales fall across its weeks.
+The score, the priority and where a line should go do not move with the
+horizon: they are how a product trades, not how much of it is being bought.
 
 **A priority means the same thing every month.** The bands are fixed marks on
 the score, not a ranking within the month, so a quiet month can have no
@@ -94,6 +106,26 @@ TRIAL_SHARE, TRIAL_MIN, TRIAL_WORTH_TESTING = 0.15, 10, 40
 # per carton, over at least this many loads of that fruit, before it is worth
 # the freight and the risk.
 TRIAL_MARGIN, MIN_TRIAL_LOADS = 1.05, 2
+
+# The book is kept in months, so a month is the horizon everything is scaled
+# from. 30 rather than the calendar's own length: the projection is a median of
+# whole months, and pretending to know that February is shorter would be a
+# precision the figures behind it do not have.
+MONTH_DAYS = 30
+DEFAULT_DAYS = MONTH_DAYS
+
+# What the screen offers, and what each one is called in a sentence.
+HORIZONS = {
+    7: "the next 7 days",
+    14: "the next 14 days",
+    30: "the next month",
+    90: "the next 3 months",
+}
+
+
+def horizon_label(days: int) -> str:
+    """"the next 7 days", or "the next 21 days" for anything unusual."""
+    return HORIZONS.get(days) or f"the next {days} days"
 
 
 def _direction(basis: dict[str, float]) -> tuple[str, float]:
@@ -218,7 +250,9 @@ def _trial(line: dict, by_fruit: dict[str, dict[str, dict]]) -> dict | None:
     here_back = line["back_per_carton"]
     if line["where_kind"] != "only" or not here_back or here_back <= 0:
         return None
-    if line["expected_cartons"] < TRIAL_WORTH_TESTING:
+    # Judged on the month, not on the horizon: a week's worth of a good line is
+    # a small number, and that is no reason not to try it somewhere new.
+    if line.get("monthly_cartons", line["expected_cartons"]) < TRIAL_WORTH_TESTING:
         return None
     mine = next((d for d in line["destinations"] if d["market"] == line["market"]), None)
     held_here = _strength(mine) if mine else None
@@ -286,8 +320,15 @@ def _reasons(line: dict) -> list[str]:
 
 
 def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAULT_MONTHS,
-          today=None) -> dict:
-    """The plan: every product worth taking on, ranked, with its destination."""
+          today=None, days: int = DEFAULT_DAYS) -> dict:
+    """The plan: every product worth taking on, ranked, with its destination.
+
+    `months` is how far back the destinations are compared over; `days` is how
+    long the order is for. They are different questions and the screen asks
+    them separately.
+    """
+    days = max(int(days or DEFAULT_DAYS), 1)
+    scale = days / MONTH_DAYS
     projection = forecast.project(rows, today)
     card = scorecard.build(rows, payments, months)
     velocity = {v["product"]: v for v in forecast.velocity(rows)}
@@ -307,16 +348,23 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
         best = next((d for d in placed.get("destinations", [])
                      if d["market"] == verdict.get("market")), None)
         on_floor = round(floor.get(product, 0.0))
-        expected = p["cartons_estimate"]
+        # A month's worth, cut to the horizon being bought for. What is already
+        # on the floor is not scaled: stock is stock, however long the order is
+        # for, and it comes off the next load either way.
+        monthly = p["cartons_estimate"]
+        expected = round(monthly * scale, 1)
         direction, direction_score = _direction(p["basis"])
         lines.append({
             "product": product,
             "fruit": analytics.product_type(product),
-            # What the market is expected to return next month, not a margin.
+            # What the market is expected to return over the horizon, not a margin.
             "expected_cartons": expected,
-            "expected_value": p["estimate"],
-            "expected_low": p["low"],
-            "expected_high": p["high"],
+            "expected_value": round(p["estimate"] * scale, 2),
+            "expected_low": round(p["low"] * scale, 2),
+            "expected_high": round(p["high"] * scale, 2),
+            # The unscaled month, which is what says whether a product moves
+            # enough to be worth testing at a second market at all.
+            "monthly_cartons": monthly,
             "confidence": p["confidence"],
             "months_used": p["months_used"],
             "on_hand": on_floor,
@@ -337,8 +385,11 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
     if lines:
         for line in lines:
             clearance = line["sell_through"] if line["sell_through"] is not None else PAR
-            days = line["days_to_clear"]
-            speed = 1 - min(days / SLOW_DAYS, 1.0) if days is not None else PAR
+            # Named apart from the horizon's `days`: this is how long the
+            # fruit takes to clear, not how long the order is for.
+            clear_days = line["days_to_clear"]
+            speed = (1 - min(clear_days / SLOW_DAYS, 1.0)
+                     if clear_days is not None else PAR)
             vs = line["vs_market"]
             price = PAR if vs is None else max(min((vs - 0.5) / (AT_MARKET - 0.5), 1.0), 0.0)
             raw = (WEIGHTS["clearance"] * min(clearance, 1.0)
@@ -372,6 +423,8 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
     take = [l for l in lines if l["take_on"] > 0]
     return {
         "month": projection["month"],
+        "horizon": {"days": days, "label": horizon_label(days),
+                    "scale": round(scale, 4), "is_month": days == MONTH_DAYS},
         "window": card.get("window"),
         "lines": lines,
         "priorities": [{"key": k, "lines": groups[k],
@@ -397,15 +450,19 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
             "trial_worth": round(sum(l["trial"]["worth"] for l in lines if l["trial"]), 2),
         },
         "bands": {"critical": CRITICAL_AT, "high": HIGH_AT, "steady": STEADY_AT},
-        "caveats": projection["caveats"] + [
+        "caveats": projection["caveats"] + ([] if days == MONTH_DAYS else [
+            f"The book is kept in months, so an order for {horizon_label(days)} is the "
+            f"month's expectation cut to {days} days. Nothing recorded says how a month's "
+            "sales fall across its weeks, so a short order is a rate, not a forecast of "
+            "that particular week."]) + [
             "Priorities are fixed marks on the score, not a ranking within the month, "
             "so a quiet month can have nothing in the top band and a strong one can be "
             "full of it.",
             "Nothing here knows what the fruit costs: Zaco takes it on consignment and "
             "earns a commission on what the market returns. Every rand figure is what "
             "the market is expected to return, not a margin.",
-            "How much to take on is what is expected to sell next month less what is "
-            "still on the floor now.",
+            "How much to take on is what is expected to sell over "
+            f"{horizon_label(days)} less what is still on the floor now.",
             "Room to grow is only offered where a product sold every carton sent, cleared "
             "within a couple of days, held the market average and has nothing left on the "
             "floor. What a stretch is worth assumes the extra cartons fetch what the "

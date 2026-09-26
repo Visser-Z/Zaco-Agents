@@ -617,7 +617,7 @@ How the business works: Zaco takes fruit from growers on consignment, sends it t
 You are given the plan already computed: every product worth taking on, its priority, how many cartons to take on (what is expected to sell, less what is already sitting on the floor), where it pays best, and the figures behind each. Some lines also carry room to grow: extra cartons on top of the expectation, where that market took everything sent, took it within a couple of days and paid about the going rate, and test loads at a market a product has never been to. Use only those figures. Never add, average or estimate anything yourself, and never name a product or a destination that is not in the list. Never suggest more of something the plan does not say there is room for.
 
 Write it the way the operator will act on it:
-- Open with the shape of it in one line: how many lines to take on, how many cartons, and what the market is expected to return.
+- Open with the shape of it in one line: what period the order covers, how many lines to take on, how many cartons, and what the market is expected to return. Never call it a month unless the plan says the order covers a month.
 - Then the Critical and High lines, each in one sentence: how much of what, where to send it, and the single figure that justifies it.
 - Then the growth, which is the part that makes the month bigger than last month: name the lines with room to grow, how many extra cartons and what they should return, and the test loads worth taking a chance on, each with what it is worth and what to watch.
 - Call out anything that still has stock on the floor, where taking on more would add to what is already unsold.
@@ -630,7 +630,9 @@ def plan_context(plan: dict) -> str:
     if not plan.get("lines"):
         return "## The buy plan\nNot enough recorded history to plan anything yet."
     t = plan["totals"]
-    out = [f"## Buy plan for {plan['month']} (computed, do not recalculate)",
+    covers = (plan.get("horizon") or {}).get("label") or "the next month"
+    out = [f"## Buy plan for {covers} (computed, do not recalculate)",
+           f"The order covers {covers}. "
            f"To take on: {t['cartons']} cartons across {t['to_take_on']} of "
            f"{t['lines']} lines. Expected back from the market: {_rand(t['expected_value'])}. "
            f"Already on the floor: {t['on_hand']} cartons. "

@@ -27,7 +27,8 @@ def test_it_is_a_pdf_with_the_order_on_it(plan: dict) -> None:
     assert "Procurement order" in text
     assert "Zaco Agents (Pty) Ltd" in text
     assert "26 September 2026" in text
-    assert "October 2026" in text
+    # A month's order names its month; a shorter one says the span instead.
+    assert "the next month (October 2026)" in " ".join(text.split())
 
 
 def test_every_line_to_order_is_on_it_under_its_market(plan: dict) -> None:

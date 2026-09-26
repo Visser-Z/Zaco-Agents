@@ -748,9 +748,49 @@ def _short_answer(system: str, prompt: str) -> str:
     return text
 
 
+# How much of a conversation goes back with the next question. Long enough to
+# follow a line of thought ("and at Durban?"), short enough that the book, not
+# the chat, stays the bulk of what is read.
+HISTORY_TURNS = 12
+HISTORY_CHARS = 4000
+
+
+def conversation(history: list[dict] | None, question: str) -> list[dict]:
+    """The turns so far, as the API wants them, with the new question last.
+
+    Stored turns are (role, body) where role is the screen's own "q" and "a".
+    Anything that failed is left out: an error message is not something the
+    assistant said, and feeding it back invites an apology for it. The API
+    refuses two turns of the same role in a row, so a question that never got
+    an answer is dropped rather than doubled up.
+    """
+    turns: list[dict] = []
+    for item in (history or [])[-HISTORY_TURNS:]:
+        if item.get("failed"):
+            continue
+        body = str(item.get("body") or "").strip()[:HISTORY_CHARS]
+        role = "user" if item.get("role") == "q" else "assistant"
+        if not body:
+            continue
+        if turns and turns[-1]["role"] == role:
+            turns[-1]["content"] = body if role == "assistant" else turns[-1]["content"]
+            continue
+        turns.append({"role": role, "content": body})
+    while turns and turns[0]["role"] != "user":
+        turns.pop(0)
+    if turns and turns[-1]["role"] == "user":
+        turns.pop()
+    return turns + [{"role": "user", "content": question}]
+
+
 def ask(question: str, rows: list[dict],
-        payments: list[dict] | None = None) -> str:
-    """Answer `question` against the recorded sales `rows`."""
+        payments: list[dict] | None = None,
+        history: list[dict] | None = None) -> str:
+    """Answer `question` against the recorded sales `rows`.
+
+    `history` is the conversation this question belongs to, so a follow-up can
+    lean on what was already said instead of starting cold every time.
+    """
     import anthropic
 
     key = api_key()
@@ -775,7 +815,7 @@ def ask(question: str, rows: list[dict],
         "model": model_id,
         "max_tokens": MAX_TOKENS,
         "system": system,
-        "messages": [{"role": "user", "content": question}],
+        "messages": conversation(history, question),
         **_thinking(model_id, THINKING_BUDGET),
     }
 

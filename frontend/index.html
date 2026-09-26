@@ -888,7 +888,53 @@
   table.recon td .btn.sm { padding: 5px 11px; font-size: 12px; }
 
   /* -------- procurement assistant ------------------------------------ */
+  /* ---- the ask dock ------------------------------------------------- */
+  .ask-open { appearance: none; cursor: pointer; border: 1px solid var(--line);
+              background: var(--surface); color: var(--ink-soft); border-radius: 999px;
+              padding: 5px 13px; font: inherit; font-size: 12px; font-weight: 600; }
+  .ask-open:hover { border-color: var(--ink-faint); color: var(--ink); }
+  .ask-open.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .dock { position: fixed; top: 0; right: 0; bottom: 0; width: 390px; z-index: 40;
+          display: flex; flex-direction: column; background: var(--surface);
+          border-left: 1px solid var(--line); box-shadow: -12px 0 30px rgba(15, 23, 42, .07); }
+  .dock[hidden] { display: none; }
+  /* On a wide screen the dock sits beside the work instead of over it, so a
+     table can still be read while it is open. */
+  @media (min-width: 1180px) {
+    body.dock-open .app { padding-right: 390px; }
+  }
+  .dock-head { display: flex; align-items: center; gap: 6px; height: 52px; flex: none;
+               padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
+  .dock-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 650;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dock-btn { appearance: none; border: 0; background: none; cursor: pointer; color: var(--ink-faint);
+              font: inherit; font-size: 15px; line-height: 1; padding: 6px 8px; border-radius: 7px; }
+  .dock-btn:hover { background: var(--surface-2); color: var(--ink); }
+  .dock-threads { flex: none; max-height: 44%; overflow-y: auto; padding: 8px;
+                  border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .dock-threads[hidden] { display: none; }
+  .dt-item { display: flex; align-items: center; gap: 6px; border-radius: 8px; padding: 2px; }
+  .dt-item:hover { background: var(--surface); }
+  .dt-open { flex: 1; min-width: 0; text-align: left; appearance: none; border: 0; cursor: pointer;
+             background: none; font: inherit; font-size: 12px; color: var(--ink);
+             padding: 6px 8px; border-radius: 7px; }
+  .dt-item.on .dt-open { font-weight: 650; color: var(--accent-strong); }
+  .dt-open span { display: block; font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; }
+  .dt-del { appearance: none; border: 0; background: none; cursor: pointer; color: var(--ink-faint);
+            padding: 4px 6px; border-radius: 6px; opacity: 0; }
+  .dt-item:hover .dt-del { opacity: 1; }
+  .dt-del:hover { color: var(--crit); background: var(--surface-2); }
+  .dt-empty { padding: 10px; font-size: 11.5px; color: var(--ink-faint); }
+  .dock-log { flex: 1; max-height: none; padding: 16px 16px 8px; }
+  .dock-bar { flex: none; display: flex; gap: 8px; padding: 12px 14px;
+              border-top: 1px solid var(--line); }
+  .dock-input { flex: 1; min-width: 0; }
+  .dock-note { padding: 0 16px 10px; font-size: 11px; color: var(--ink-faint); }
+  @media (max-width: 520px) { .dock { width: 100%; } }
+
   .ask-card { padding: 0; overflow: hidden; }
+  .ask-open-card { padding: 18px 20px 14px; }
+  .ask-open-card .ask-chips { margin: 4px 0 2px; }
   .ask-log { padding: 20px 22px; max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
   .ask-q { align-self: flex-end; max-width: 78%; background: var(--accent); color: #fff; padding: 9px 14px; border-radius: 14px 13px 3px 13px; font-size: 13px; font-weight: 550; }
   .ask-a { align-self: flex-start; max-width: 88%; background: var(--surface-2); padding: 12px 15px; border-radius: 14px 13px 13px 3px; font-size: 13px; line-height: 1.6; }
@@ -982,6 +1028,59 @@
   @media (max-width: 1000px) { .kpis.kpis-4 { grid-template-columns: repeat(2, 1fr); }
                                .ins-grid-2 { grid-template-columns: 1fr; } }
   /* Printing a report: just the report, and let the tables break across pages. */
+  /* The order sheet: a document, not a screen. Hidden until it is printed,
+     then it is the only thing on the page. */
+  #order-sheet { display: none; }
+  @media print {
+    body.printing-plan > .app,
+    body.printing-plan > .auth,
+    body.printing-plan > .dock { display: none !important; }
+    body.printing-plan { min-width: 0; background: #fff; }
+    body.printing-plan #order-sheet { display: block; color: #000; max-width: none; }
+  }
+  /* A page, not a screen: the sheet is paper-wide wherever it is rendered,
+     so a long product name wraps instead of pushing the figures off the
+     right-hand edge. */
+  #order-sheet { font-size: 12px; color: #000; width: 100%; max-width: 190mm;
+                 margin: 0 auto; }
+  #order-sheet h1 { font-size: 21px; margin: 0; letter-spacing: -.01em; }
+  .os-head { display: flex; justify-content: space-between; align-items: flex-start;
+             border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 12px; }
+  .os-for { margin: 3px 0 0; font-size: 12px; }
+  .os-who { text-align: right; font-size: 11px; line-height: 1.5; }
+  .os-to { margin-top: 7px; }
+  .os-fill { display: inline-block; min-width: 190px; border-bottom: 1px solid #000; }
+  .os-who b { display: block; font-size: 13px; }
+  .os-lede { margin: 0 0 16px; line-height: 1.6; max-width: 46em; }
+  /* min-width: the app's data tables are 1560px wide by default (see the bare
+     `table` rule); a sheet that has to fit a page is not. */
+  .os-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse;
+              margin: 0 0 16px; break-inside: auto; font-size: 11.5px; }
+  .os-table caption { text-align: left; font-weight: 700; font-size: 13px;
+                      padding: 8px 0 5px; border-top: 1px solid #000; break-after: avoid; }
+  /* white-space: the app's tables keep their cells on one line; a product name
+     on a page has to wrap or it runs into the figures beside it. */
+  .os-table th, .os-table td { border-bottom: 1px solid #bbb; padding: 5px 7px;
+                               text-align: left; vertical-align: top;
+                               white-space: normal; overflow-wrap: anywhere; }
+  .os-table thead th { border-bottom: 1.5px solid #000; font-size: 10px;
+                       text-transform: uppercase; letter-spacing: .05em; }
+  /* Figures never wrap; the headings above them may. */
+  .os-table td.num { text-align: right; white-space: nowrap; }
+  .os-table th.num { text-align: right; }
+  .os-table col.os-q { width: 58px; }
+  .os-table col.os-g { width: 76px; }
+  .os-table col.os-v { width: 98px; }
+  .os-table col.os-p { width: 66px; }
+  .os-table col.os-n { width: 78px; }
+  .os-table tfoot td { border-top: 1.5px solid #000; border-bottom: 0; font-size: 11.5px; }
+  .os-table tr { break-inside: avoid; }
+  .os-sub { display: block; font-size: 10px; color: #444; }
+  .os-foot { margin-top: 18px; padding-top: 10px; border-top: 1px solid #000;
+             font-size: 10.5px; line-height: 1.6; }
+  .os-foot ul { margin: 6px 0 0; padding-left: 16px; }
+  .os-sign { display: flex; gap: 40px; margin-top: 26px; }
+  .os-sign span { flex: 1; border-top: 1px solid #000; padding-top: 4px; font-size: 10px; }
   @media print {
     body.printing-report .topbar,
     body.printing-report .tabs,
@@ -1062,6 +1161,8 @@
   <header class="topbar">
     <div class="brand"><span class="glyph">◧</span><span>ZacoAgents</span></div>
     <span class="spacer"></span>
+    <button type="button" class="ask-open" id="askOpen" onclick="toggleDock()"
+      title="Ask about the book">◧ Ask</button>
     <span class="mode demo" id="modeBadge" title="">Connecting…</span>
     <div class="user-chip" id="userChip" hidden>
       <span class="who" id="userWho">—</span>
@@ -1082,6 +1183,30 @@
     <main class="main" id="main"></main>
   </div>
 </div>
+
+<!-- The assistant lives beside the work rather than on a page of its own: a
+     question is nearly always about what is on the screen behind it, and the
+     answer is worth having next to the figures it is about. The frame is
+     static and only its lists are re-rendered, so typing survives a redraw. -->
+<aside class="dock" id="dock" hidden aria-label="Ask about the book">
+  <header class="dock-head">
+    <button type="button" class="dock-btn" id="dockHistory" onclick="toggleThreadList()"
+      title="Earlier conversations">☰</button>
+    <div class="dock-title" id="dockTitle">Ask</div>
+    <button type="button" class="dock-btn" onclick="newConversation()"
+      title="Start a new conversation">+</button>
+    <button type="button" class="dock-btn" onclick="toggleDock(false)" title="Close">×</button>
+  </header>
+  <div class="dock-threads" id="dockThreads" hidden></div>
+  <div class="dock-log ask-log" id="dockLog"></div>
+  <form class="dock-bar" id="dockBar"
+    onsubmit="event.preventDefault(); askAssistant(this.q.value); this.q.value = '';">
+    <input class="ask-input dock-input" id="dockInput" name="q" autocomplete="off"
+      maxlength="2000" placeholder="Ask about your sales"
+      oninput="S.assistant.draft = this.value">
+    <button class="btn primary sm" id="dockSend">Ask</button>
+  </form>
+</aside>
 
 <script>
 "use strict";
@@ -1117,8 +1242,11 @@ const S = {
   // question, so it lives in the state and nothing loads until both ends are set.
   reports: { data: null, loading: false, error: null, from: "", to: "", periods: [] },
   // The conversation is kept across tab switches; the status is read once.
+  // The conversation. `log` is what is on screen; `threadId` is the row it is
+  // being kept in, so closing the tab no longer ends the conversation.
   assistant: { status: null, loading: false, error: null, log: [], busy: false,
-               busyLabel: "", draft: "" },
+               busyLabel: "", draft: "", open: false, threads: [], threadId: null,
+               listOpen: false, loadingThreads: false, keeping: true, unavailable: null },
   // The computed outlook. Separate from the conversation because it does not
   // need an assistant key and must still be there when there is none.
   // The buy plan: what to take on, how much, and where to send it.
@@ -1536,6 +1664,7 @@ function setModule(m) {
 function go(screen) { S.screen = screen; render(); main.scrollTo(0, 0); }
 function render() {
   syncModuleNav();
+  renderDock();
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
   if (S.module === "reports") return renderReports();
@@ -2458,7 +2587,7 @@ async function loadAssistant() {
 }
 
 function scrollAskLog() {
-  const el = document.querySelector(".ask-log");
+  const el = document.getElementById("dockLog") || document.querySelector(".ask-log");
   if (el) el.scrollTop = el.scrollHeight;
 }
 
@@ -2471,18 +2600,22 @@ async function askAssistant(text) {
   render(); scrollAskLog();
   try {
     const body = new URLSearchParams({ question });
+    if (A.threadId) body.set("thread_id", A.threadId);
     const res = await (await api("/api/assistant", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
     })).json();
     A.log.push({ role: "a", text: res.answer });
+    A.keeping = res.remembered !== false;
+    if (res.thread_id && res.thread_id !== A.threadId) { rememberThread(res.thread_id); loadThreads(); }
+    else if (res.thread_id) loadThreads();
   } catch (e) {
     A.log.push({ role: "a", text: e.message || String(e), failed: true });
   } finally {
-    A.busy = false; render(); scrollAskLog();
-    const input = document.querySelector(".ask-input");
-    if (input) input.focus();
+    A.busy = false; A.draft = ""; render(); scrollAskLog();
+    const input = document.getElementById("dockInput");
+    if (input && S.assistant.open) { input.value = ""; input.focus(); }
   }
 }
 
@@ -2495,8 +2628,17 @@ async function runAnalysis() {
   A.busy = true; A.busyLabel = "Six specialists are going through the book";
   render(); scrollAskLog();
   try {
-    const res = await (await api("/api/assistant/analyse", { method: "POST" })).json();
+    const body = new URLSearchParams();
+    if (A.threadId) body.set("thread_id", A.threadId);
+    const res = await (await api("/api/assistant/analyse", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    })).json();
     A.log.push({ role: "a", text: res.recommendation, findings: res.findings || [] });
+    A.keeping = res.remembered !== false;
+    if (res.thread_id && res.thread_id !== A.threadId) { rememberThread(res.thread_id); }
+    loadThreads();
   } catch (e) {
     A.log.push({ role: "a", text: e.message || String(e), failed: true });
   } finally {
@@ -2504,7 +2646,175 @@ async function runAnalysis() {
   }
 }
 
-function clearAssistant() { S.assistant.log = []; render(); }
+/** Open or close the dock. Opening it is also what first fetches the
+ *  conversations, so nothing is loaded for someone who never asks anything. */
+function toggleDock(open) {
+  const A = S.assistant;
+  A.open = open === undefined ? !A.open : !!open;
+  document.body.classList.toggle("dock-open", A.open);
+  if (A.open) {
+    if (A.status === null && !A.loading) loadAssistant();
+    if (!A.threads.length && !A.loadingThreads) loadThreads();
+    if (!A.log.length && !A.threadId) resumeConversation();
+  }
+  renderDock();
+  if (A.open) {
+    const input = document.getElementById("dockInput");
+    if (input) input.focus();
+  }
+}
+
+function toggleThreadList() {
+  S.assistant.listOpen = !S.assistant.listOpen;
+  if (S.assistant.listOpen) loadThreads();
+  renderDock();
+}
+
+/** The conversations this person has had, newest first. */
+async function loadThreads() {
+  const A = S.assistant;
+  if (!S.live) { A.threads = []; return; }
+  A.loadingThreads = true;
+  try {
+    const r = await (await api("/api/assistant/threads")).json();
+    A.threads = r.threads || [];
+    A.unavailable = r.unavailable || null;
+  } catch (e) {
+    A.threads = [];
+  } finally {
+    A.loadingThreads = false; renderDock();
+  }
+}
+
+/** Reopen whichever conversation this browser was last in. */
+function resumeConversation() {
+  let last = null;
+  try { last = localStorage.getItem("zacon.thread"); } catch (e) { /* private window */ }
+  if (last) openConversation(last, true);
+}
+
+function rememberThread(id) {
+  S.assistant.threadId = id || null;
+  try {
+    if (id) localStorage.setItem("zacon.thread", id);
+    else localStorage.removeItem("zacon.thread");
+  } catch (e) { /* nothing to do: the thread is still kept server side */ }
+}
+
+/** Put one saved conversation back on screen, turn for turn. */
+async function openConversation(id, quiet) {
+  const A = S.assistant;
+  if (!S.live || A.busy) return;
+  A.listOpen = false;
+  try {
+    const r = await (await api(`/api/assistant/threads/${encodeURIComponent(id)}`)).json();
+    A.log = (r.messages || []).map(m => ({
+      role: m.role, text: m.body, findings: m.findings || [], failed: !!m.failed }));
+    rememberThread(id);
+  } catch (e) {
+    if (!quiet) { A.log = []; rememberThread(null); }
+  } finally {
+    renderDock(); scrollAskLog();
+  }
+}
+
+function newConversation() {
+  const A = S.assistant;
+  A.log = []; A.listOpen = false; rememberThread(null);
+  renderDock();
+  const input = document.getElementById("dockInput");
+  if (input) input.focus();
+}
+
+async function deleteConversation(id) {
+  const A = S.assistant;
+  A.threads = A.threads.filter(t => t.id !== id);
+  if (A.threadId === id) { A.log = []; rememberThread(null); }
+  renderDock();
+  try {
+    await api(`/api/assistant/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (e) { loadThreads(); }
+}
+
+/** Ask from anywhere: opens the dock, then asks. */
+function askInDock(text) {
+  toggleDock(true);
+  askAssistant(text);
+}
+
+/** The dock's own contents. Only the lists are written, never the form, so a
+ *  half-typed question survives every redraw the rest of the app does. */
+function renderDock() {
+  const A = S.assistant;
+  const dock = document.getElementById("dock");
+  if (!dock) return;
+  dock.hidden = !A.open;
+  const opener = document.getElementById("askOpen");
+  if (opener) opener.classList.toggle("on", A.open);
+  if (!A.open) return;
+
+  const thread = A.threads.find(t => t.id === A.threadId);
+  const title = document.getElementById("dockTitle");
+  if (title) title.textContent = thread ? thread.title : "Ask";
+
+  const list = document.getElementById("dockThreads");
+  if (list) {
+    list.hidden = !A.listOpen;
+    list.innerHTML = A.threads.length
+      ? A.threads.map(t => `<div class="dt-item${t.id === A.threadId ? " on" : ""}">
+          <button class="dt-open" onclick="openConversation(${q(t.id)})">${esc(t.title)}
+            <span>${esc(whenLabel(t.updated_at))}</span></button>
+          <button class="dt-del" title="Delete this conversation"
+            onclick="deleteConversation(${q(t.id)})">${icon("trash", 13)}</button>
+        </div>`).join("")
+      : `<p class="dt-empty">${A.loadingThreads ? "Looking…"
+          : "No earlier conversations yet. Whatever you ask is kept here."}</p>`;
+  }
+
+  const log = document.getElementById("dockLog");
+  if (!log) return;
+  const ready = !!(A.status && A.status.configured);
+  if (!ready) {
+    log.innerHTML = `<div class="ask-empty"><div class="ai">${icon("chat", 20)}</div>
+      <p>${S.live
+        ? "The assistant needs a Claude key. Add <code>ANTHROPIC_API_KEY</code> in Vercel, then redeploy."
+        : "The assistant reads your saved history, so it only works signed in."}</p></div>`;
+    return;
+  }
+  const turns = A.log.map(m => m.role === "q"
+    ? `<div class="ask-q">${esc(m.text)}</div>`
+    : `<div class="ask-a${m.failed ? " failed" : ""}">${m.failed
+        ? `<p>${esc(m.text)}</p>` : mdLite(m.text)}${findingsBlock(m.findings)}</div>`).join("");
+  const busy = A.busy
+    ? `<div class="ask-a"><div class="busy"><span class="spin"></span> ${esc(A.busyLabel)}</div></div>`
+    : "";
+  const empty = !A.log.length && !A.busy ? `<div class="ask-empty">
+      <div class="ai">${icon("chat", 20)}</div>
+      <p>Ask about what sold, where it sold best, and at what price. This conversation is
+        kept, so you can pick it up again later.</p>
+      <div class="ask-chips">${(A.status.suggestions || []).map(x =>
+        `<button class="ask-chip" data-q="${esc(x)}" onclick="askAssistant(this.dataset.q)">${esc(x)}</button>`).join("")}
+        <button class="ask-chip" onclick="runAnalysis()">What should I buy next month?</button></div>
+    </div>` : "";
+  log.innerHTML = empty + turns + busy
+    + (A.keeping ? "" : `<p class="dock-note">This conversation is not being kept: the
+        0022_chat_threads migration has not been run yet.</p>`);
+}
+
+/** "2 hours ago", "yesterday", or the date once it stops being recent. */
+function whenLabel(iso) {
+  const then = new Date(iso);
+  if (isNaN(then)) return "";
+  const mins = Math.round((Date.now() - then.getTime()) / 60000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} minutes ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return then.toLocaleDateString("en-ZA", { day: "numeric", month: "short" });
+}
 
 /** Just enough markdown for an answer: paragraphs, bullet and numbered lists,
  *  bold and headings. The text is escaped before anything else, so nothing in
@@ -2750,6 +3060,116 @@ function planDetail(l) {
     </div>`;
 }
 
+/** The plan as a document: what to order, how much, and where it goes.
+ *
+ *  The screen is for deciding; this is for sending. The partner who buys the
+ *  fruit does not want filter chips and sort arrows, he wants a list he can
+ *  work down and a total at the bottom, on paper or as a PDF out of the print
+ *  dialog. So the sheet is built fresh rather than the screen being restyled:
+ *  nothing on it depends on what is open, sorted or filtered behind it.
+ */
+function orderSheet(d) {
+  const lines = d.lines.filter(l => l.take_on > 0);
+  const byMarket = new Map();
+  for (const l of lines) {
+    const key = [l.market || "No destination on record", l.market_agent || ""].join("|");
+    if (!byMarket.has(key)) byMarket.set(key, []);
+    byMarket.get(key).push(l);
+  }
+  const order = [...byMarket.keys()].sort((a, b) => a.localeCompare(b));
+
+  const sections = order.map(key => {
+    const rows = [...byMarket.get(key)].sort((x, y) =>
+      BAND_ORDER.indexOf(x.priority) - BAND_ORDER.indexOf(y.priority)
+      || y.take_on - x.take_on);
+    const [market, agent] = key.split("|");
+    const cartons = rows.reduce((n, l) => n + l.take_on, 0);
+    const grow = rows.reduce((n, l) => n + (l.headroom ? l.headroom.cartons : 0), 0);
+    const value = rows.reduce((n, l) => n + l.expected_value, 0);
+    return `<table class="os-table">
+      <caption>${esc(market)}${agent ? ` &middot; ${esc(agent)}` : ""}</caption>
+      <colgroup><col><col class="os-q"><col class="os-g"><col class="os-v"><col class="os-p"></colgroup>
+      <thead><tr><th>Product</th><th class="num">Order</th><th class="num">Room to grow</th>
+        <th class="num">Should return</th><th>Priority</th></tr></thead>
+      <tbody>${rows.map(l => `<tr>
+          <td>${esc(l.product)}${l.on_hand
+            ? `<span class="os-sub">${fmtInt(l.on_hand)} already on the floor, taken off this order</span>` : ""}</td>
+          <td class="num"><b>${fmtInt(l.take_on)}</b></td>
+          <td class="num">${l.headroom ? "+" + fmtInt(l.headroom.cartons) : "&mdash;"}</td>
+          <td class="num">R ${fmt(l.expected_value)}</td>
+          <td>${esc((BANDS[l.priority] || BANDS.hold).label)}</td>
+        </tr>`).join("")}</tbody>
+      <tfoot><tr><td>${fmtInt(rows.length)} line${rows.length === 1 ? "" : "s"}</td>
+        <td class="num"><b>${fmtInt(cartons)}</b></td>
+        <td class="num">${grow ? "+" + fmtInt(grow) : "&mdash;"}</td>
+        <td class="num"><b>R ${fmt(value)}</b></td><td></td></tr></tfoot>
+    </table>`;
+  }).join("");
+
+  const trials = d.lines.filter(l => l.trial);
+  const trialBlock = trials.length ? `<table class="os-table os-trials">
+      <caption>Worth a try: markets these have never been to</caption>
+      <colgroup><col><col class="os-q"><col><col class="os-v"></colgroup>
+      <thead><tr><th>Product</th><th class="num">Test load</th><th>Send it to</th>
+        <th class="num">Worth about</th></tr></thead>
+      <tbody>${trials.map(l => `<tr>
+        <td>${esc(l.product)}<span class="os-sub">goes to ${esc(l.market || "one market")} today</span></td>
+        <td class="num"><b>${fmtInt(l.trial.cartons)}</b></td>
+        <td>${esc(l.trial.market)}${l.trial.market_agent ? ` &middot; ${esc(l.trial.market_agent)}` : ""}</td>
+        <td class="num">R ${fmt(l.trial.worth)}</td></tr>`).join("")}</tbody>
+    </table>` : "";
+
+  const t = d.totals;
+  const today = new Date().toLocaleDateString("en-ZA",
+    { day: "numeric", month: "long", year: "numeric" });
+  return `<header class="os-head">
+      <div><h1>Procurement order</h1>
+        <p class="os-for">${esc(monthLabel(d.month))} &middot; prepared ${esc(today)}</p>
+        <p class="os-for os-to">For: <span class="os-fill"></span></p></div>
+      <div class="os-who"><b>Zaco Agents (Pty) Ltd</b><span>ZacoAgents procurement plan</span></div>
+    </header>
+    <p class="os-lede">Order <b>${fmtInt(t.cartons)} cartons</b> across
+      <b>${fmtInt(t.to_take_on)} lines</b>, which the markets are expected to return
+      <b>R ${fmt(t.expected_value)}</b> on. Quantities are what each market is expected to
+      sell next month less the ${fmtInt(t.on_hand)} cartons already sitting on its floor.
+      Room to grow is extra on top of the order, offered only where the market sold every
+      carton sent, cleared it within a couple of days and held the market average.</p>
+    ${sections}
+    ${trialBlock}
+    <div class="os-foot">
+      <p><b>How to read it.</b> Order is cartons. Priority is a fixed mark on how a product
+        has been trading, the same mark every month, not a ranking within this list.</p>
+      <p><b>What these figures are not.</b> Zaco takes fruit on consignment and earns a
+        commission on what the market returns, so no purchase price exists anywhere in this
+        data. Every rand figure here is what the market is expected to return, never a margin.</p>
+      ${(d.caveats || []).length ? `<ul>${d.caveats.slice(0, 4).map(c =>
+        `<li>${esc(c)}</li>`).join("")}</ul>` : ""}
+      <div class="os-sign"><span>Ordered by</span><span>Date</span></div>
+    </div>`;
+}
+
+/** Put the sheet on the page and hand it to the print dialog, which is also
+ *  where "Save as PDF" lives on every browser the office uses. */
+function printOrderSheet() {
+  const d = S.procure.data;
+  if (!d || !d.lines || !d.lines.length) return;
+  let host = document.getElementById("order-sheet");
+  if (!host) {
+    host = document.createElement("section");
+    host.id = "order-sheet";
+    document.body.appendChild(host);
+  }
+  host.innerHTML = orderSheet(d);
+  document.body.classList.add("printing-plan");
+  const done = () => {
+    document.body.classList.remove("printing-plan");
+    window.removeEventListener("afterprint", done);
+  };
+  window.addEventListener("afterprint", done);
+  window.print();
+  setTimeout(done, 1000);   // afterprint does not fire everywhere
+}
+
 function renderProcure() {
   const P = S.procure, A = S.assistant;
   if (P.data === null && !P.loading && P.error === null && S.live) loadProcurement();
@@ -2765,6 +3185,7 @@ function renderProcure() {
       <div class="ins-actions">
         <div class="seg sm">${[[3, "Last 3 months"], [0, "All time"]].map(([m, l]) =>
           `<button class="${P.months === m ? "on" : ""}" onclick="setPlanMonths(${m})">${l}</button>`).join("")}</div>
+        <button class="btn ghost sm" onclick="printOrderSheet()">${icon("print")}Order sheet</button>
         <button class="btn ghost sm refresh" onclick="loadProcurement()">${icon("refresh")}Refresh</button>
       </div>
     </div>`;
@@ -2865,25 +3286,18 @@ function renderProcure() {
           `<span class="plan-dot t-${BANDS[k].tone}"></span> ${BANDS[k].label.toLowerCase()}`).join(", ")}.</p>
     </div>`;
 
-  const log = A.log.map(m => m.role === "q"
-    ? `<div class="ask-q">${esc(m.text)}</div>`
-    : `<div class="ask-a${m.failed ? " failed" : ""}">${m.failed ? `<p>${esc(m.text)}</p>` : mdLite(m.text)}${findingsBlock(m.findings)}</div>`
-  ).join("");
-  const busy = A.busy
-    ? `<div class="ask-a"><div class="busy"><span class="spin"></span> ${esc(A.busyLabel)}</div></div>` : "";
+  // The conversation itself lives in the dock, beside whatever is on screen.
+  // What stays here is the way in, with the questions this page invites.
   const ask = ready
-    ? `<div class="card ask-card">
+    ? `<div class="card ask-card ask-open-card">
         <div class="ins-card-head"><h2>Ask about any of it</h2>
-          ${A.log.length && !A.busy ? `<button class="linklike" onclick="clearAssistant()">Clear</button>` : ""}</div>
-        ${log || busy ? `<div class="ask-log">${log}${busy}</div>` : `
-          <div class="ask-chips">${(A.status.suggestions || []).map(x =>
-            `<button class="ask-chip" data-q="${esc(x)}" onclick="askAssistant(this.dataset.q)">${esc(x)}</button>`).join("")}</div>`}
-        <form class="ask-bar" onsubmit="event.preventDefault(); askAssistant(this.q.value)">
-          <input class="ask-input" name="q" autocomplete="off" maxlength="2000"
-            placeholder="Ask about a product, a market, next month" value="${esc(A.draft)}"
-            oninput="S.assistant.draft = this.value" ${A.busy ? "disabled" : ""}>
-          <button class="btn primary sm" ${A.busy ? "disabled" : ""}>Ask</button>
-        </form>
+          <button class="linklike" onclick="toggleDock(true)">Open the assistant</button></div>
+        <div class="ask-chips">${(A.status.suggestions || []).map(x =>
+          `<button class="ask-chip" data-q="${esc(x)}" onclick="askInDock(this.dataset.q)">${esc(x)}</button>`).join("")}
+          <button class="ask-chip" onclick="askInDock('Talk me through this month\\'s buy plan.')">Talk me through this plan</button>
+        </div>
+        <p class="rep-note">Answers open on the right and are kept, so you can pick the
+          conversation up again tomorrow.</p>
       </div>`
     : "";
 
@@ -2913,65 +3327,6 @@ function cashBlock(lag) {
       it, across ${fmtInt(lag.reduce((n, l) => n + l.payments, 0))} payments. Slowest single
       settlement: ${fmtInt(Math.max(...lag.map(l => l.slowest_days)))} days.</p>
   </div>`;
-}
-
-function renderAssistant() {
-  const A = S.assistant;
-  if (A.status === null && !A.loading) loadAssistant();
-  const ready = !!(A.status && A.status.configured);
-
-  const head = `<div class="head ins-head">
-      <div><h1>Assistant</h1>
-        <p class="head-sub">Ask about your sales. Answers are worked from the figures on the book;
-          it can explain them, not change them.</p></div>
-      <div class="ins-actions">${ready
-        ? `<button class="btn ghost sm" onclick="runAnalysis()" ${A.busy ? "disabled" : ""}>${icon("chat")}Buying recommendation</button>`
-        : ""}</div>
-    </div>`;
-
-  if (!A.status) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="card"><div class="busy"><span class="spin"></span> Checking the assistant</div></div></section>`;
-    return;
-  }
-  if (!ready) {
-    main.innerHTML = `<section class="screen">${head}
-      <div class="card placeholder"><div class="pi">${icon("chat", 22)}</div>
-        <h2>${S.live ? "Not set up yet" : "Needs the live app"}</h2>
-        <p>${S.live
-          ? "Add <code>ANTHROPIC_API_KEY</code> in Vercel under Settings, Environment Variables, then redeploy. The badge at the top right says when the assistant is ready."
-          : "The assistant reads your saved history, so it only works signed in to the live app."}</p>
-        ${A.error ? `<p class="ask-muted">${esc(A.error)}</p>` : ""}
-      </div></section>`;
-    return;
-  }
-
-  const log = A.log.map(m => m.role === "q"
-    ? `<div class="ask-q">${esc(m.text)}</div>`
-    : `<div class="ask-a${m.failed ? " failed" : ""}">${m.failed ? `<p>${esc(m.text)}</p>` : mdLite(m.text)}${findingsBlock(m.findings)}</div>`
-  ).join("");
-  const busy = A.busy
-    ? `<div class="ask-a"><div class="busy"><span class="spin"></span> ${esc(A.busyLabel)}</div></div>` : "";
-  const empty = !A.log.length && !A.busy ? `<div class="ask-empty">
-      <div class="ai">${icon("chat", 20)}</div>
-      <p>Ask about what sold, where it sold best, and at what price.</p>
-      <div class="ask-chips">${(A.status.suggestions || []).map(s =>
-        `<button class="ask-chip" data-q="${esc(s)}" onclick="askAssistant(this.dataset.q)">${esc(s)}</button>`).join("")}</div>
-    </div>` : "";
-
-  main.innerHTML = `<section class="screen">${head}
-    <div class="card ask-card">
-      <div class="ask-log">${empty}${log}${busy}</div>
-      <form class="ask-bar" onsubmit="event.preventDefault(); askAssistant(this.q.value)">
-        <input class="ask-input" name="q" autocomplete="off" maxlength="2000"
-          placeholder="Ask about your sales" value="${esc(A.draft)}"
-          oninput="S.assistant.draft = this.value" ${A.busy ? "disabled" : ""}>
-        <button class="btn primary sm" ${A.busy ? "disabled" : ""}>Ask</button>
-      </form>
-      ${A.log.length && !A.busy
-        ? `<div class="ask-foot"><button class="linklike" onclick="clearAssistant()">Clear conversation</button></div>` : ""}
-    </div>
-  </section>`;
 }
 
 function renderReports() {

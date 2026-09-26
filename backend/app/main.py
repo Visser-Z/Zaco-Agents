@@ -33,7 +33,8 @@ from . import (
     stock,
     tracking,
 )
-from .supabase_auth import User, current_profile, db_delete, db_get, db_post, require_user
+from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
+                            db_post, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
@@ -1413,11 +1414,99 @@ async def assistant_status(user: User | None = Depends(require_user)) -> dict:
     return {"configured": assistant.configured(), "suggestions": assistant.SUGGESTIONS}
 
 
+# --- conversations --------------------------------------------------------
+# A conversation is kept so it can be picked up later, on another day or
+# another device. It is the caller's own: every read and write goes through
+# PostgREST as them, and the policies in 0022 only show a thread to whoever
+# started it. Nothing here is needed to ask a question -- if the tables are not
+# there yet, the answer still comes back and only the keeping of it fails.
+
+THREAD_TITLE_CHARS = 70
+
+
+def _thread_title(question: str) -> str:
+    """Name a conversation after the question that started it."""
+    title = " ".join(question.split())
+    if len(title) > THREAD_TITLE_CHARS:
+        title = title[:THREAD_TITLE_CHARS - 1].rstrip() + "\u2026"
+    return title or "New conversation"
+
+
+async def _thread_messages(user: User, thread_id: str) -> list[dict]:
+    """One conversation's turns, oldest first."""
+    return await db_get(user, "chat_messages", {
+        "select": "id,role,body,findings,failed,created_at",
+        "thread_id": f"eq.{thread_id}", "order": "id.asc", "limit": "400"})
+
+
+async def _remember(user: User | None, thread_id: str | None, question: str,
+                    turns: list[dict]) -> str | None:
+    """Keep a question and what came back, in a thread, and return its id.
+
+    Best effort on purpose: a conversation that cannot be filed is worth less
+    than an answer that never arrives, so every failure here is swallowed and
+    the caller still gets its answer.
+    """
+    if user is None:
+        return None
+    try:
+        if not thread_id:
+            made = await db_post(user, "chat_threads",
+                                 [{"title": _thread_title(question), "created_by": user.id}])
+            thread_id = made[0]["id"] if made else None
+            if not thread_id:
+                return None
+        else:
+            await db_patch(user, "chat_threads", {"id": f"eq.{thread_id}"},
+                           {"updated_at": datetime.now(timezone.utc).isoformat()})
+        await db_post(user, "chat_messages",
+                      [{"thread_id": thread_id, "role": t["role"], "body": t["body"],
+                        "findings": t.get("findings") or [],
+                        "failed": bool(t.get("failed")), "created_by": user.id}
+                       for t in turns])
+        return thread_id
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return None
+
+
+@app.get("/api/assistant/threads")
+async def list_threads(user: User | None = Depends(require_user)) -> dict:
+    """The caller's conversations, most recently used first."""
+    if user is None:
+        return {"threads": []}
+    try:
+        rows = await db_get(user, "chat_threads", {
+            "select": "id,title,created_at,updated_at",
+            "order": "updated_at.desc", "limit": "60"})
+    except Exception as exc:  # noqa: BLE001 -- before 0022 there is nothing to list
+        return {"threads": [], "unavailable": _pending_migration(exc) or "0022_chat_threads"}
+    return {"threads": rows}
+
+
+@app.get("/api/assistant/threads/{thread_id}")
+async def read_thread(thread_id: str, user: User | None = Depends(require_user)) -> dict:
+    """One conversation, turn by turn."""
+    if user is None:
+        raise HTTPException(401, "Sign in to open a conversation.")
+    return {"thread_id": thread_id, "messages": await _thread_messages(user, thread_id)}
+
+
+@app.delete("/api/assistant/threads/{thread_id}")
+async def delete_thread(thread_id: str, user: User | None = Depends(require_user)) -> dict:
+    """Forget one conversation. The messages go with it (0022 cascades)."""
+    if user is None:
+        raise HTTPException(401, "Sign in to delete a conversation.")
+    await db_delete(user, "chat_threads", {"id": f"eq.{thread_id}"})
+    return {"deleted": thread_id}
+
+
 @app.post("/api/assistant")
 async def ask_assistant(
-    question: str = Form(...), user: User | None = Depends(require_user)
+    question: str = Form(...),
+    thread_id: str | None = Form(None),
+    user: User | None = Depends(require_user),
 ) -> dict:
-    """Answer a question about the sales history."""
+    """Answer a question about the sales history, in the thread it belongs to."""
     question = question.strip()
     if not question:
         raise HTTPException(400, "Ask a question first.")
@@ -1431,16 +1520,28 @@ async def ask_assistant(
 
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
+    history: list[dict] = []
+    if user is not None and thread_id:
+        try:
+            history = await _thread_messages(user, thread_id)
+        except Exception:  # noqa: BLE001 -- a lost history is not a lost answer
+            history = []
     try:
-        answer = await run_in_threadpool(assistant.ask, question, rows, payments)
+        answer = await run_in_threadpool(assistant.ask, question, rows, payments, history)
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
 
-    return {"question": question, "answer": answer, "rows_considered": len(rows)}
+    kept = await _remember(user, thread_id, question,
+                           [{"role": "q", "body": question},
+                            {"role": "a", "body": answer}])
+    return {"question": question, "answer": answer, "rows_considered": len(rows),
+            "thread_id": kept or thread_id, "remembered": bool(kept),
+            "turns_recalled": len(history)}
 
 
 @app.post("/api/assistant/analyse")
-async def run_analysis(user: User | None = Depends(require_user)) -> dict:
+async def run_analysis(thread_id: str | None = Form(None),
+                       user: User | None = Depends(require_user)) -> dict:
     """Run the analyst panel: several specialists, then a buying recommendation.
 
     Each specialist examines the same complete history from a different angle
@@ -1456,9 +1557,15 @@ async def run_analysis(user: User | None = Depends(require_user)) -> dict:
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
     try:
-        return await assistant.analyse(rows, payments)
+        out = await assistant.analyse(rows, payments)
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
+    question = "What does next month look like, and what should I buy?"
+    kept = await _remember(user, thread_id, question,
+                           [{"role": "q", "body": question},
+                            {"role": "a", "body": out.get("recommendation") or "",
+                             "findings": out.get("findings") or []}])
+    return out | {"thread_id": kept or thread_id, "remembered": bool(kept)}
 
 
 # --- reconciliation -------------------------------------------------------

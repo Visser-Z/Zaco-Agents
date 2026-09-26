@@ -187,3 +187,45 @@ def test_every_view_setmodule_clears_can_fetch_itself_again(source: str) -> None
         assert re.search(r"\.data === null[^\n]*\bload\w*\(", body), (
             f"render{view.capitalize()} does not fetch its data back when setModule "
             f"has cleared it, so reopening the {view} tab hangs on its spinner")
+
+
+# --- the ask dock and the order sheet -------------------------------------
+
+def test_the_dock_frame_is_static_markup(source: str) -> None:
+    """The conversation is re-rendered on every redraw; the form around it must
+    not be, or a half-typed question disappears whenever anything else does."""
+    assert '<aside class="dock" id="dock"' in source
+    assert 'id="dockLog"' in source and 'id="dockInput"' in source
+    # renderDock writes the lists and never the form.
+    body = source[source.index("function renderDock()"):source.index("function whenLabel")]
+    assert 'getElementById("dockLog")' in body
+    assert 'getElementById("dockThreads")' in body
+    assert 'dockInput").value' not in body
+
+
+def test_every_redraw_keeps_the_dock_in_step(source: str) -> None:
+    render = source[source.index("function render() {"):]
+    assert "renderDock();" in render[:200]
+
+
+def test_the_order_sheet_is_only_the_sheet_when_it_prints(source: str) -> None:
+    """Printing the plan prints the document, not the app around it."""
+    assert "body.printing-plan > .app" in source
+    assert "body.printing-plan #order-sheet { display: block" in source
+    assert "#order-sheet { display: none; }" in source
+
+
+def test_the_sheet_overrides_the_wide_table_defaults(source: str) -> None:
+    """A bare `table` in this page is 1560px wide and its cells never wrap,
+    which is right for a dashboard and wrong for a page that has to fit A4."""
+    rule = source[source.index("  .os-table { width: 100%"):]
+    rule = rule[:rule.index(".os-foot")]
+    assert "min-width: 0" in rule
+    assert "white-space: normal" in rule
+    assert "table-layout: fixed" in rule
+
+
+def test_the_sheet_says_what_the_figures_are_not(source: str) -> None:
+    """It leaves the building, so it has to carry the consignment caveat."""
+    sheet = source[source.index("function orderSheet(d)"):source.index("function printOrderSheet")]
+    assert "consignment" in sheet and "never a margin" in sheet

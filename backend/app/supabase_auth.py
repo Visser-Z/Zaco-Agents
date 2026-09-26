@@ -165,6 +165,23 @@ async def db_post(
     return r.json() if r.content else []
 
 
+async def db_patch(user: User, path: str, params: dict, payload: dict) -> list[dict]:
+    """Update rows through PostgREST as the caller, so RLS applies. Like the
+    delete below, `params` MUST carry a filter: an unfiltered patch would
+    rewrite the whole table."""
+    if not params:
+        raise HTTPException(400, "Refusing an unfiltered update.")
+    headers = _headers(user) | {"Prefer": "return=representation"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.patch(
+            f"{config.SUPABASE_URL}/rest/v1/{path}",
+            headers=headers, params=params, json=payload,
+        )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, f"Database update failed: {r.text}")
+    return r.json() if r.content else []
+
+
 async def db_delete(user: User, path: str, params: dict) -> list[dict]:
     """Delete from PostgREST as the caller, so RLS applies. `params` MUST carry a
     filter -- an unfiltered delete would remove the whole table."""

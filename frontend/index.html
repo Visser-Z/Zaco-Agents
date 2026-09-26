@@ -1254,7 +1254,8 @@ const S = {
              brief: null, briefBusy: false, briefError: null,
              // The plan is one table: which priorities to show, whether to
              // group it by market, and what it is sorted on.
-             filter: "all", groupBy: "market", sort: "priority", dir: -1 },
+             filter: "all", groupBy: "market", sort: "priority", dir: -1,
+             savingPdf: false, pdfError: null },
 };
 
 // ------------------------------------------------------- demo sample data
@@ -3148,8 +3149,43 @@ function orderSheet(d) {
     </div>`;
 }
 
-/** Put the sheet on the page and hand it to the print dialog, which is also
- *  where "Save as PDF" lives on every browser the office uses. */
+/** Fetch the sheet as a PDF and hand it to the browser as a download.
+ *
+ *  The print dialog can make a PDF too, but in the desktop shell it offers no
+ *  preview and the destination has to be found every time, so the file it is
+ *  usually wanted as is a button of its own. The server draws it, because the
+ *  file has to be the same document whichever machine asked for it.
+ */
+async function saveOrderSheet() {
+  const P = S.procure;
+  if (P.savingPdf) return;
+  if (!S.live) { P.pdfError = "Saving the sheet needs the live app."; render(); return; }
+  P.savingPdf = true; P.pdfError = null; render();
+  let url = null;
+  try {
+    const qs = new URLSearchParams({ months: String(P.months) });
+    const res = await api(`/api/procurement/sheet.pdf?${qs}`);
+    const blob = await res.blob();
+    const name = (res.headers.get("Content-Disposition") || "")
+      .split("filename=")[1] || `zaco-procurement-${(P.data && P.data.month) || "plan"}.pdf`;
+    url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name.replace(/["';]/g, "").trim();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) {
+    P.pdfError = e.message || String(e);
+  } finally {
+    // Revoked late: Chrome and the Electron shell both need the object URL to
+    // outlive the click that started the download.
+    if (url) setTimeout(() => URL.revokeObjectURL(url), 30000);
+    P.savingPdf = false; render();
+  }
+}
+
+/** Put the sheet on the page and hand it to the print dialog, for paper. */
 function printOrderSheet() {
   const d = S.procure.data;
   if (!d || !d.lines || !d.lines.length) return;
@@ -3185,7 +3221,9 @@ function renderProcure() {
       <div class="ins-actions">
         <div class="seg sm">${[[3, "Last 3 months"], [0, "All time"]].map(([m, l]) =>
           `<button class="${P.months === m ? "on" : ""}" onclick="setPlanMonths(${m})">${l}</button>`).join("")}</div>
-        <button class="btn ghost sm" onclick="printOrderSheet()">${icon("print")}Order sheet</button>
+        <button class="btn ghost sm" onclick="saveOrderSheet()" ${P.savingPdf ? "disabled" : ""}>${
+          P.savingPdf ? `<span class="spin"></span>Building` : `${icon("download")}Save as PDF`}</button>
+        <button class="btn ghost sm" onclick="printOrderSheet()">${icon("print")}Print</button>
         <button class="btn ghost sm refresh" onclick="loadProcurement()">${icon("refresh")}Refresh</button>
       </div>
     </div>`;
@@ -3230,6 +3268,10 @@ function renderProcure() {
           t.trials === 1 ? "" : "s"} of ${fmtInt(t.untested)} never compared`,
         undefined, { tone: "ok", icon: "pin" })}
     </div>`;
+
+  const pdfError = P.pdfError
+    ? `<div class="banner bad"><span class="bi">!</span><span><b>Could not build the PDF.</b>
+        ${esc(P.pdfError)}</span></div>` : "";
 
   const brief = `<div class="where-brief">
       ${P.brief ? `<div class="wb-text">${mdLite(P.brief)}</div>` : ""}
@@ -3303,6 +3345,7 @@ function renderProcure() {
 
   main.innerHTML = `<section class="screen ins">
     ${head}
+    ${pdfError}
     ${kpis}
     ${brief}
     ${table}

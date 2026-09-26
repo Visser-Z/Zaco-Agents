@@ -11,11 +11,12 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import (
+    order_sheet,
     procurement,
     scorecard,
     analytics,
@@ -1389,6 +1390,30 @@ async def get_procurement(
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
     return procurement.build(rows, payments, months)
+
+
+@app.get("/api/procurement/sheet.pdf")
+async def get_order_sheet(
+    months: int = Query(scorecard.DEFAULT_MONTHS, ge=0, le=24),
+    prepared_for: str | None = Query(None, max_length=80),
+    user: User | None = Depends(require_user),
+) -> Response:
+    """The same plan as a PDF, for whoever does the buying.
+
+    Drawn on the server rather than left to the browser's print dialog: the
+    desktop shell offers no print preview, so "save it as a PDF" there means
+    hunting for the destination every time. This comes back as a file with a
+    name on it, ready to send.
+    """
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    plan = procurement.build(rows, payments, months)
+    pdf = await run_in_threadpool(order_sheet.build, plan, None, prepared_for)
+    return Response(
+        pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{order_sheet.filename(plan)}"',
+                 "Cache-Control": "no-store"})
 
 
 @app.post("/api/assistant/plan")

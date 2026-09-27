@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import (
+    doc_check,
     order_sheet,
     procurement,
     scorecard,
@@ -1646,6 +1647,88 @@ async def _accumulated_daily(user: User, dns: set[int], lo: str | None, hi: str 
         }
         for r in rows
     ]
+
+
+# --- the document check ---------------------------------------------------
+# The parsers are exact but they fail quietly: a header in a shape the pattern
+# does not cover is not an error, it is a block that never appears. So the same
+# file is read again by a model that is shown none of what was parsed, and the
+# two readings are compared in `doc_check`. It runs on its own key
+# (ANTHROPIC_API_KEY_DOCS) and on its own request, after the rows are already
+# on screen: a check is worth waiting for, but not worth waiting for before
+# seeing the work.
+
+def _document_text(name: str, data: bytes) -> tuple[str, list[str]]:
+    """The file as text, and as pages where it has them."""
+    if csv_reports.looks_like_csv(name, data):
+        text = csv_reports.decode(data)
+        return text, [text]
+    pages = pdf_to_page_texts(data)
+    return "\n".join(pages), pages
+
+
+def _parse_for_check(name: str, text: str, pages: list[str]) -> tuple[str, list[dict]]:
+    """What this app reads out of that file, and which kind of file it is.
+
+    Deliberately the same parsers the real endpoints use, called the same way:
+    a check against a second, kinder reading of the document would prove
+    nothing about what is actually saved.
+    """
+    if csv_reports.looks_like_csv(name, text.encode("utf-8", "ignore")) or "," in text[:200]:
+        if csv_reports.is_payment_details_csv(text):
+            return "payments", csv_reports.parse_payment_details_csv(text, name)
+        if csv_reports.is_daily_sales_csv(text):
+            return "sales", [r.model_dump() for r in
+                             csv_reports.parse_daily_sales_csv(text, name)]
+    if payment_details.is_payment_details(text):
+        return "payments", payment_details.parse_payment_details(pages, name)
+    if nett_adjustments.is_nett_adjustments(text):
+        return "nett", []
+    return "sales", [r.model_dump() for r in statements_from_pages(pages, name)]
+
+
+@app.post("/api/documents/check")
+async def check_documents(
+    files: list[UploadFile] = File(...),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Read the dropped reports again and say where the two readings differ.
+
+    Answers per file, so one unreadable document never costs the check on the
+    others. Nothing here writes anything: it reports.
+    """
+    if not doc_check.configured():
+        raise HTTPException(503, doc_check.NOT_SET_UP)
+
+    results: list[dict] = []
+    for f in files:
+        name = f.filename or "document.pdf"
+        data = await f.read()
+        try:
+            text, pages = _document_text(name, data)
+            kind, parsed = _parse_for_check(name, text, pages)
+            if kind == "nett":
+                results.append({"file": name, "kind": kind, "ok": None, "findings": [],
+                                "note": "A Nett Adjustments report carries no rows to check."})
+                continue
+            out = await run_in_threadpool(doc_check.check, text, parsed, kind)
+            results.append({"file": name, **out})
+        except assistant.AssistantError as exc:
+            results.append({"file": name, "ok": None, "findings": [], "error": str(exc)})
+        except Exception as exc:  # noqa: BLE001 -- one bad file, not a failed check
+            results.append({"file": name, "ok": None, "findings": [],
+                            "error": f"Could not check this file: {exc}"})
+
+    findings = sum(len(r.get("findings") or []) for r in results)
+    checked = [r for r in results if r.get("ok") is not None]
+    return {
+        "files": results,
+        "checked": len(checked),
+        "findings": findings,
+        # True only when something was actually compared and all of it agreed.
+        "ok": bool(checked) and all(r.get("ok") for r in checked),
+        "model": assistant.model(),
+    }
 
 
 @app.post("/api/reconcile")

@@ -287,11 +287,21 @@ change the book.
 
 | Variable | What it is |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | **Secret.** The Anthropic API key the usage is billed to |
+| `ANTHROPIC_API_KEY` | **Secret.** The Anthropic API key the usage is billed to. Used by anything below that has no key of its own |
+| `ANTHROPIC_API_KEY_INTEL` | **Secret.** Optional second key, for Procurement and the assistant, so that spend can be told apart |
+| `ANTHROPIC_API_KEY_DOCS` | **Secret.** Optional third key, for the document check that reads every dropped report back |
 | `ZACON_ASSISTANT_MODEL` | Optional. Defaults to `claude-haiku-4-5`. `claude-sonnet-5` gives stronger answers at a higher price |
 
 Without `ANTHROPIC_API_KEY` the tab says it is not set up, and everything else
 works exactly as before.
+
+**The document check** (`ANTHROPIC_API_KEY_DOCS`) is the one that reads a
+dropped PDF a second time and compares that reading with what the parsers made
+of it. It runs after the rows are already on screen, one request per round, and
+reports rather than changes anything: a block on the page that never became a
+row, a figure read differently, or a document total that does not agree with
+the lines under it. Without the key nothing runs and nothing is said; the
+health endpoint's `doc_check` says which state it is in.
 
 `ANTHROPIC_API_KEY` is a secret and is treated as one:
 

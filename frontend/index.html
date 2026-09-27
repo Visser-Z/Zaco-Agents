@@ -936,6 +936,12 @@
   .dock-note { padding: 0 16px 10px; font-size: 11px; color: var(--ink-faint); }
   @media (max-width: 520px) { .dock { width: 100%; } }
 
+  .banner.good { background: var(--ok-tint); border-color: color-mix(in srgb, var(--ok) 28%, var(--line)); }
+  .banner.good .bi { color: var(--ok); }
+  .doc-check ul { margin: 6px 0 0; padding-left: 18px; }
+  .doc-check li { margin: 2px 0; }
+  .dc-file { color: var(--ink-faint); font-size: 11px; margin-left: 7px; }
+  .dc-note { margin: 8px 0 0; color: var(--ink-soft); }
   .ask-card { padding: 0; overflow: hidden; }
   .ask-open-card { padding: 18px 20px 14px; }
   .ask-open-card .ask-chips { margin: 4px 0 2px; }
@@ -1224,6 +1230,7 @@ const S = {
   module: "sales",      // "sales" | "tracking" | "insights"
   screen: "hub",
   live: false,          // true once /api/health answers
+  docCheckReady: false, // the document check has its own key on the server
   assistantReady: false, // Claude has a key on the server
   build: "",            // the commit actually serving
   authRequired: false,  // true when the server has Supabase auth configured
@@ -1248,6 +1255,10 @@ const S = {
   // The conversation is kept across tab switches; the status is read once.
   // The conversation. `log` is what is on screen; `threadId` is the row it is
   // being kept in, so closing the tab no longer ends the conversation.
+  // The document check: a second reading of whatever was just dropped. It runs
+  // after the rows are on screen, so it never stands between the operator and
+  // the work; what it finds appears when it arrives.
+  docCheck: { on: null, busy: false, result: null, error: null, files: 0 },
   assistant: { status: null, loading: false, error: null, log: [], busy: false,
                busyLabel: "", draft: "", open: false, threads: [], threadId: null,
                listOpen: false, loadingThreads: false, keeping: true, unavailable: null },
@@ -1625,6 +1636,7 @@ async function checkHealth() {
     S.live = true;
     S.authRequired = !!data.auth_required;
     S.assistantReady = !!data.assistant;   // Claude has a key on the server
+    S.docCheckReady = !!data.doc_check;    // and a key for reading documents back
     S.build = data.build || "";
     Auth.cfg = { url: data.supabase_url || "", key: data.supabase_anon_key || "" };
   } catch { S.live = false; S.authRequired = false; }
@@ -3695,6 +3707,71 @@ const RECON_STATUS = {
 };
 const RECON_ORDER = ["matched", "outstanding", "over", "unpaid", "no_sales"];
 
+/** Read the same files again, with a model, and compare the two readings.
+ *
+ *  Deliberately a second request rather than part of the upload: it costs a
+ *  few seconds and a few cents, and the rows are more use on screen now than
+ *  they would be after a wait. Whatever it finds lands when it lands.
+ */
+async function checkDocuments(files) {
+  const D = S.docCheck;
+  if (!S.live || !files || !files.length) return;
+  if (!S.docCheckReady) return;   // no key for it on the server
+  D.busy = true; D.error = null; D.result = null; D.files = files.length; render();
+  try {
+    const fd = new FormData();
+    files.forEach(f => fd.append("files", f));
+    D.result = await (await api("/api/documents/check", { method: "POST", body: fd })).json();
+  } catch (e) {
+    D.error = e.message || String(e);
+  } finally {
+    D.busy = false; render();
+  }
+}
+
+function dismissDocCheck() {
+  S.docCheck.result = null; S.docCheck.error = null; render();
+}
+
+/** What the check found, or that it is still looking. Sits above the work it
+ *  is about, and says nothing at all when there is nothing to say. */
+function docCheckPanel() {
+  const D = S.docCheck;
+  if (D.busy) {
+    return `<div class="banner"><span class="bi">${icon("chat", 13)}</span><span>
+      <b>Checking ${fmtInt(D.files)} document${D.files === 1 ? "" : "s"} against what was
+      read.</b> The rows below are ready to work on meanwhile.</span></div>`;
+  }
+  if (D.error) {
+    return `<div class="banner warn"><span class="bi">!</span><span>
+      <b>The document check could not run.</b> ${esc(D.error)} What was read is unaffected.
+      <button class="linklike" onclick="dismissDocCheck()">Hide</button></span></div>`;
+  }
+  const r = D.result;
+  if (!r) return "";
+  const findings = (r.files || []).flatMap(f =>
+    (f.findings || []).map(x => ({ ...x, file: f.file })));
+  const failed = (r.files || []).filter(f => f.error);
+  if (!findings.length && !failed.length) {
+    return `<div class="banner good"><span class="bi">${icon("check", 13)}</span><span>
+      <b>Checked against the document${r.checked === 1 ? "" : "s"}.</b>
+      Every reference and every total on ${r.checked === 1 ? "the page" : "the pages"} agrees
+      with what was read.
+      <button class="linklike" onclick="dismissDocCheck()">Hide</button></span></div>`;
+  }
+  return `<div class="banner bad doc-check"><span class="bi">!</span><div>
+      <b>${fmtInt(findings.length)} thing${findings.length === 1 ? "" : "s"} on the
+      document ${findings.length === 1 ? "does" : "do"} not match what was read.</b>
+      <ul>${findings.slice(0, 12).map(f =>
+        `<li>${esc(f.message)}<span class="dc-file">${esc(f.file || "")}</span></li>`).join("")}
+        ${findings.length > 12 ? `<li>and ${fmtInt(findings.length - 12)} more.</li>` : ""}
+        ${failed.map(f => `<li>${esc(f.file)}: ${esc(f.error)}</li>`).join("")}</ul>
+      <p class="dc-note">The figures on screen are what the app read. Where the document
+        says otherwise, the document is right: re-export that report, or send this list on.
+        <button class="linklike" onclick="dismissDocCheck()">Hide</button></p>
+    </div></div>`;
+}
+
 function browsePayments() { document.getElementById("paymentInput").click(); }
 
 async function onPaymentFiles(files) {
@@ -3710,6 +3787,9 @@ async function onPaymentFiles(files) {
   } finally {
     R.loading = false; render();
   }
+  // After the matching, not instead of it: the check is a second opinion on
+  // the same files, and it must never delay the first one.
+  checkDocuments(files);
 }
 
 /** The Payment matching panel. */
@@ -4430,6 +4510,8 @@ function renderHub() {
           Detail lives under <a href="#" onclick="event.preventDefault(); setModule('reports')">Reports</a>.</p>
       </div></div>
 
+      ${docCheckPanel()}
+
       <div class="workspace">
         <div class="ws-col" data-drop="sales">
           <div class="card">
@@ -4526,6 +4608,7 @@ async function onPdfFiles(files) {
   });
   // Netts are folded in first, so a row is only judged once it is complete.
   commitClean();
+  checkDocuments(files);
 }
 
 /** Split one figure across the rows it covers, in the ratio of their gross, so
@@ -4688,6 +4771,7 @@ function renderReview() {
         <div class="stat"><div class="n">${dns.map(d => groupDate(d, pool)).join(", ") || "—"}</div><div class="l">Batch date${dns.length === 1 ? "" : "s"}</div></div>
       </div>
 
+      ${docCheckPanel()}
       ${S.importWarnings.map(w => `<div class="banner bad"><span class="bi">!</span><span><b>This export may not be the whole picture.</b> ${esc(w)}</span></div>`).join("")}
 
       ${ns ? `<div class="banner ${ns.matched ? "" : "bad"}"><span class="bi">${ns.matched ? "✓" : "!"}</span>

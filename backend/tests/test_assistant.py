@@ -110,3 +110,63 @@ def test_the_written_plan_is_handed_the_room_to_grow_with_the_figures():
 def test_the_plan_prompt_tells_the_model_not_to_invent_growth():
     assert "Never suggest more of something the plan does not say there is room for" \
         in assistant.PLAN_SYSTEM
+
+
+# --- what is owed, which the rows alone cannot say ------------------------
+
+SETTLE_ROWS = [
+    {"consignment_id": 100, "dn": 1855491, "product": "GRAPES SWEET CELEBRATION",
+     "market": "DURBAN MARKET", "market_agent": "Grow Port Natal", "cartons_sold": 100,
+     "price": 400.0, "sales_total": 40000.0, "last_sale": "2026-09-03",
+     "date_received": "2026-09-01", "group_date": "2026-09-01", "qty_received": 100},
+    {"consignment_id": 200, "dn": 14370, "product": "GRAPES RALLI",
+     "market": "JOBURG MKT - BR / MAR", "market_agent": "Grow Marco", "cartons_sold": 50,
+     "price": 200.0, "sales_total": 10000.0, "last_sale": "2026-09-05",
+     "date_received": "2026-09-04", "group_date": "2026-09-04", "qty_received": 50},
+]
+SETTLE_PAYS = [
+    {"accsale": "JOH*MAR*1", "dn": 14370, "date": "2026-09-12", "gross": 10000.0,
+     "nett": 8500.0, "lines": [{"product": "GRAPES RALLI", "sales_total": 10000.0}]},
+]
+
+
+def test_the_block_carries_what_is_owed_market_by_market():
+    """Durban sold R 40 000,00 and nothing has been paid against it. The rows
+    cannot say that; the settlement can, and now does."""
+    text = assistant.settlement_context(SETTLE_ROWS, SETTLE_PAYS)
+    assert "Payment and what is still owed" in text
+    assert "DURBAN MARKET | Grow Port Natal | 40 000,00 | 1" in text
+    assert "GRAPES SWEET CELEBRATION" in text
+    # Joburg was paid in full, so it is not on the outstanding list at all.
+    assert "JOBURG MKT" not in text.split("### Still owed, by market")[1]
+
+
+def test_the_block_says_what_a_blank_nett_does_not_mean():
+    """The wrong answer this fixes: asked what Durban still owed, the
+    assistant said it could not tell because the nett column was blank, while
+    Tracking showed R 107 740,00 outstanding on the same screen."""
+    text = assistant.settlement_context(SETTLE_ROWS, SETTLE_PAYS)
+    assert "NOT whether a consignment has been paid" in text
+    assert "It is NOT whether the consignment has been paid" in assistant.SYSTEM
+    assert "Never reason about payment from the nett column" in assistant.SYSTEM
+
+
+def test_the_settlement_travels_with_every_question():
+    block = assistant.data_block(SETTLE_ROWS, SETTLE_PAYS)
+    assert "Payment and what is still owed" in block
+    assert "Still to come: R 40 000,00" in block
+
+
+def test_paid_and_owed_agree_with_the_tracking_tab():
+    """Both read the same settlement, so a figure quoted in the chat is the
+    figure on the screen behind it."""
+    from app import tracking
+
+    status = tracking.payment_status(SETTLE_ROWS, SETTLE_PAYS)
+    text = assistant.settlement_context(SETTLE_ROWS, SETTLE_PAYS)
+    assert assistant._rand(status["still_to_come"]) in text
+    assert assistant._rand(status["total_paid"]) in text
+
+
+def test_an_empty_book_has_no_settlement_block():
+    assert assistant.settlement_context([], []) == ""

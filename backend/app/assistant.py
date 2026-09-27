@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from . import analytics, forecast, procurement, scorecard
+from . import analytics, forecast, procurement, scorecard, tracking
 
 # Claude Haiku 4.5, the operator's choice: they hold the key and pay for what it
 # uses. Overridable per deployment with ZACON_ASSISTANT_MODEL -- to try Sonnet if
@@ -156,8 +156,17 @@ Each row below is one consignment of one product:
   cartons     units sold
   price       average price per carton, in Rand
   value       gross sales value, in Rand (cartons x price)
-  nett        what Zaco was actually paid after the agent's deductions, in \
-Rand. Often blank, because it arrives later on a separate payment report.
+  nett        a column the SALES report leaves blank on most rows. It is \
+NOT whether the consignment has been paid, and a blank one says nothing at all \
+about that.
+
+Money that came in is reported separately, under "Payment and what is still \
+owed", where the payment reports have already been matched onto the sales by \
+the app. That section is the ONLY place to answer a question about what has \
+been paid, what is outstanding, or what a market still owes. Never reason \
+about payment from the nett column: an empty nett means the sales report did \
+not print that figure, not that the money has not arrived. If the settlement \
+section is present, it has the answer; use it, and quote its figures.
 
 All money is South African Rand. Write amounts as "R 12 500,00".
 
@@ -552,6 +561,73 @@ class AssistantError(RuntimeError):
     """The assistant could not answer -- surfaced to the operator as-is."""
 
 
+# How many outstanding lines are listed one by one. Long enough to answer
+# "what does Durban still owe" line by line, short enough not to crowd out the
+# rest of the book.
+MAX_OUTSTANDING = 60
+
+
+def settlement_context(rows: list[dict], payments: list[dict]) -> str:
+    """What has been paid and what is still owed, market by market.
+
+    This block exists because of a real wrong answer. Asked what Durban still
+    owed, the assistant said it could not tell, because "the nett column is
+    blank for all Durban consignments" -- while the Tracking tab, on the same
+    screen, showed R 107 740,00 outstanding across three named lines.
+
+    Both readings were of the same book. The `nett` on a sales row is a column
+    the SALES report leaves blank; what was actually paid lives in the payment
+    reports and is matched onto the sales by ``tracking``. Given only the rows,
+    the model could see an empty column and nothing else, so it drew the only
+    conclusion available to it, and it was wrong. Everything the settlement
+    knows is handed over here, already computed.
+    """
+    if not rows:
+        return ""
+    status = tracking.payment_status(rows, payments or [])
+    out = ["## Payment and what is still owed (computed by the app, do not recalculate)",
+           "The `nett` column on the consignment rows below is a column the SALES report "
+           "leaves blank. It is NOT whether a consignment has been paid. What was paid "
+           "comes from the payment reports and is matched onto the sales here. Use this "
+           "section for anything about money owed or received.",
+           f"Paid so far: {_rand(status['total_paid'])} nett over "
+           f"{status['batches_paid']} settled batches.",
+           f"Still to come: {_rand(status['still_to_come'])} over "
+           f"{status['batches_outstanding']} batches"
+           + (f", oldest {status['oldest_outstanding']}." if status['oldest_outstanding']
+              else "."),
+           f"Payment reports on record: {status['payments_recorded']}."]
+    if status.get("credit_value"):
+        out.append(f"Credits (paid more than the sale): {_rand(-status['credit_value'])} "
+                   f"over {len(status.get('credits') or [])} lines.")
+    if status.get("unmatched"):
+        out.append(f"Paid but matching nothing on the book: {len(status['unmatched'])} "
+                   f"payments.")
+
+    markets = status.get("outstanding_markets") or []
+    if markets:
+        out.append("")
+        out.append("### Still owed, by market (exact)")
+        out.append("market | agent | owed (R) | lines | oldest")
+        for m in markets:
+            out.append(f"{m['market']} | {m.get('agents') or ''} | {_fmt(m['owed'])} | "
+                       f"{m['items']} | {m.get('oldest') or ''}")
+
+    lines = status.get("outstanding") or []
+    if lines:
+        out.append("")
+        out.append(f"### Every outstanding line ({min(len(lines), MAX_OUTSTANDING)} of "
+                   f"{len(lines)}, biggest first)")
+        out.append("market | agent | delivery note | product | sold (R) | paid (R) | owed (R) | date")
+        for r in lines[:MAX_OUTSTANDING]:
+            out.append(" | ".join([
+                str(r.get("market") or ""), str(r.get("market_agent") or ""),
+                str(r.get("dn") or ""), str(r.get("product") or ""),
+                _fmt(r.get("daily_total")), _fmt(r.get("payment_gross")),
+                _fmt(r.get("owed")), str(r.get("date") or "")]))
+    return "\n".join(out)
+
+
 def data_block(rows: list[dict], payments: list[dict] | None = None) -> str:
     """Everything the model is given: what happened, then what is expected.
 
@@ -559,9 +635,10 @@ def data_block(rows: list[dict], payments: list[dict] | None = None) -> str:
     """
     parts = [build_context(rows)]
     if rows:
+        parts.append(settlement_context(rows, payments or []))
         parts.append(forecast_context(rows, payments or []))
         parts.append(where_context(scorecard.build(rows, payments or [])))
-    return "\n\n".join(parts)
+    return "\n\n".join(p for p in parts if p)
 
 
 def _rand(value) -> str:

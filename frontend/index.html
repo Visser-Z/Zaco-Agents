@@ -855,6 +855,16 @@
   .sdn-sub { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sdn .trk-stock { padding-left: 12px; }
   .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+  /* The owed lines used to borrow the stock grid above, which has a badge
+     column they do not: the name took the badge's column, the delivery note
+     the stretchy one, and a long note ran into the amount beside it. */
+  .trk-owed { padding: 0 4px 8px 26px; }
+  .trk-list.trk-owed li { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+  .why { display: flex; gap: 7px; align-items: baseline; font-size: 11px; font-weight: 650;
+         margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .why em { font-style: normal; font-weight: 400; color: var(--ink-faint); }
+  .why.t-debt { color: var(--warn); }
+  .why.t-check { color: var(--accent-strong); }
   @media (max-width: 700px) {
     .smkt-head { grid-template-columns: auto minmax(0, 1fr) auto; }
     .smkt-tiers { grid-column: 2 / -1; justify-content: flex-start; }
@@ -862,6 +872,7 @@
     .sdn { margin-left: 4px; }
     .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
     .trk-list.trk-stock li .trk-d { grid-column: 2 / 3; }
+    .trk-owed { padding-left: 4px; }
   }
   .trk-list li.done { opacity: .5; }
   .trk-list li.done .trk-nm { text-decoration: line-through; }
@@ -2070,12 +2081,39 @@ function whereLine(r) {
 }
 
 /** The name cell of a tracking row: what it is, and under it where it is. */
-function nameCell(r, label) {
+function nameCell(r, label, extra) {
   const name = label !== undefined ? label : (shortProduct(r.product || r.reference) || "—");
   const at = whereLine(r);
   return `<span class="trk-p" title="${esc(r.product || r.reference || "")}"
     ><span class="trk-nm">${esc(name)}</span>${
-    at ? `<span class="trk-sub" title="${esc(at)}">${esc(at)}</span>` : ""}</span>`;
+    at ? `<span class="trk-sub" title="${esc(at)}">${esc(at)}</span>` : ""}${extra || ""}</span>`;
+}
+
+/* Why a line is still owed, read from the cartons each payment says it covers.
+   The first two are money to chase; the rest are a gap in the history or a
+   price to query, and are coloured apart so the chase list reads at a glance. */
+const OWED_WHY = {
+  awaiting:      { label: "Not paid yet",          tone: "debt",
+                   note: "Nothing has been paid on this yet." },
+  short:         { label: "Cartons unpaid",        tone: "debt",
+                   note: "Fewer cartons paid for than sold: money genuinely still owed." },
+  sales_missing: { label: "Sales report missing?", tone: "check",
+                   note: "The payments count more cartons than the book has sold. A sales report is probably not on the book, so this is a gap in the history rather than a debt." },
+  price:         { label: "Price differs",         tone: "check",
+                   note: "Every carton has been paid for, for less money. The sales and payment reports disagree on the price: a question for the agent, not a chase." },
+  no_count:      { label: "No carton count",       tone: "check",
+                   note: "The payment report did not print cartons, so the reason cannot be read from it." },
+};
+
+function owedWhy(r) {
+  const w = OWED_WHY[r.reason];
+  if (!w) return "";
+  // Short on purpose: it shares a narrow column with the product name.
+  const detail = r.cartons_paid != null
+    ? `${fmtInt(r.cartons_paid)} of ${fmtInt(r.cartons_sold)} ctn paid`
+    : r.reason === "awaiting" ? `${fmtInt(r.cartons_sold)} ctn sold` : "";
+  return `<span class="why t-${w.tone}" title="${esc(w.note)}">${esc(w.label)}${
+    detail ? `<em>${detail}</em>` : ""}</span>`;
 }
 
 // What each Tracking block is: money still owed is a warning, stock that will
@@ -2174,7 +2212,7 @@ function renderTracking() {
 
   // --- outstanding ---------------------------------------------------------
   const owedRow = r => `<li>
-      ${nameCell(r)}
+      ${nameCell(r, undefined, owedWhy(r))}
       <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
       <span class="trk-n num">R ${fmt(r.owed)}</span>
       <button class="xbtn" title="Close this one off"
@@ -2193,6 +2231,11 @@ function renderTracking() {
         onclick="event.stopPropagation(); closeTrackingItem('${kind}', ${q(r.ref)}, true)">Reopen</button>
       </li>`).join("")}</ul>`;
 
+  /** What in these lines is not a debt but a question: a price, or a gap in
+   *  the history. Named on the market head so it is not chased by mistake. */
+  const checkOf = lines => (lines || []).reduce((t, r) =>
+    t + (OWED_WHY[r.reason] && OWED_WHY[r.reason].tone === "check" ? r.owed : 0), 0);
+
   /* What is owed, market by market: chasing it is one call per floor. The flat
      list stays in the page for the print sheet, which runs down the page in
      three columns and has no room for group headers. */
@@ -2204,10 +2247,11 @@ function renderTracking() {
         <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
         <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
         <span class="smkt-sum num">${fmtInt(m.items)} line${m.items === 1 ? "" : "s"}${
-          m.oldest ? ` · oldest ${fmtInt(ageInDays(m.oldest))} days` : ""}</span>
+          m.oldest ? ` · oldest ${fmtInt(ageInDays(m.oldest))} days` : ""}${
+          checkOf(m.lines) ? ` · R ${fmt(checkOf(m.lines))} to check` : ""}</span>
         <span class="smkt-tiers"><span class="trk-n num">R ${fmt(m.owed)}</span></span>
       </button>
-      ${isOpen ? `<ul class="trk-list trk-stock">${m.lines.map(r =>
+      ${isOpen ? `<ul class="trk-list trk-owed">${m.lines.map(r =>
         owedRow({ ...r, market: null })).join("")}</ul>` : ""}
     </div>`;
   };
@@ -2227,7 +2271,7 @@ function renderTracking() {
 
   const owedBlock = owed.length
     ? block("owed", "Outstanding", owed.length,
-        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}${p.closed_value ? ` · R ${fmt(p.closed_value)} closed, not counted` : ""}${p.credit_value ? ` · R ${fmt(-p.credit_value)} credited back` : ""}`,
+        `R ${fmt(p.still_to_come)} across ${fmtInt(p.batches_outstanding)} batch${p.batches_outstanding === 1 ? "" : "es"}${p.to_check > 0.005 ? ` · R ${fmt(p.to_check)} of it to check, not chase` : ""}${p.closed_value ? ` · R ${fmt(p.closed_value)} closed, not counted` : ""}${p.credit_value ? ` · R ${fmt(-p.credit_value)} credited back` : ""}`,
         owedMarkets,
         owedFull,
         `<button class="btn ghost sm" onclick="event.stopPropagation(); printOutstanding()">Print</button>`)

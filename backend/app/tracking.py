@@ -188,7 +188,14 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
                    else ("k", reconcile._key(rec.get("dn"), l.get("product"))))
             line = {"gross": gross, "left": gross, "date": day,
                     "rate": nett / base if base else 0.0,
-                    "dn": rec.get("dn"), "product": l.get("product")}
+                    "dn": rec.get("dn"), "product": l.get("product"),
+                    # The cartons this line pays for, as the payment report
+                    # prints them. None on the older exports that did not.
+                    "cartons": (reconcile._num(l.get("sold"))
+                                if l.get("sold") is not None else None),
+                    # Where the line would have fallen back to, so a line bound
+                    # by FMS id can still be counted against its delivery note.
+                    "ref": ("k", reconcile._key(rec.get("dn"), l.get("product")))}
             if gross < 0:
                 credits.append((key, line))
             else:
@@ -205,6 +212,83 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
             if credit["left"] >= -0.005:
                 break
     return lines, reversals, bound
+
+
+# Why a line is still owed, from the cartons.
+#
+# Every payment line prints how many cartons it pays for, and that settles what
+# the money alone cannot. Cartons SOLD, not sent: the fruit that never sold is
+# nobody's debt, so comparing against what went to market would call every
+# unsold carton unpaid. Measured on the live book, on the 147 lines paid to the
+# cent the payments' cartons agreed with the book's on every one, so where they
+# disagree it means something:
+#
+#   awaiting       nothing has been paid on it yet
+#   short          some cartons paid for, fewer than sold: genuinely owed
+#   sales_missing  the payments count MORE cartons than the book has sold, so a
+#                  sales report is probably not on the book; the money shown
+#                  as owed is then not a debt but a gap in the history
+#   price          every carton paid for, for less money: the two reports
+#                  disagree on the price, which is a query, not a chase
+#   no_count       paid on, but the payment reports did not print cartons
+REASONS = {
+    "awaiting": "Not paid yet",
+    "short": "Cartons unpaid",
+    "sales_missing": "Sales report missing?",
+    "price": "Price differs",
+    "no_count": "No carton count",
+}
+# Money that is really owed, as against money that needs looking into.
+DEBT_REASONS = ("awaiting", "short")
+
+# A carton either way is a rounding in the reports, not a difference.
+CARTON_SLACK = 0.5
+
+
+def carton_reason(paid: float, sold: float, counted: bool, paid_any: bool) -> str:
+    """Which of the reasons above a line that still owes money falls under."""
+    if not paid_any:
+        return "awaiting"
+    if not counted:
+        return "no_count"
+    if paid <= CARTON_SLACK:
+        return "awaiting"
+    if paid < sold - CARTON_SLACK:
+        return "short"
+    if paid > sold + CARTON_SLACK:
+        return "sales_missing"
+    return "price"
+
+
+def _carton_tally(sales: list[dict], lines: dict[tuple, list[dict]]) -> dict[tuple, dict]:
+    """Cartons sold against cartons paid for, per delivery note and product.
+
+    Counted at the delivery note and product, whichever way each payment line
+    was matched: a consignment paid partly by lines bound through the FMS id
+    and partly by lines from before the id was read is one consignment, and
+    splitting its cartons between the two would call both halves short.
+    """
+    tally: dict[tuple, dict] = defaultdict(
+        lambda: {"sold": 0.0, "paid": 0.0, "counted": False, "paid_any": False})
+    # A line bound by FMS id is counted against ITS consignment's delivery note,
+    # never the payment's own: the Durban 20026*N payments carry no delivery
+    # note at all, and counting their cartons under a blank one called a
+    # consignment with R 71 100,00 paid against it "not paid yet".
+    home: dict[tuple, tuple] = {}
+    for row in sales:
+        ref = ("k", reconcile._key(row.get("dn"), row.get("product")))
+        tally[ref]["sold"] += analytics.row_cartons(row)
+        if row.get("consignment_id"):
+            home.setdefault(("c", int(row["consignment_id"])), ref)
+    for key, pool in lines.items():
+        for line in pool:
+            ref = key if key[0] == "k" else home.get(key, line["ref"])
+            t = tally[ref]
+            t["paid_any"] = True
+            if line.get("cartons") is not None:
+                t["paid"] += line["cartons"]
+                t["counted"] = True
+    return tally
 
 
 def line_key(row: dict) -> tuple:
@@ -319,6 +403,7 @@ def _allocate(sales: list[dict], payments: list[dict]):
             credit[key] = spare
     extra = {
         "reversals": reversals,
+        "cartons": _carton_tally(sales, lines),
         "gross_paid": {k: round(v, 2) for k, v in gross_paid.items()},
         "bound": bound,
         "sold_keys": set(by_consignment) | set(by_ref),
@@ -457,6 +542,15 @@ def payment_status(sales: list[dict], payments: list[dict],
             continue
         outstanding += 1
         still_to_come += owed
+        # The cartons are the consignment's, whatever window is open: a month
+        # shows part of a consignment's money, but its payments count cartons
+        # across all of it.
+        t = extra["cartons"].get(("k", reconcile._key(rows[0].get("dn"),
+                                                     rows[0].get("product"))), {})
+        entry["cartons_sold"] = round(t.get("sold", 0.0), 1)
+        entry["cartons_paid"] = round(t.get("paid", 0.0), 1) if t.get("counted") else None
+        entry["reason"] = carton_reason(t.get("paid", 0.0), t.get("sold", 0.0),
+                                        t.get("counted", False), t.get("paid_any", False))
         outstanding_rows.append(entry)
 
     # Paid for more than the whole book ever sold on that consignment. A
@@ -500,6 +594,15 @@ def payment_status(sales: list[dict], payments: list[dict],
     dates = [r["date"] for r in outstanding_rows if r["date"]]
     oldest = min(dates) if dates else None
 
+    # What is owed, split by why. Only the first two are money to chase; the
+    # rest is a gap in the history or a price to query.
+    by_reason = {k: 0.0 for k in REASONS}
+    count_reason = {k: 0 for k in REASONS}
+    for r in outstanding_rows:
+        by_reason[r["reason"]] += r["owed"]
+        count_reason[r["reason"]] += 1
+    by_reason = {k: round(v, 2) for k, v in by_reason.items()}
+
     return {
         "total_paid": paid_for_window,
         "received_in_window": paid_in_window,
@@ -532,6 +635,11 @@ def payment_status(sales: list[dict], payments: list[dict],
         # How many payments are tied to their delivery by FMS id, so the screen
         # can say how much of the matching is exact.
         "fms_bound": len(extra["bound"]),
+        # Outstanding split by why, from the cartons. "debt" is what to chase.
+        "owed_by_reason": by_reason,
+        "lines_by_reason": count_reason,
+        "debt": round(sum(by_reason[k] for k in DEBT_REASONS), 2),
+        "to_check": round(sum(v for k, v in by_reason.items() if k not in DEBT_REASONS), 2),
     }
 
 

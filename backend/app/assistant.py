@@ -170,6 +170,14 @@ section is present, it has the answer; use it, and quote its figures.
 
 For a question about one month ("what is still owed for September"), answer from the "Month by month" table in that section and nowhere else. Never work a month's figure out by adding up outstanding lines: a line is one consignment over every day it sold, dated by its first sale, and one that started in August and kept selling into September belongs partly to each. The table has already split them, exactly as the Tracking tab does.
 
+Outstanding money comes in two kinds, and the settlement section says which \
+each line is. "Not paid yet" and "Cartons unpaid" are money genuinely owed: \
+chase those. "Price differs", "Sales report missing?" and "No carton count" \
+are questions, not debts: every carton may already be paid for, or the book \
+may be missing a sales report. When asked what to chase, what is really owed, \
+or who to phone, give the money to chase and name the rest separately as \
+things to check.
+
 All money is South African Rand. Write amounts as "R 12 500,00".
 
 Two limits you must respect rather than work around:
@@ -590,6 +598,8 @@ def month_settlement(rows: list[dict], payments: list[dict],
             "sold": round(sold, 2),
             "paid": status["total_paid"],
             "owed": status["still_to_come"],
+            "debt": status["debt"],
+            "to_check": status["to_check"],
             "lines": status["batches_outstanding"],
             "credit": status.get("credit_value") or 0.0,
             "markets": [{"market": m["market"], "agents": m.get("agents"),
@@ -629,7 +639,13 @@ def settlement_context(rows: list[dict], payments: list[dict],
            f"{status['batches_outstanding']} batches"
            + (f", oldest {status['oldest_outstanding']}." if status['oldest_outstanding']
               else "."),
-           f"Payment reports on record: {status['payments_recorded']}."]
+           f"Payment reports on record: {status['payments_recorded']}.",
+           f"Of what is outstanding, {_rand(status['debt'])} is money genuinely owed "
+           f"(nothing paid yet, or fewer cartons paid for than sold) and "
+           f"{_rand(status['to_check'])} is to check rather than chase (every carton paid "
+           f"for at a different price, payments counting more cartons than the book has "
+           f"sold so a sales report is probably missing, or no carton count on the "
+           f"payment). Each line below says which."]
     if status.get("credit_value"):
         out.append(f"Credits (paid more than the sale): {_rand(-status['credit_value'])} "
                    f"over {len(status.get('credits') or [])} lines.")
@@ -647,10 +663,11 @@ def settlement_context(rows: list[dict], payments: list[dict],
                    "question about a particular month, answer from this table and nowhere "
                    "else.")
         out.append("month | sold (R) | paid for it (R, nett) | still owed on it (R) | "
-                   "lines outstanding")
+                   "of which to chase (R) | of which to check (R) | lines outstanding")
         for m in months:
             out.append(f"{m['month']} | {_fmt(m['sold'])} | {_fmt(m['paid'])} | "
-                       f"{_fmt(m['owed'])} | {m['lines']}")
+                       f"{_fmt(m['owed'])} | {_fmt(m['debt'])} | {_fmt(m['to_check'])} | "
+                       f"{m['lines']}")
         owing = [m for m in months if m["markets"] or m["credit"]]
         if owing:
             out.append("")
@@ -688,13 +705,17 @@ def settlement_context(rows: list[dict], payments: list[dict],
                    "into the next belongs partly to each, so never filter or add these lines "
                    "up to get a month's figure: use the month table above.")
         out.append("market | agent | delivery note | product | sold (R) | paid (R) | "
-                   "owed (R) | first sold")
+                   "owed (R) | first sold | cartons sold | cartons paid for | why")
         for r in lines[:MAX_OUTSTANDING]:
+            paid_ctn = r.get("cartons_paid")
             out.append(" | ".join([
                 str(r.get("market") or ""), str(r.get("market_agent") or ""),
                 str(r.get("dn") or ""), str(r.get("product") or ""),
                 _fmt(r.get("daily_total")), _fmt(r.get("payment_gross")),
-                _fmt(r.get("owed")), str(r.get("date") or "")]))
+                _fmt(r.get("owed")), str(r.get("date") or ""),
+                _count(r.get("cartons_sold") or 0),
+                "not printed" if paid_ctn is None else _count(paid_ctn),
+                tracking.REASONS.get(r.get("reason"), "")]))
     return "\n".join(out)
 
 

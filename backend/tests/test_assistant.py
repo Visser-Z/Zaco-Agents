@@ -244,3 +244,26 @@ def test_a_month_holding_a_credit_says_so_and_still_adds_up():
     assert sept["owed"] == -4000.0
     text = assistant.settlement_context(rows, [])
     assert "2026-09 comes out below zero" in text
+
+
+# --- a debt, or a question: the chat knows which ---------------------------
+
+def test_every_outstanding_line_tells_the_chat_why_it_is_owed():
+    rows = [SETTLE_ROWS[0]]
+    pays = [{"accsale": "DUR*13*9", "dn": 1855491, "date": "2026-09-10", "gross": 24000.0,
+             "nett": 20400.0, "lines": [{"product": "GRAPES SWEET CELEBRATION",
+                                          "sales_total": 24000.0, "sold": 60}]}]
+    text = assistant.settlement_context(rows, pays)
+    line = [l for l in text.split("\n") if "1855491 | GRAPES SWEET CELEBRATION" in l][0]
+    assert line.endswith("| 100 | 60 | Cartons unpaid")
+    assert "R 16 000,00 is money genuinely owed" in text
+
+
+def test_the_month_table_splits_what_to_chase_from_what_to_check():
+    text = assistant.settlement_context(SPANNING, SPAN_PAID)
+    assert "of which to chase (R) | of which to check (R)" in text
+
+
+def test_the_chat_is_told_a_price_query_is_not_a_debt():
+    assert "questions, not debts" in assistant.SYSTEM
+    assert "give the money to chase and name the rest separately" in assistant.SYSTEM

@@ -138,7 +138,7 @@ def test_the_block_carries_what_is_owed_market_by_market():
     assert "DURBAN MARKET | Grow Port Natal | 40 000,00 | 1" in text
     assert "GRAPES SWEET CELEBRATION" in text
     # Joburg was paid in full, so it is not on the outstanding list at all.
-    assert "JOBURG MKT" not in text.split("### Still owed, by market")[1]
+    assert "JOBURG MKT" not in text.split("### Still owed, all months together, by market")[1]
 
 
 def test_the_block_says_what_a_blank_nett_does_not_mean():
@@ -170,3 +170,77 @@ def test_paid_and_owed_agree_with_the_tracking_tab():
 
 def test_an_empty_book_has_no_settlement_block():
     assert assistant.settlement_context([], []) == ""
+
+
+# --- each month on its own, the way the tab shows it -----------------------
+
+# One Durban consignment that sold across the turn of the month: R 30 000,00
+# in August and R 20 000,00 in September, with R 25 000,00 paid against it.
+SPANNING = [
+    {"consignment_id": 300, "dn": 1855491, "product": "GRAPES SUGRAONE",
+     "market": "DURBAN MARKET", "market_agent": "Grow Port Natal", "cartons_sold": 75,
+     "price": 400.0, "sales_total": 30000.0, "last_sale": "2026-08-29",
+     "date_received": "2026-08-27", "group_date": "2026-08-27", "qty_received": 125},
+    {"consignment_id": 300, "dn": 1855491, "product": "GRAPES SUGRAONE",
+     "market": "DURBAN MARKET", "market_agent": "Grow Port Natal", "cartons_sold": 50,
+     "price": 400.0, "sales_total": 20000.0, "last_sale": "2026-09-02",
+     "date_received": "2026-08-27", "group_date": "2026-08-27", "qty_received": 125},
+]
+SPAN_PAID = [{"accsale": "DUR*13*1", "dn": 1855491, "date": "2026-09-05", "gross": 25000.0,
+              "nett": 21250.0,
+              "lines": [{"product": "GRAPES SUGRAONE", "sales_total": 25000.0}]}]
+
+
+def test_a_consignment_that_crossed_the_month_is_owed_in_both():
+    """The wrong answer this fixes: asked what September still owed, the chat
+    had only the all-time lines, each dated by its first sale, so a Durban
+    consignment that started in August and sold on into September counted
+    wholly as August and September came out far too low."""
+    months = {m["month"]: m for m in assistant.month_settlement(SPANNING, SPAN_PAID)}
+    assert months["2026-08"]["sold"] == 30000.0
+    assert months["2026-09"]["sold"] == 20000.0
+    # Paid oldest first: August's R 30 000,00 takes the R 25 000,00 first.
+    assert months["2026-08"]["owed"] == 5000.0
+    assert months["2026-09"]["owed"] == 20000.0
+
+
+def test_the_months_add_up_to_the_whole():
+    from app import tracking
+
+    months = assistant.month_settlement(SPANNING, SPAN_PAID)
+    whole = tracking.payment_status(SPANNING, SPAN_PAID)["still_to_come"]
+    assert round(sum(m["owed"] for m in months), 2) == whole == 25000.0
+
+
+def test_each_month_is_the_figure_the_tab_shows_with_that_month_open():
+    from app import analytics, tracking
+
+    for m in assistant.month_settlement(SPANNING, SPAN_PAID):
+        lo, hi = analytics.period_bounds(month=m["month"])
+        tab = tracking.payment_status(SPANNING, SPAN_PAID, frozenset(), lo, hi)
+        assert m["owed"] == tab["still_to_come"]
+        assert m["paid"] == tab["total_paid"]
+
+
+def test_the_chat_is_told_to_answer_a_month_from_the_month_table():
+    text = assistant.settlement_context(SPANNING, SPAN_PAID)
+    assert "### Month by month" in text
+    assert "2026-09 | 20 000,00 |" in text
+    assert "- 2026-09: DURBAN MARKET R 20 000,00 (1 line) = R 20 000,00" in text
+    assert "never filter or add these lines up" in text
+    assert "Never work a month's figure out by adding up outstanding lines" in assistant.SYSTEM
+
+
+def test_a_month_holding_a_credit_says_so_and_still_adds_up():
+    """A return booked in September against August's sales leaves September
+    below zero. The market line and the credit together must equal the month."""
+    rows = SPANNING + [{
+        "consignment_id": 300, "dn": 1855491, "product": "GRAPES SUGRAONE",
+        "market": "DURBAN MARKET", "market_agent": "Grow Port Natal", "cartons_sold": -60,
+        "price": 400.0, "sales_total": -24000.0, "last_sale": "2026-09-10",
+        "date_received": "2026-08-27", "group_date": "2026-08-27", "qty_received": 125}]
+    months = {m["month"]: m for m in assistant.month_settlement(rows, [])}
+    sept = months["2026-09"]
+    assert sept["owed"] == -4000.0
+    text = assistant.settlement_context(rows, [])
+    assert "2026-09 comes out below zero" in text

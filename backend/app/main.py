@@ -1557,7 +1557,11 @@ async def ask_assistant(
         except Exception:  # noqa: BLE001 -- a lost history is not a lost answer
             history = []
     try:
-        answer = await run_in_threadpool(assistant.ask, question, rows, payments, history)
+        # The lines closed off on Tracking, so "still owed" in the chat is the
+        # figure on the screen behind it, not one that still counts them.
+        closed = await _closed_refs(user)
+        answer = await run_in_threadpool(assistant.ask, question, rows, payments, history,
+                                         closed)
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -1587,7 +1591,7 @@ async def run_analysis(thread_id: str | None = Form(None),
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
     try:
-        out = await assistant.analyse(rows, payments)
+        out = await assistant.analyse(rows, payments, await _closed_refs(user))
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
     question = "What does next month look like, and what should I buy?"

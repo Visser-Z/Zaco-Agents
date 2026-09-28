@@ -168,6 +168,8 @@ about payment from the nett column: an empty nett means the sales report did \
 not print that figure, not that the money has not arrived. If the settlement \
 section is present, it has the answer; use it, and quote its figures.
 
+For a question about one month ("what is still owed for September"), answer from the "Month by month" table in that section and nowhere else. Never work a month's figure out by adding up outstanding lines: a line is one consignment over every day it sold, dated by its first sale, and one that started in August and kept selling into September belongs partly to each. The table has already split them, exactly as the Tracking tab does.
+
 All money is South African Rand. Write amounts as "R 12 500,00".
 
 Two limits you must respect rather than work around:
@@ -567,7 +569,38 @@ class AssistantError(RuntimeError):
 MAX_OUTSTANDING = 60
 
 
-def settlement_context(rows: list[dict], payments: list[dict]) -> str:
+def month_settlement(rows: list[dict], payments: list[dict],
+                     closed=frozenset()) -> list[dict]:
+    """Each month's own sales: what they sold for, what has been paid for
+    them, and what is still owed on them, market by market.
+
+    Exactly the call the Tracking tab makes when a month is open. Every sale is
+    settled against the whole book first, and the month then only decides
+    which sales are reported, so a month answers for its own sales and the
+    months add up to the whole. Nothing is left for the model to add up.
+    """
+    months = sorted({d.strftime("%Y-%m") for r in rows if (d := analytics.row_date(r))})
+    out = []
+    for month in months:
+        lo, hi = analytics.period_bounds(month=month)
+        status = tracking.payment_status(rows, payments, closed, lo, hi)
+        sold = sum(analytics.row_value(r) for r in tracking.in_period(rows, lo, hi))
+        out.append({
+            "month": month,
+            "sold": round(sold, 2),
+            "paid": status["total_paid"],
+            "owed": status["still_to_come"],
+            "lines": status["batches_outstanding"],
+            "credit": status.get("credit_value") or 0.0,
+            "markets": [{"market": m["market"], "agents": m.get("agents"),
+                         "owed": m["owed"], "lines": m["items"]}
+                        for m in status.get("outstanding_markets") or []],
+        })
+    return out
+
+
+def settlement_context(rows: list[dict], payments: list[dict],
+                       closed=frozenset()) -> str:
     """What has been paid and what is still owed, market by market.
 
     This block exists because of a real wrong answer. Asked what Durban still
@@ -584,7 +617,7 @@ def settlement_context(rows: list[dict], payments: list[dict]) -> str:
     """
     if not rows:
         return ""
-    status = tracking.payment_status(rows, payments or [])
+    status = tracking.payment_status(rows, payments or [], closed)
     out = ["## Payment and what is still owed (computed by the app, do not recalculate)",
            "The `nett` column on the consignment rows below is a column the SALES report "
            "leaves blank. It is NOT whether a consignment has been paid. What was paid "
@@ -604,10 +637,42 @@ def settlement_context(rows: list[dict], payments: list[dict]) -> str:
         out.append(f"Paid but matching nothing on the book: {len(status['unmatched'])} "
                    f"payments.")
 
+    months = month_settlement(rows, payments or [], closed)
+    if months:
+        out.append("")
+        out.append("### Month by month (exact; the same figures as the Tracking tab with "
+                   "that month open)")
+        out.append("A month here is the month the fruit SOLD in. Each month answers only for "
+                   "its own sales, and the months add up to the totals above. For any "
+                   "question about a particular month, answer from this table and nowhere "
+                   "else.")
+        out.append("month | sold (R) | paid for it (R, nett) | still owed on it (R) | "
+                   "lines outstanding")
+        for m in months:
+            out.append(f"{m['month']} | {_fmt(m['sold'])} | {_fmt(m['paid'])} | "
+                       f"{_fmt(m['owed'])} | {m['lines']}")
+        owing = [m for m in months if m["markets"] or m["credit"]]
+        if owing:
+            out.append("")
+            out.append("Still owed in each month, by market (exact). Where a month also holds "
+                       "a credit, it is given after the markets: the markets less the credit "
+                       "is that month's figure in the table above.")
+            for m in owing:
+                parts = ", ".join(f"{x['market']} {_rand(x['owed'])} ({x['lines']} "
+                                  f"line{'' if x['lines'] == 1 else 's'})"
+                                  for x in m["markets"]) or "no market owes anything"
+                if m["credit"]:
+                    parts += f", less {_rand(-m['credit'])} of credit"
+                out.append(f"- {m['month']}: {parts} = {_rand(m['owed'])}")
+        negative = [m for m in months if m["owed"] < 0]
+        for m in negative:
+            out.append(f"({m['month']} comes out below zero: returns booked that month "
+                       f"reversed sales made earlier, so it holds a credit, not a debt.)")
+
     markets = status.get("outstanding_markets") or []
     if markets:
         out.append("")
-        out.append("### Still owed, by market (exact)")
+        out.append("### Still owed, all months together, by market (exact)")
         out.append("market | agent | owed (R) | lines | oldest")
         for m in markets:
             out.append(f"{m['market']} | {m.get('agents') or ''} | {_fmt(m['owed'])} | "
@@ -616,9 +681,14 @@ def settlement_context(rows: list[dict], payments: list[dict]) -> str:
     lines = status.get("outstanding") or []
     if lines:
         out.append("")
-        out.append(f"### Every outstanding line ({min(len(lines), MAX_OUTSTANDING)} of "
-                   f"{len(lines)}, biggest first)")
-        out.append("market | agent | delivery note | product | sold (R) | paid (R) | owed (R) | date")
+        out.append(f"### Every outstanding line, all months together "
+                   f"({min(len(lines), MAX_OUTSTANDING)} of {len(lines)}, biggest first)")
+        out.append("Each line is one consignment across ALL the days it sold, dated by the "
+                   "day it FIRST sold. A consignment that started in one month and carried on "
+                   "into the next belongs partly to each, so never filter or add these lines "
+                   "up to get a month's figure: use the month table above.")
+        out.append("market | agent | delivery note | product | sold (R) | paid (R) | "
+                   "owed (R) | first sold")
         for r in lines[:MAX_OUTSTANDING]:
             out.append(" | ".join([
                 str(r.get("market") or ""), str(r.get("market_agent") or ""),
@@ -628,14 +698,17 @@ def settlement_context(rows: list[dict], payments: list[dict]) -> str:
     return "\n".join(out)
 
 
-def data_block(rows: list[dict], payments: list[dict] | None = None) -> str:
+def data_block(rows: list[dict], payments: list[dict] | None = None,
+               closed=frozenset()) -> str:
     """Everything the model is given: what happened, then what is expected.
 
     Built in one place so a question and the panel always see the same book.
+    `closed` is the lines the team has closed off on Tracking, so the chat's
+    outstanding figures are the ones on the screen.
     """
     parts = [build_context(rows)]
     if rows:
-        parts.append(settlement_context(rows, payments or []))
+        parts.append(settlement_context(rows, payments or [], closed))
         parts.append(forecast_context(rows, payments or []))
         parts.append(where_context(scorecard.build(rows, payments or [])))
     return "\n\n".join(p for p in parts if p)
@@ -864,7 +937,8 @@ def conversation(history: list[dict] | None, question: str) -> list[dict]:
 
 def ask(question: str, rows: list[dict],
         payments: list[dict] | None = None,
-        history: list[dict] | None = None) -> str:
+        history: list[dict] | None = None,
+        closed=frozenset()) -> str:
     """Answer `question` against the recorded sales `rows`.
 
     `history` is the conversation this question belongs to, so a follow-up can
@@ -885,7 +959,7 @@ def ask(question: str, rows: list[dict],
         # follow-up question cheap. It re-caches whenever new sales are saved.
         {
             "type": "text",
-            "text": data_block(rows, payments),
+            "text": data_block(rows, payments, closed),
             "cache_control": {"type": "ephemeral"},
         },
     ]
@@ -962,7 +1036,8 @@ async def _one_call(client, system: list[dict], prompt: str, max_tokens: int,
         raise
 
 
-async def analyse(rows: list[dict], payments: list[dict] | None = None) -> dict:
+async def analyse(rows: list[dict], payments: list[dict] | None = None,
+                  closed=frozenset()) -> dict:
     """Run the analyst panel and synthesise a buying recommendation.
 
     The specialists run concurrently, so the wall clock is roughly one call plus
@@ -983,7 +1058,7 @@ async def analyse(rows: list[dict], payments: list[dict] | None = None) -> dict:
             "There are no saved sales to analyse yet. Process a round of PDFs and save first."
         )
 
-    context = data_block(rows, payments)
+    context = data_block(rows, payments, closed)
     block = {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}}
 
     client = anthropic.AsyncAnthropic(api_key=key)

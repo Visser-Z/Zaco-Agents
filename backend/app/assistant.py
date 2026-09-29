@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import date
 
 from . import analytics, forecast, procurement, scorecard, tracking
 
@@ -177,6 +178,21 @@ are questions, not debts: every carton may already be paid for, or the book \
 may be missing a sales report. When asked what to chase, what is really owed, \
 or who to phone, give the money to chase and name the rest separately as \
 things to check.
+
+Where each kind of answer lives. Every section below is computed by the app, \
+the same figures the screens show; quote them rather than working anything out:
+  money paid, owed or outstanding     "Payment and what is still owed"
+  one month's money                   its "Month by month" table
+  stock on hand, on the floor, unsold "Stock on hand, as of today"
+  one month's stock on hand           "Still on hand, by the month it arrived"
+  one day, or a run of days           "Sales per day"
+  what sells where, and through whom  "What sells at each market"
+  what to order, how much, where      "The buy plan"
+  what next month looks like          "Projection"
+  where a product pays best           "Where to send it"
+If a question is about something the app shows, one of these has it. Only say \
+the book has nothing on a subject after checking the section it belongs in, \
+and then say which section you checked and what it said.
 
 All money is South African Rand. Write amounts as "R 12 500,00".
 
@@ -719,6 +735,155 @@ def settlement_context(rows: list[dict], payments: list[dict],
     return "\n".join(out)
 
 
+# --- every screen, in words ----------------------------------------------
+# The rule these follow: anything a screen shows, the chat is handed, computed
+# by the same call that screen makes. Asked what was on hand for September, the
+# chat said there was no stock on hand at all, and it was right about what it
+# had been given: the Stock on Hand block had never been passed to it. A
+# question the app can answer on screen must never be one the chat cannot.
+
+# How many trading days the day-by-day block covers, newest first. Two months
+# answers "what did we sell on the 17th" without crowding out the rest.
+DAILY_DAYS = 62
+
+
+def _tier_word(tier: str | None) -> str:
+    return {"red": "red (14 days or more)", "orange": "orange (7 to 13 days)",
+            "green": "green (under 7 days)"}.get(tier or "", tier or "")
+
+
+def stock_context(rows: list[dict], closed=frozenset(), today=None) -> str:
+    """Stock on hand, as the Tracking tab shows it, and per arrival month."""
+    if not rows:
+        return ""
+    today = today or date.today()
+    soh = tracking.stock_on_hand(rows, today, closed)
+    out = ["## Stock on hand, as of today (computed by the app, the Tracking tab's "
+           "Stock on Hand block, do not recalculate)",
+           "Cartons still unsold on the market floor: what each consignment was sent, less "
+           "what it has sold. Also called what is on the floor, what is sitting, or unsold "
+           "stock. Coloured by days since it arrived: green under 7 days, orange 7 to 13, "
+           "red 14 or more.",
+           f"Total: {_count(soh['cartons_left'])} cartons over {soh['items']} lines at "
+           f"{len(soh['markets'])} markets; red {soh['counts'].get('red', 0)}, orange "
+           f"{soh['counts'].get('orange', 0)}, green {soh['counts'].get('green', 0)}."]
+    if not soh["markets"]:
+        out.append("Nothing is on hand: every carton sent has sold.")
+        return "\n".join(out)
+
+    out += ["", "### By market", "market | agent | cartons left | lines | red | orange | green"]
+    for m in soh["markets"]:
+        out.append(f"{m['market']} | {m.get('agents') or ''} | {_count(m['cartons_left'])} | "
+                   f"{m['items']} | {m.get('red', 0)} | {m.get('orange', 0)} | {m.get('green', 0)}")
+
+    out += ["", "### Every line on hand, oldest first within each market",
+            "market | agent | delivery note | product | arrived | days on hand | sent | "
+            "left | colour"]
+    for m in soh["markets"]:
+        for r in m.get("lines") or []:
+            out.append(" | ".join([
+                str(r.get("market") or m["market"]), str(r.get("market_agent") or ""),
+                str(r.get("dn") or ""), str(r.get("product") or ""),
+                str(r.get("arrived") or ""), str(r.get("days_on_hand") or 0),
+                _count(r.get("cartons_sent") or 0), _count(r.get("cartons_left") or 0),
+                _tier_word(r.get("tier"))]))
+
+    # "What is on hand for September" is what September put on the floor and
+    # has not sold yet: the Tracking tab with that month open, exactly.
+    months = sorted({str(r["arrived"])[:7] for m in soh["markets"]
+                     for r in m.get("lines") or [] if r.get("arrived")})
+    if months:
+        out += ["", "### Still on hand, by the month it arrived (the Tracking tab with that "
+                    "month open)",
+                "A question about stock on hand for a month means the stock that ARRIVED in "
+                "that month and is still unsold today.",
+                "month arrived | cartons left | lines | markets"]
+        for month in months:
+            lo, hi = analytics.period_bounds(month=month)
+            part = tracking.stock_on_hand(rows, today, closed, lo, hi)
+            where = ", ".join(f"{m['market']} {_count(m['cartons_left'])}"
+                              for m in part["markets"])
+            out.append(f"{month} | {_count(part['cartons_left'])} | {part['items']} | {where}")
+    return "\n".join(out)
+
+
+def daily_context(rows: list[dict], payments: list[dict], closed=frozenset(),
+                  today=None) -> str:
+    """Sales per day, as the Tracking tab shows it: what sold, where, and how
+    much of each day's sales has been paid."""
+    if not rows:
+        return ""
+    days = tracking.compute(rows, payments or [], today=today or date.today(),
+                            closed=closed)["sales_by_day"]["days"]
+    recent = sorted(days, key=lambda d: d["date"], reverse=True)[:DAILY_DAYS]
+    out = [f"## Sales per day, the last {len(recent)} trading days (computed by the app, the "
+           f"Tracking tab's Sales per day block, do not recalculate)",
+           "Each day is what sold THAT day, net of returns, and how much of that day's "
+           "sales has been paid for so far. Use this for any question about a particular "
+           "day or run of days instead of adding up consignment rows.",
+           "date | sold (R) | cartons | returned | paid for (R, nett) | still owed (R) | "
+           "by market"]
+    for d in recent:
+        markets = ", ".join(f"{m['market']} {_rand(m['value'])}"
+                            for m in d.get("markets") or [])
+        out.append(f"{d['date']} | {_fmt(d['value'])} | {_count(d['cartons'])} | "
+                   f"{_count(d.get('returned') or 0)} | {_fmt(d.get('paid') or 0)} | "
+                   f"{_fmt(d.get('owed') or 0)} | {markets}")
+    return "\n".join(out)
+
+
+def markets_context(rows: list[dict]) -> str:
+    """Which products sell at which market, through which agent, as Insights
+    shows them market by market."""
+    groups = analytics.market_groups(rows, "month") if rows else []
+    if not groups:
+        return ""
+    out = ["## What sells at each market (exact, the Insights tab's markets)",
+           "market | products and their agents, biggest first"]
+    for g in groups:
+        out.append(f"### {g['label']}: {_rand(g['value'])}, {_count(g['cartons'])} cartons")
+        for p in (g.get("products") or [])[:12]:
+            agents = ", ".join(p.get("agents") or [])
+            out.append(f"- {p['label']}: {_rand(p['value'])}, {_count(p['cartons'])} cartons, "
+                       f"{p['lines']} consignments{f', via {agents}' if agents else ''}")
+    return "\n".join(out)
+
+
+def plan_block(rows: list[dict], payments: list[dict], today=None) -> str:
+    """The Procurement tab's plan, for a week and for a month side by side, so
+    "what should I order this week" has an answer without a recalculation."""
+    if not rows:
+        return ""
+    week = procurement.build(rows, payments or [], today=today, days=7)
+    month = procurement.build(rows, payments or [], today=today, days=30)
+    if not month["lines"]:
+        return ""
+    by_week = {l["product"]: l for l in week["lines"]}
+    tw, tm = week["totals"], month["totals"]
+    out = ["## The buy plan, the Procurement tab (computed by the app, do not recalculate)",
+           "What to take on, less what is already on the floor, and where to send it. Every "
+           "rand is what the market is expected to return, never a margin.",
+           f"For the next 7 days: take on {_count(tw['cartons'])} cartons over "
+           f"{tw['to_take_on']} lines, expected back {_rand(tw['expected_value'])}.",
+           f"For the next month: take on {_count(tm['cartons'])} cartons over "
+           f"{tm['to_take_on']} lines, expected back {_rand(tm['expected_value'])}. Room to "
+           f"grow: {_count(tm['growth_cartons'])} more cartons worth about "
+           f"{_rand(tm['growth_worth'])}, plus {tm['trials']} test loads.",
+           "product | priority | take on, 7 days | take on, month | on the floor | send to | "
+           "expected back, month (R) | room to grow | test load"]
+    for l in month["lines"]:
+        w = by_week.get(l["product"], {})
+        grow = f"+{_count(l['headroom']['cartons'])}" if l.get("headroom") else ""
+        trial = (f"{_count(l['trial']['cartons'])} to {l['trial']['market']}"
+                 if l.get("trial") else "")
+        where_to = (f"{l['market']} via {l['market_agent']}" if l.get("market")
+                    else "no destination on record")
+        out.append(f"{l['product']} | {l['priority']} | {_count(w.get('take_on', 0))} | "
+                   f"{_count(l['take_on'])} | {_count(l['on_hand'])} | {where_to} | "
+                   f"{_fmt(l['expected_value'])} | {grow} | {trial}")
+    return "\n".join(out)
+
+
 def data_block(rows: list[dict], payments: list[dict] | None = None,
                closed=frozenset()) -> str:
     """Everything the model is given: what happened, then what is expected.
@@ -730,6 +895,10 @@ def data_block(rows: list[dict], payments: list[dict] | None = None,
     parts = [build_context(rows)]
     if rows:
         parts.append(settlement_context(rows, payments or [], closed))
+        parts.append(stock_context(rows, closed))
+        parts.append(daily_context(rows, payments or [], closed))
+        parts.append(markets_context(rows))
+        parts.append(plan_block(rows, payments or []))
         parts.append(forecast_context(rows, payments or []))
         parts.append(where_context(scorecard.build(rows, payments or [])))
     return "\n\n".join(p for p in parts if p)

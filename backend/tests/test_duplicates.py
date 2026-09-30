@@ -34,8 +34,8 @@ def test_matching_statement_gets_a_nonblocking_warning(monkeypatch):
     dup, fresh = rows
     flag = next(f for f in dup.flags if f.field == "stm_no")
     assert flag.severity == "warning"
-    assert "Already saved on 2026-08-01" in flag.message
-    assert "Farmers Trust" in flag.message
+    assert "Already on the book (saved on 2026-08-01)" in flag.message
+    assert flag.code == "duplicate"
     assert not dup.blocking            # a warning must not block the append
     assert fresh.flags == []           # the unseen statement is untouched
 

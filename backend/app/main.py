@@ -38,6 +38,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
+from . import overlap
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -150,67 +151,32 @@ async def add_lookup(
 # --- extraction -----------------------------------------------------------
 
 async def flag_duplicates(user: User | None, rows: list[StatementRow]) -> None:
-    """Warn on rows whose statement is already in the saved history.
+    """Mark rows whose day is already on the book. See ``overlap``.
 
-    Guards against appending the same PDF to the workbook twice. The check is on
-    the statement number (Consignment ID / Account Sales No) -- the finest-grain
-    identity, and already the workbook's unique key -- NOT the Delivery ID: one
-    delivery legitimately spans several save rounds, so matching on it would
-    false-warn on the normal multi-round workflow.
-
-    Non-blocking (a warning): re-processing a corrected statement is legitimate
-    and the save upserts rather than duplicating in the database. Skipped when no
+    Matched on the consignment and the day it sold, whatever statement number
+    the report files it under, and compared with what was saved so a report
+    that disagrees with the book says so. The review screen leaves every
+    marked row out: what is on the book stays as it was saved. Skipped when no
     user is signed in (local dev has no history to compare against).
     """
     if user is None:
         return
-    stm_nos = sorted({r.stm_no for r in rows if r.stm_no is not None})
-    if not stm_nos:
+    cons = sorted({int(r.consignment_id) for r in rows if r.consignment_id})
+    stms = sorted({int(r.stm_no) for r in rows if r.stm_no is not None and not r.consignment_id})
+    parts = []
+    if cons:
+        parts.append(f"consignment_id.in.({','.join(map(str, cons))})")
+    if stms:
+        parts.append(f"stm_no.in.({','.join(map(str, stms))})")
+    if not parts:
         return
-    where = {"stm_no": f"in.({','.join(str(n) for n in stm_nos)})"}
+    columns = "stm_no,consignment_id,market_agent,created_at,sale_day,sales_total,cartons_sold"
     try:
-        existing = await db_get(
-            user, "statements", {"select": "stm_no,consignment_id,market_agent,created_at,sale_day", **where}
-        )
-    except Exception:  # noqa: BLE001 -- before migration 0010 there is no such column
-        try:
-            existing = await db_get(
-                user, "statements",
-                {"select": "stm_no,market_agent,created_at,sale_day", **where}
-            )
-        except Exception:  # noqa: BLE001 -- a duplicate warning is not worth failing an import
-            return
-    # An account sale covers several consignments, each its own row, so identity
-    # is the pair. Keyed on the statement alone, a consignment would be called a
-    # duplicate because a *different* product on the same account sale was saved.
-    # The trading day is part of identity now: the same consignment selling on
-    # Monday and on Wednesday is two rows, not one recorded twice.
-    seen: dict[tuple, dict] = {}
-    for rec in existing:
-        day = (rec.get("sale_day") or "")[:10] or None
-        seen[(rec["stm_no"], rec.get("consignment_id") or 0, day)] = rec
-        seen.setdefault((rec["stm_no"], None, day), rec)
-    for row in rows:
-        # The day it sold, matching the table's own grain -- row.date is the
-        # consignment's date, shared by every day that consignment traded.
-        sold = row.last_sale or row.date
-        day = sold.isoformat() if sold else None
-        rec = seen.get((row.stm_no, row.consignment_id or 0, day))
-        if rec is None and row.consignment_id is None:
-            rec = seen.get((row.stm_no, None, day))
-        if rec is None:
-            continue
-        when = (rec.get("created_at") or "")[:10]
-        agent = rec.get("market_agent") or "another agent"
-        on = f" on {when}" if when else ""
-        row.flags.append(
-            Flag(
-                field="stm_no",
-                severity="warning",
-                code="duplicate",
-                message=f"Already saved{on} ({agent}) — adding it again will duplicate it in the workbook.",
-            )
-        )
+        existing = await db_get(user, "statements",
+                                {"select": columns, "or": f"({','.join(parts)})", "limit": "10000"})
+    except Exception:  # noqa: BLE001 -- a duplicate warning is not worth failing an import
+        return
+    overlap.mark_saved(rows, existing)
 
 
 def _merge_nett(nett_map: dict[int, dict], more: dict[int, dict]) -> None:
@@ -566,6 +532,11 @@ async def extract(
     # being open, or on the operator opening the same one.
     await _save_delivery_notes(user, fresh)
 
+    # A day read twice in this drop -- a day's report and the week's over it --
+    # is one day. The spare copy is set aside before anything is counted, so
+    # the stock carried forward does not sell the same cartons twice.
+    rows, repeats = overlap.collapse_batch(rows)
+
     # Column D depends on the whole group, so it is resolved across the batch.
     apply_group_dates(rows)
 
@@ -575,8 +546,9 @@ async def extract(
     stock.carry_forward(rows, await _sold_before(user, rows))
     stock.flag_impossible_stock(rows)
 
-    # Warn on any statement already in the saved history (same PDF twice).
+    # Days already on the book stay as they were saved; say where they differ.
     await flag_duplicates(user, rows)
+    rows += repeats
 
     # A database behind the code cannot record anything, and the operator should
     # hear that before reviewing 70 rows, not after pressing Save.

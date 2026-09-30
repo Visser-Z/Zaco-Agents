@@ -229,3 +229,27 @@ def test_the_sheet_says_what_the_figures_are_not(source: str) -> None:
     """It leaves the building, so it has to carry the consignment caveat."""
     sheet = source[source.index("function orderSheet(d)"):source.index("function printOrderSheet")]
     assert "consignment" in sheet and "never a margin" in sheet
+
+
+def test_the_page_lays_out_at_the_device_width(source: str) -> None:
+    """Without a doctype the page ran in quirks mode, and without a viewport a
+    phone or tablet drew it at desktop width and shrank it to fit."""
+    head = source[:600]
+    assert head.startswith("<!doctype html>")
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1' in head
+
+
+def test_phone_rules_do_not_reach_into_tables_nested_in_the_plan(source: str) -> None:
+    """The plan's rows become cards on a phone. A market table sits inside an
+    opened card, and a rule written as `.plan-table tr` turned its rows into
+    blocks as well, so every rule for the rows has to name the plan's own."""
+    rules = [l for l in source.splitlines()
+             if "table.rep-table.plan-table" in l and " tr" in l and "{" in l]
+    assert rules
+    assert all("> tbody > tr" in l or "> tfoot > tr" in l for l in rules), rules
+
+
+def test_the_dock_log_fills_the_panel(source: str) -> None:
+    """.ask-log caps a log at 52vh and comes after .dock-log, so without the
+    stronger rule the question box floated halfway down the dock."""
+    assert ".dock-log.ask-log { max-height: none" in source

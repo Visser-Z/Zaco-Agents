@@ -1,3 +1,10 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<!-- Without this a phone or tablet lays the page out at desktop width and
+     shrinks it to fit, so every figure is too small to read or tap. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
 <title>ZacoAgents</title>
 <style>
   /* Light only, one theme. Neutrals carry the interface; colour is reserved for
@@ -970,6 +977,8 @@
   .dock-input { flex: 1; min-width: 0; }
   .dock-note { padding: 0 16px 10px; font-size: 11px; color: var(--ink-faint); }
   @media (max-width: 520px) { .dock { width: 100%; } }
+  /* Where the dock covers the page, the page behind it holds still. */
+  @media (max-width: 1179px) { body.dock-open { overflow: hidden; } }
 
   .banner.good { background: var(--ok-tint); border-color: color-mix(in srgb, var(--ok) 28%, var(--line)); }
   .banner.good .bi { color: var(--ok); }
@@ -981,6 +990,10 @@
   .ask-open-card { padding: 18px 20px 14px; }
   .ask-open-card .ask-chips { margin: 4px 0 2px; }
   .ask-log { padding: 20px 22px; max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+  /* In the dock the log fills the panel and the question box sits at the foot;
+     the 52vh cap above is for a log laid in a page, and was leaving the box
+     floating halfway down the dock. */
+  .dock-log.ask-log { max-height: none; min-height: 0; }
   .ask-q { align-self: flex-end; max-width: 78%; background: var(--accent); color: #fff; padding: 9px 14px; border-radius: 14px 13px 3px 13px; font-size: 13px; font-weight: 550; }
   .ask-a { align-self: flex-start; max-width: 88%; background: var(--surface-2); padding: 12px 15px; border-radius: 14px 13px 13px 3px; font-size: 13px; line-height: 1.6; }
   .ask-a p { margin: 0 0 9px; } .ask-a p:last-child { margin-bottom: 0; }
@@ -1196,6 +1209,188 @@
     .summary { grid-template-columns: repeat(2, 1fr); } .choices { grid-template-columns: 1fr; }
     .main { padding: 20px 14px 50px; }
     .kpis { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* -------- tablets and phones --------------------------------------- */
+  /* The same screens on a tablet or a phone, not a separate app: every rule
+     below only rearranges what is already there. */
+
+  /* A finger, not a mouse: targets big enough to hit, and form fields at 16px,
+     below which iOS zooms the whole page in when one is tapped. Hover-only
+     controls are shown outright, since there is no hover to reveal them. */
+  @media (pointer: coarse) {
+    .btn, .trk-toggle, .seg button, .pg-trend, .ask-open { min-height: 38px; }
+    .tab { min-height: 44px; }
+    .dock-btn { min-width: 40px; min-height: 40px; }
+    input, select, textarea { font-size: 16px !important; }
+    .dt-del { opacity: 1; }
+    .smkt-head, .pg-head, .wp-head { min-height: 44px; }
+  }
+
+  /* Tablet, and anything narrower. */
+  @media (max-width: 1024px) {
+    .topbar { padding: 0 16px; }
+    /* Five tabs do not fit a phone, and wrapping them doubles the sticky bar.
+       They scroll sideways instead, and the open one is scrolled into view. */
+    .tabs { padding: 0 10px; overflow-x: auto; scrollbar-width: none;
+            -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { flex: none; white-space: nowrap; }
+    /* In one column the fixed-height boxes are a scroll inside a scroll. */
+    .trk-grid > .trk-block[data-block="owed"],
+    .trk-grid > .trk-block[data-block="stock"] { height: auto; }
+    .trk-grid > .trk-block[data-block="owed"] > .trk-body,
+    .trk-grid > .trk-block[data-block="stock"] > .trk-body { overflow: visible; }
+    .plan-card, .ins-card { padding-left: 16px; padding-right: 16px; }
+  }
+  @media (min-width: 1001px) and (max-width: 1024px) {
+    /* Side by side again on a landscape tablet, where they fit. */
+    .trk-grid > .trk-block[data-block="owed"],
+    .trk-grid > .trk-block[data-block="stock"] { height: 540px; }
+    .trk-grid > .trk-block[data-block="owed"] > .trk-body,
+    .trk-grid > .trk-block[data-block="stock"] > .trk-body { overflow-y: auto; }
+  }
+
+  /* Portrait tablet and phone. */
+  @media (max-width: 820px) {
+    /* Procurement: each line of the plan becomes a small card. The column
+       headings would be off the side of a phone, so each figure names itself. */
+    table.rep-table.plan-table { display: block; width: 100%; min-width: 0; }
+    table.rep-table.plan-table > thead, table.rep-table.plan-table > colgroup { display: none; }
+    table.rep-table.plan-table > tbody > tr.plan-row {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+      grid-template-areas: "prod prod prod open" "take ret grow grow" "pri pri where where";
+      gap: 6px 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+    table.rep-table.plan-table > tbody > tr.plan-row > td { padding: 0; border: 0; width: auto; text-align: left; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(1) { grid-area: pri; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(2) { grid-area: prod; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(3) { grid-area: take; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(4) { grid-area: ret; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(5) { grid-area: grow; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(6) { grid-area: where; justify-self: end; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(7) { grid-area: open; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(3)::before { content: "Take on"; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(4)::before { content: "Should return"; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(5)::before { content: "Room to grow"; }
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(3)::before,
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(4)::before,
+    table.rep-table.plan-table > tbody > tr.plan-row > td:nth-child(5)::before {
+      display: block; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--ink-faint); }
+    table.rep-table.plan-table .pl-prod, table.rep-table.plan-table .pl-sub { white-space: normal; }
+    /* The priority stripe runs down the whole card, not just its first cell. */
+    table.rep-table.plan-table > tbody > tr.plan-row > td:first-child { box-shadow: none; }
+    table.rep-table.plan-table > tbody > tr.plan-row { padding-left: 11px; box-shadow: inset 3px 0 0 var(--line-strong); }
+    table.rep-table.plan-table > tbody > tr.plan-row.t-crit { box-shadow: inset 3px 0 0 var(--crit-mark); }
+    table.rep-table.plan-table > tbody > tr.plan-row.t-warn { box-shadow: inset 3px 0 0 var(--warn-mark); }
+    table.rep-table.plan-table > tbody > tr.plan-row.t-ok { box-shadow: inset 3px 0 0 var(--ok-mark); }
+    table.rep-table.plan-table > tbody > tr.plan-market > td { white-space: normal; line-height: 1.6; }
+    table.rep-table.plan-table > tbody > tr:not(.plan-row) { display: block; }
+    table.rep-table.plan-table > tbody > tr:not(.plan-row) > td { display: block; width: auto; }
+    table.rep-table.plan-table > tbody > tr.plan-detail > td { padding-left: 0; padding-right: 0; }
+    table.rep-table.plan-table > tbody, table.rep-table.plan-table > tfoot { display: block; }
+    table.rep-table.plan-table > tfoot > tr { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+    table.rep-table.plan-table > tfoot > tr > td { display: block; width: auto; border: 0; }
+    table.rep-table.plan-table > tfoot > tr > td:empty { display: none; }
+
+    table.rep-table.plan-table > tbody > tr.plan-row:hover > td, table.rep-table.plan-table > tbody > tr.plan-row.open > td { background: none; }
+    table.rep-table.plan-table > tbody > tr.plan-row.open { background: var(--surface-2); border-radius: 8px 8px 0 0; }
+    table.rep-table.plan-table > tbody > tr.plan-detail > td { padding: 8px 0 14px; }
+    table.rep-table.plan-table .pl-grow { white-space: normal; }
+  }
+
+  /* Phone. */
+  @media (max-width: 640px) {
+    table.rep-table.plan-table > tbody > tr.plan-row {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+      grid-template-areas: "prod prod open" "take ret ret" "grow grow grow" "pri where where"; }
+    .topbar { height: 52px; gap: 8px; padding: 0 12px;
+              padding-left: max(12px, env(safe-area-inset-left));
+              padding-right: max(12px, env(safe-area-inset-right)); }
+    .brand { font-size: 14px; gap: 8px; }
+    /* The status keeps its coloured dot; its words are in the tooltip. */
+    .mode { font-size: 0; gap: 0; padding: 7px; }
+    .user-chip { padding: 3px 4px; gap: 4px; }
+    .user-chip .who, .user-chip .role { display: none; }
+    .tabs { top: 52px; }
+    .tab { padding: 12px 12px; }
+    .main { padding: 16px 16px calc(64px + env(safe-area-inset-bottom)); }
+    .screen h1, .page-title { font-size: 22px; }
+
+    /* Figures: two across, and a long rand amount allowed to shrink rather
+       than wrap its "R" onto a line of its own. */
+    .kpis, .kpis.kpis-2, .kpis.kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .kpi { padding: 12px 12px 11px; }
+    .kpi .kv { font-size: clamp(15px, 4.6vw, 20px); white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; }
+    .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .card, .ins-card, .plan-card { border-radius: 12px; }
+    .ins-card, .plan-card { padding: 14px 12px; }
+    .ins-card-head { flex-wrap: wrap; }
+
+    /* Tracking. Each block's heading wraps its toggle under the title, and a
+       list line puts its detail under its name, so the amount keeps its own
+       column on the right instead of being pushed off the card. */
+    .trk-head { padding: 12px 14px; flex-wrap: wrap; }
+    .trk-body { padding: 4px 12px 12px; }
+    .trk-list li, .trk-list.trk-owed li { grid-template-columns: minmax(0, 1fr) auto; }
+    .trk-list li > .trk-p { grid-column: 1; grid-row: 1; }
+    .trk-list li > .trk-n { grid-column: 2; grid-row: 1; }
+    .trk-list li > .trk-d { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
+    .trk-list li > .xbtn, .trk-list li > button:not(.trk-p) { grid-column: 2; grid-row: 2; justify-self: end; }
+    .trk-list.trk-sig li, .trk-list.trk-stock li { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .trk-list.trk-sig li > :first-child, .trk-list.trk-stock li > :first-child { grid-column: 1; grid-row: 1; }
+    .trk-list.trk-sig li > .trk-p, .trk-list.trk-stock li > .trk-p { grid-column: 2; }
+    .trk-list.trk-sig li > .trk-n, .trk-list.trk-stock li > .trk-n { grid-column: 3; }
+    .trk-list.trk-sig li > .trk-d, .trk-list.trk-stock li > .trk-d { grid-column: 2 / -1; }
+    .trk-list li.smonth { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .smkt-head { grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 2px; }
+    .smkt-sum { grid-column: 2 / -1; grid-row: 2; white-space: normal; font-family: var(--sans); }
+    .smkt-tiers { grid-column: 3; grid-row: 1; justify-content: flex-end; }
+    .sdn-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .sdn-head .sdn-sub { grid-column: 1 / -1; }
+    .trk-cols { columns: 1; }
+    .flag-head .trk-n { margin-left: 0; }
+    .flag-act .btn, .flag-pick { flex: 1 1 100%; }
+    .dbreak-head { flex-wrap: wrap; }
+    table.sday-items col.c-n { width: 26%; }
+
+    /* Insights: the name takes the line, its count drops beneath it. */
+    .pg-head, .pg-item { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+    .pgroups.pg-market .pg-head, .pgroups.pg-market .pg-item { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .pgroups.pg-market .pg-c { display: none; }
+    .pg-name { overflow: hidden; flex-wrap: wrap; row-gap: 0; }
+    .pg-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .pg-name em { flex-basis: 100%; padding-left: 19px; }
+    .pg-items .pg-name em { padding-left: 0; }
+    /* A product under a fruit: its full name on one line, its figures under it. */
+    .pg-items .pg-item { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+    .pg-items .pg-item > .pg-name { grid-column: 1 / -1; flex-wrap: nowrap; }
+    .pg-items .pg-item > .pg-v { grid-column: 1; text-align: left; padding-left: 25px; }
+    .pg-items .pg-item > .pg-c { grid-column: 2; }
+    .pg-items .pg-item .bt { white-space: normal; }
+    .bar { grid-template-columns: minmax(0, 40%) 1fr auto; gap: 8px; }
+
+    /* Reports: a figures table keeps readable columns and scrolls sideways in
+       its card, rather than overprinting its numbers to fit the phone. */
+    .rep-scroll { margin: 0 -12px; padding: 0 12px; }
+    /* A grid cell is as wide as its widest table unless told it may shrink,
+       and the page clips sideways, so a wide table was cut off, not scrolled. */
+    .ins-grid, .ins-grid-2, .workspace { grid-template-columns: minmax(0, 1fr); }
+    .ins-grid > *, .ins-grid-2 > *, .workspace > *, .trk-grid > * { min-width: 0; }
+    table.rep-table { min-width: 560px; }
+    table.rep-table th:first-child, table.rep-table td:first-child { width: 190px; }
+    table.rep-table.where-table { min-width: 820px; }
+    table.rep-table.where-table th:first-child, table.rep-table.where-table td:first-child { width: 170px; }
+    .rep-controls > * { flex: 1 1 140px; }
+    .rep-months { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .rep-months::-webkit-scrollbar { display: none; }
+    .rep-months button { flex: none; }
+
+    /* The ask panel takes the whole phone, clear of the home bar. */
+    .dock { width: 100%; }
+    .dock-bar { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   }
 </style>
 
@@ -1699,6 +1894,15 @@ async function loadCodes() {
 function syncModuleNav() {
   document.querySelectorAll(".tab").forEach(b =>
     b.classList.toggle("active", b.dataset.module === S.module));
+  // On a phone the tab bar scrolls sideways; keep the open tab in sight.
+  const open = document.querySelector(".tab.active");
+  const bar = open && open.parentElement;
+  if (bar && bar.scrollWidth > bar.clientWidth
+      && (open.offsetLeft < bar.scrollLeft
+          || open.offsetLeft + open.offsetWidth > bar.scrollLeft + bar.clientWidth)) {
+    bar.scrollTo({ left: open.offsetLeft - (bar.clientWidth - open.offsetWidth) / 2,
+                   behavior: "smooth" });
+  }
 }
 function setModule(m) {
   if (S.module === m) return;
@@ -1720,6 +1924,9 @@ function setModule(m) {
 function go(screen) { S.screen = screen; render(); main.scrollTo(0, 0); }
 function render() {
   syncModuleNav();
+  const kept = document.querySelector('.chart-wrap[data-keep="day"]');
+  if (kept) S.chartScroll = kept.scrollLeft;
+  setTimeout(settleCharts);
   renderDock();
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
@@ -1730,13 +1937,23 @@ function render() {
   if (S.screen === "review") return renderReview();
 }
 
+/** A chart that scrolls opens on its newest days, and stays where it was put
+ *  when the page redraws under it (clicking a day redraws the whole tab). */
+function settleCharts() {
+  const walls = document.querySelectorAll('.chart-wrap[data-keep="day"]');
+  walls.forEach(w => {
+    w.scrollLeft = S.chartReset || S.chartScroll == null ? w.scrollWidth : S.chartScroll;
+  });
+  if (walls.length) S.chartReset = false;
+}
+
 // ------------------------------------------------------------- tracking
 // Three questions the owner asks, answered from saved data: what has been paid
 // and what is still owed, how much sold each day, and what is not moving.
 
 async function loadTracking() {
   const T = S.tracking;
-  T.loading = true; T.error = null; render();
+  T.loading = true; T.error = null; S.chartReset = true; render();
   try {
     const qs = new URLSearchParams();
     if (T.from) qs.set("from", T.from);
@@ -2091,7 +2308,11 @@ function dayChart(days, metric, selected) {
   const { names, rows, colour } = chartSeries(chron, metric);
   if (!names.length) return `<p class="ins-empty">No products on these days.</p>`;
 
-  const W = 900, H = 300, L = 62, R = 12, T = 14, B = 44;
+  // On a phone a fixed drawing squeezed to the screen shrinks its labels to
+  // nothing, so there each day gets room of its own and the chart scrolls.
+  const narrow = window.matchMedia("(max-width: 640px)").matches;
+  const W = narrow ? Math.max(340, rows.length * 44 + 74) : 900;
+  const H = 300, L = 62, R = 12, T = 14, B = 44;
   const iw = W - L - R, ih = H - T - B;
   const peak = Math.max(...rows.map(r => r.total), 0) || 1;
   // A round number above the tallest bar, so the gridlines read as figures.
@@ -2136,7 +2357,7 @@ function dayChart(days, metric, selected) {
         <button class="${metric === "cartons" ? "on" : ""}" onclick="event.stopPropagation(); setTrackingChart('cartons')">Cartons</button>
       </div>
     </div>
-    <div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" class="daychart" role="img"
+    <div class="chart-wrap"${narrow ? ` data-keep="day"` : ""}><svg viewBox="0 0 ${W} ${H}" class="daychart" role="img"${narrow ? ` style="width:${W}px;max-width:none"` : ""}
       aria-label="Sales per day by product" preserveAspectRatio="xMidYMid meet">
       ${grid}
       <line class="ca" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>

@@ -141,6 +141,11 @@ def is_reversal(rec: dict) -> bool:
     return reconcile._num(rec.get("gross")) < 0
 
 
+def link_key(accsale, product) -> tuple:
+    """How a manual link names a payment line: its account sale and product."""
+    return (str(accsale or "").strip().upper(), reconcile.normalise_product(product))
+
+
 def _payment_lines(payments: list[dict], sales: list[dict]):
     """Every commodity line of every payment, keyed to what it paid for.
 
@@ -183,7 +188,15 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
             gross = reconcile._num(l.get("sales_total"))
             if not gross:
                 continue
-            cid = reconcile.line_consignment(rec, l, bound, products_of)
+            # A link the operator made by hand beats everything: it is the one
+            # match here a person has looked at. Then the FMS id, then the
+            # delivery note the market typed.
+            # Put on the line when payments are read (see main._apply_links),
+            # so every screen that settles payments honours it without being
+            # told: Tracking, the chat and the reports cannot disagree.
+            manual = l.get("linked_consignment")
+            cid = manual if manual is not None else reconcile.line_consignment(
+                rec, l, bound, products_of)
             key = (("c", cid) if cid is not None
                    else ("k", reconcile._key(rec.get("dn"), l.get("product"))))
             line = {"gross": gross, "left": gross, "date": day,
@@ -195,7 +208,13 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
                                 if l.get("sold") is not None else None),
                     # Where the line would have fallen back to, so a line bound
                     # by FMS id can still be counted against its delivery note.
-                    "ref": ("k", reconcile._key(rec.get("dn"), l.get("product")))}
+                    "ref": ("k", reconcile._key(rec.get("dn"), l.get("product"))),
+                    # Enough to name the line to a person, and to check it.
+                    "accsale": rec.get("accsale"), "line_no": l.get("line_no"),
+                    "delivered": l.get("delivered"),
+                    "check": l.get("check"),
+                    "how": ("manual" if manual is not None
+                            else "fms" if cid is not None else "note")}
             if gross < 0:
                 credits.append((key, line))
             else:
@@ -291,6 +310,183 @@ def _carton_tally(sales: list[dict], lines: dict[tuple, list[dict]]) -> dict[tup
     return tally
 
 
+# --- payments a person should look at --------------------------------------
+# The matcher is sure of most of what it does: 98% of the money on the live
+# book was placed either to the cent or on a sale that had started selling by
+# the day it was paid. The rest it placed because it had to go somewhere, and
+# that is the part a person should see before it is trusted.
+
+FLAG_KINDS = {
+    "loose": "Paid before that sale started",
+    "unplaced": "No sale to put it on",
+    "elsewhere": "Cartons point to another delivery",
+}
+
+# How far either side of the payment a candidate sale may have started.
+CANDIDATE_DAYS = 45
+
+# Below this, two deliveries sharing a carton count is coincidence, not proof.
+ELSEWHERE_MIN_CARTONS = 10
+
+
+def _rand(value: float) -> str:
+    """R 20 000,00: these messages are read by the operator, not by code."""
+    return "R " + f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _consignment_summary(rows: list[dict], owed: dict) -> dict:
+    first = rows[0]
+    return {
+        "consignment_id": first.get("consignment_id"),
+        "dn": first.get("dn"),
+        "product": first.get("product"),
+        "market": first.get("market"),
+        "market_agent": first.get("market_agent"),
+        "started": min((d for r in rows if (d := _started(r))), default=None),
+        "sold": round(sum(reconcile._num(r.get("sales_total")) for r in rows), 2),
+        "owed": round(sum(owed[id(r)] for r in rows), 2),
+    }
+
+
+def payment_flags(sales: list[dict], payments: list[dict]) -> dict:
+    """Payments the matcher could not be sure of, and where else each could go.
+
+    Three kinds, from strongest doubt to weakest:
+
+      unplaced   nothing on the book could take the money: the delivery note
+                 has no sales of that product, or its sales are paid already
+      elsewhere  the payment says how many cartons were delivered, and that is
+                 the size of a DIFFERENT delivery of the same product at the
+                 same market, not the one its note names
+      loose      it was put on a sale that had not started selling by the day
+                 it was paid; a payment cannot be for fruit not yet sold, so
+                 either an earlier sales report is missing or it belongs to
+                 another delivery
+
+    A line someone has already decided on (kept, or linked by hand) is never
+    flagged again. Every flag offers the sales it could belong to instead: the
+    same product at the same market, started near the payment, still owing.
+    """
+    filled = valued(sales)
+    owed, _, _, _, extra = _allocate(filled, payments)
+
+    by_cons: dict = defaultdict(list)
+    for r in filled:
+        if r.get("consignment_id"):
+            by_cons[int(r["consignment_id"])].append(r)
+    summaries = {cid: _consignment_summary(rows, owed) for cid, rows in by_cons.items()}
+    sizes: dict = defaultdict(set)
+    for cid, rows in by_cons.items():
+        for r in rows:
+            for q in (r.get("qty_amended"), r.get("qty_received")):
+                if q:
+                    sizes[cid].add(int(q))
+
+    def decided(line: dict) -> bool:
+        return line.get("how") == "manual" or line.get("check") == "keep"
+
+    def candidates(line: dict, exclude=()) -> list[dict]:
+        market = payment_details.destination(line.get("accsale") or "").get("market")
+        product = reconcile.normalise_product(line.get("product"))
+        paid_on = line.get("date") or ""
+        out = []
+        for cid, summ in summaries.items():
+            if cid in exclude:
+                continue
+            if reconcile.normalise_product(summ["product"]) != product:
+                continue
+            if market and summ["market"] != market:
+                continue
+            started = summ["started"] or ""
+            if paid_on and started:
+                gap = abs((date.fromisoformat(paid_on[:10])
+                           - date.fromisoformat(started[:10])).days)
+                if gap > CANDIDATE_DAYS:
+                    continue
+            else:
+                gap = CANDIDATE_DAYS
+            out.append({**summ, "_gap": gap,
+                        "fits": bool(started and paid_on and started <= paid_on)})
+        # Sales that had started by the payment and still owe come first.
+        out.sort(key=lambda c: (not c["fits"], c["owed"] <= 0.01, c["_gap"]))
+        return [{k: v for k, v in c.items() if k != "_gap"} for c in out[:6]]
+
+    flags: dict[tuple, dict] = {}
+
+    def flag(kind: str, line: dict, amount: float, message: str, placed_on=None) -> None:
+        key = link_key(line.get("accsale"), line.get("product"))
+        f = flags.get(key)
+        if f is None:
+            f = flags[key] = {
+                "kind": kind, "label": FLAG_KINDS[kind],
+                "accsale": line.get("accsale"), "product": line.get("product"),
+                "date": line.get("date"), "dn": line.get("dn"),
+                "delivered": line.get("delivered"), "amount": 0.0,
+                "message": message, "placed_on": [], "candidates": [],
+            }
+        f["amount"] = round(f["amount"] + amount, 2)
+        if placed_on and placed_on not in f["placed_on"]:
+            f["placed_on"].append(placed_on)
+
+    # Unplaced: money left on a line after every pass.
+    for pool in extra["lines"].values():
+        for line in pool:
+            if line["left"] > 0.01 and not decided(line):
+                flag("unplaced", line, line["left"],
+                     f"Nothing on the book could take {_rand(line['left'])} of this payment: "
+                     f"delivery note {line.get('dn')} has no unpaid sales of this product.")
+
+    # Elsewhere and loose, from where the money actually went.
+    for pl in extra["placements"]:
+        line, row = pl["line"], pl["row"]
+        if decided(line):
+            continue
+        cid = int(row["consignment_id"]) if row.get("consignment_id") else None
+        on = summaries.get(cid) if cid else None
+        d = line.get("delivered")
+        if d is not None and cid and sizes.get(cid) and int(d) not in sizes[cid]:
+            # Only when the count belongs to exactly one other delivery of the
+            # same product: an amended quantity the book never saw is not that.
+            # A different delivery note, and a count too big to match by
+            # chance: two loads of five cartons say nothing, two of 336 do. A
+            # sibling line on the same note is not a note that is wrong.
+            others = [c for c in candidates(line, exclude=(cid,))
+                      if c["dn"] != row.get("dn") and int(d) >= ELSEWHERE_MIN_CARTONS
+                      and int(d) in sizes.get(c["consignment_id"], set())]
+            if len(others) == 1:
+                flag("elsewhere", line, pl["amount"],
+                     f"It says {int(d)} cartons were delivered. That is the size of "
+                     f"delivery note {others[0]['dn']}, not of {row.get('dn')}, where it "
+                     f"was put.", on)
+                continue
+        # Loose on its own is not doubt. Measured on the live book, most of it
+        # was a delivery paid to the cent whose payment is dated a few days
+        # before the book dates the last of its sales. It only means something
+        # when the WHOLE delivery had not sold a thing by the day it was paid.
+        first = (on or {}).get("started")
+        if pl["pass"] == "loose" and first and line.get("date") and first > line["date"]:
+            flag("loose", line, pl["amount"],
+                 f"Paid on {line.get('date')}, but the only place it could go was delivery "
+                 f"note {row.get('dn')}, which did not start selling until {first}. A payment "
+                 f"cannot be for fruit that had not sold yet: either an earlier sales report "
+                 f"is missing, or it belongs to another delivery.", on)
+
+    for f in flags.values():
+        here = {p["consignment_id"] for p in f["placed_on"]}
+        f["candidates"] = candidates(
+            {"accsale": f["accsale"], "product": f["product"], "date": f["date"]}, exclude=here)
+
+    order = {"unplaced": 0, "elsewhere": 1, "loose": 2}
+    items = sorted(flags.values(), key=lambda f: (order[f["kind"]], -f["amount"]))
+    return {
+        "items": items,
+        "count": len(items),
+        "value": round(sum(f["amount"] for f in items), 2),
+        "decided": sum(1 for p in payments for l in p.get("lines") or []
+                       if l.get("check") == "keep" or l.get("linked_consignment") is not None),
+    }
+
+
 def line_key(row: dict) -> tuple:
     """What a sale is grouped and reported under: its consignment where it has
     one, otherwise the delivery note and commodity it always was."""
@@ -343,17 +539,28 @@ def _allocate(sales: list[dict], payments: list[dict]):
     nett = {id(r): 0.0 for r in sales}
     gross_paid = {id(r): 0.0 for r in sales}
 
+    # Which pass placed each rand. "exact" is a payment that adds up to the
+    # sale to the cent; "dated" went to a sale that had started selling by the
+    # day it was paid; "loose" is what was left, put on whatever still owed.
+    # The last is the one a person should look at.
+    placements: list[dict] = []
+    stage = {"pass": "exact"}
+
     def pay(row: dict, line: dict, amount: float) -> None:
         line["left"] -= amount
         left[id(row)] -= amount
         nett[id(row)] += amount * line["rate"]
         gross_paid[id(row)] += amount
+        if amount > 0.005:
+            placements.append({"line": line, "row": row, "amount": amount,
+                               "pass": stage["pass"]})
 
     def settle_pool(rows: list[dict], pool: list[dict]) -> None:
         # A sale with no date cannot be placed in the order, so it settles last
         # rather than taking credit from a sale known to be older.
         rows = sorted(rows, key=lambda r: (selling_day(r) is None, selling_day(r) or ""))
         pool = sorted(pool, key=_by_date)
+        stage["pass"] = "exact"
         for row in rows:
             start, end = _started(row), selling_day(row)
             if left[id(row)] <= 0 or not start or not end:
@@ -368,6 +575,7 @@ def _allocate(sales: list[dict], payments: list[dict]):
             for line in match:
                 pay(row, line, line["left"])
         for dated_only in (True, False):
+            stage["pass"] = "dated" if dated_only else "loose"
             for line in pool:
                 for row in rows:
                     if line["left"] <= 0.005:
@@ -404,6 +612,8 @@ def _allocate(sales: list[dict], payments: list[dict]):
     extra = {
         "reversals": reversals,
         "cartons": _carton_tally(sales, lines),
+        "placements": placements,
+        "lines": lines,
         "gross_paid": {k: round(v, 2) for k, v in gross_paid.items()},
         "bound": bound,
         "sold_keys": set(by_consignment) | set(by_ref),
@@ -1263,6 +1473,8 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
                                      settled=(owed_by_row, paid_by_row)),
         "slow_stock": slow_stock(sales, today, closed, lo, hi),
         "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi),
+        # Across the whole book: a payment to check does not belong to a month.
+        "flags": payment_flags(sales, payments),
         "span": date_span(sales),
         "periods": available_periods(sales),
         "filter": {"from": d_start, "to": d_end, "month": month, "week": week},

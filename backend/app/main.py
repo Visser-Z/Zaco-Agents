@@ -944,7 +944,42 @@ async def _saved_payments(user: User | None) -> list[dict]:
     for r in rows:
         r["date"] = r.pop("paid_on", None)
         r["lines"] = r.get("lines") or []
+    _apply_checks(rows, await _payment_checks(user))
     return rows
+
+
+async def _payment_checks(user: User | None) -> list[dict]:
+    """What people decided about payments the matcher was unsure of."""
+    if user is None:
+        return []
+    try:
+        return await db_get(user, "payment_checks", {
+            "select": "accsale,product,decision,consignment_id,note,created_at",
+            "limit": "5000"})
+    except Exception:  # noqa: BLE001 -- before migration 0023 nothing is decided
+        return []
+
+
+def _apply_checks(payments: list[dict], checks: list[dict]) -> None:
+    """Put each decision onto the payment line it is about.
+
+    Done here, as the payments are read, rather than passed to the matcher:
+    every screen that settles payments reads them through this function, so a
+    link made on Tracking is the link the chat, the reports and Procurement
+    see as well, without any of them having to be told.
+    """
+    if not checks:
+        return
+    by_key = {tracking.link_key(c.get("accsale"), c.get("product")): c for c in checks}
+    for rec in payments:
+        for line in rec.get("lines") or []:
+            c = by_key.get(tracking.link_key(rec.get("accsale"), line.get("product")))
+            if not c:
+                continue
+            if c.get("decision") == "link" and c.get("consignment_id") is not None:
+                line["linked_consignment"] = int(c["consignment_id"])
+            elif c.get("decision") == "keep":
+                line["check"] = "keep"
 
 
 async def _closed_refs(user: User | None) -> set[str]:
@@ -1023,8 +1058,61 @@ async def get_tracking(
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
     closed = await _closed_refs(user)
-    return tracking.compute(sales, payments, start=date_from, end=date_to,
-                            closed=closed, month=month, week=week)
+    out = tracking.compute(sales, payments, start=date_from, end=date_to,
+                           closed=closed, month=month, week=week)
+    # What has been decided, so a decision can be seen and undone.
+    out["flags"]["decisions"] = await _payment_checks(user)
+    return out
+
+
+@app.post("/api/tracking/flags/decide")
+async def decide_payment_flag(
+    accsale: str = Form(...),
+    product: str = Form(...),
+    decision: str = Form(...),
+    consignment_id: int | None = Form(None),
+    note: str | None = Form(None),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Settle a flagged payment by hand: keep it where it is, or link it.
+
+    Nothing in the sales or payment history is changed. The decision is kept
+    beside them and applied every time payments are read, so it can always be
+    seen, and undone, and the original match comes back when it is.
+    """
+    if user is None:
+        raise HTTPException(401, "Sign in to check a payment.")
+    if decision not in ("keep", "link"):
+        raise HTTPException(400, f"Unknown decision \u201c{decision}\u201d.")
+    if decision == "link" and consignment_id is None:
+        raise HTTPException(400, "Say which sale the payment belongs to.")
+    try:
+        await db_post(user, "payment_checks", [{
+            "accsale": accsale.strip(), "product": product.strip(), "decision": decision,
+            "consignment_id": consignment_id if decision == "link" else None,
+            "note": note, "created_by": user.id}],
+            upsert=True, on_conflict="accsale,product")
+    except Exception as exc:  # noqa: BLE001
+        if (migration := _pending_migration(exc)):
+            raise HTTPException(
+                400, f"Checking payments needs the {migration} migration, which has not "
+                     f"been run in the Supabase SQL editor yet.") from exc
+        raise HTTPException(400, f"Could not record that: {exc}") from exc
+    return {"decided": decision, "accsale": accsale, "product": product}
+
+
+@app.post("/api/tracking/flags/undo")
+async def undo_payment_flag(
+    accsale: str = Form(...),
+    product: str = Form(...),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Take a decision back; the payment is matched by the rules again."""
+    if user is None:
+        raise HTTPException(401, "Sign in to undo a check.")
+    await db_delete(user, "payment_checks",
+                    {"accsale": f"eq.{accsale.strip()}", "product": f"eq.{product.strip()}"})
+    return {"undone": True}
 
 
 @app.get("/api/reports/periods")

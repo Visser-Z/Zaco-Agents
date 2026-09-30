@@ -668,6 +668,19 @@ def settlement_context(rows: list[dict], payments: list[dict],
     if status.get("unmatched"):
         out.append(f"Paid but matching nothing on the book: {len(status['unmatched'])} "
                    f"payments.")
+    # The Tracking tab's "payments to check": what the matcher could not place
+    # with certainty, each waiting for a person to keep it or move it.
+    flags = tracking.payment_flags(rows, payments or [])
+    if flags["count"]:
+        out.append(f"Payments waiting to be checked by hand on the Tracking tab: "
+                   f"{flags['count']}, {_rand(flags['value'])}. Until each is settled, "
+                   f"what is paid and owed may be out by that much:")
+        for f in flags["items"][:20]:
+            out.append(f"- {f['accsale']}, paid {f['date']}, {_rand(f['amount'])}, "
+                       f"{f['product']}: {f['label']}. {f['message']}")
+    else:
+        out.append("Payments waiting to be checked by hand: none. Every payment is placed "
+                   "by the rules with certainty, or has been checked by a person.")
 
     months = month_settlement(rows, payments or [], closed)
     if months:

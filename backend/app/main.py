@@ -971,7 +971,19 @@ def _apply_checks(payments: list[dict], checks: list[dict]) -> None:
     if not checks:
         return
     by_key = {tracking.link_key(c.get("accsale"), c.get("product")): c for c in checks}
+    unlisted = tracking.link_key("", tracking.NOT_LISTED)[1]
     for rec in payments:
+        # Money the market paid without itemising it has no line to carry a
+        # link, so a link for it becomes the line, for exactly that money.
+        c = by_key.get(tracking.link_key(rec.get("accsale"), tracking.NOT_LISTED))
+        listed = sum(float(l.get("sales_total") or 0) for l in rec.get("lines") or [])
+        gap = round(float(rec.get("gross") or 0) - listed, 2)
+        itemised = any(tracking.link_key("", l.get("product"))[1] == unlisted
+                       for l in rec.get("lines") or [])
+        if (c and c.get("decision") == "link" and c.get("consignment_id") is not None
+                and gap > 0.01 and not itemised):
+            rec["lines"] = [*(rec.get("lines") or []),
+                            {"product": tracking.NOT_LISTED, "sales_total": gap}]
         for line in rec.get("lines") or []:
             c = by_key.get(tracking.link_key(rec.get("accsale"), line.get("product")))
             if not c:

@@ -1864,7 +1864,7 @@ function flagsBlock(F) {
       </div>
       <p class="flag-why">${esc(f.message)}</p>
       <div class="flag-act">
-        ${f.kind !== "unplaced" ? `<button class="btn ghost sm" onclick="keepFlag(${i})"
+        ${!["unplaced", "unlisted"].includes(f.kind) ? `<button class="btn ghost sm" onclick="keepFlag(${i})"
           title="The system put it in the right place. Stop flagging it.">It's right</button>` : ""}
         ${(f.candidates || []).length ? `<select id="flagMove${i}" class="flag-pick">
             ${f.candidates.map(c => `<option value="${esc(c.consignment_id)}">${esc(shortDn(c))}</option>`).join("")}

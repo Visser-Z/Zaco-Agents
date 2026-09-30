@@ -141,6 +141,11 @@ def is_reversal(rec: dict) -> bool:
     return reconcile._num(rec.get("gross")) < 0
 
 
+# What a payment paid that the market did not itemise under it. Named like a
+# product so a person's decision about it is kept the way every other one is.
+NOT_LISTED = "Not itemised on the payment"
+
+
 def link_key(accsale, product) -> tuple:
     """How a manual link names a payment line: its account sale and product."""
     return (str(accsale or "").strip().upper(), reconcile.normalise_product(product))
@@ -175,15 +180,29 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
     lines: dict[tuple, list[dict]] = defaultdict(list)
     credits: list[tuple[tuple, dict]] = []
     reversals: list[dict] = []
+    gaps: list[dict] = []
     for rec in payments:
         if is_reversal(rec):
             reversals.append(rec)
             continue
         rec_lines = rec.get("lines") or []
-        base = (sum(reconcile._num(l.get("sales_total")) for l in rec_lines)
-                or reconcile._num(rec.get("gross")))
+        listed = sum(reconcile._num(l.get("sales_total")) for l in rec_lines)
+        paid = reconcile._num(rec.get("gross"))
+        # The Nett is split over what the payment paid, which is its Gross
+        # where the lines under it come to less: Subtropico's SPR*SUB*47500
+        # paid R 14 660,00 and itemised R 2 700,00 of it, and splitting its
+        # Nett over the R 2 700,00 alone gave each line four times its money.
+        base = max(listed, paid) if rec_lines else paid
         nett = reconcile._num(rec.get("nett"))
         day = str(rec.get("date") or "")[:10] or None
+        if rec_lines and paid - listed > 0.01:
+            gaps.append({"gross": round(paid - listed, 2), "left": round(paid - listed, 2),
+                         "date": day, "rate": nett / base if base else 0.0,
+                         "dn": rec.get("dn"), "product": NOT_LISTED,
+                         "cartons": None, "ref": None, "accsale": rec.get("accsale"),
+                         "line_no": None, "delivered": None, "check": None,
+                         "fms_id": rec.get("fms_id"), "how": "gap",
+                         "listed": round(listed, 2), "paid": round(paid, 2)})
         for l in rec_lines:
             gross = reconcile._num(l.get("sales_total"))
             if not gross:
@@ -230,7 +249,7 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
             credit["left"] += take
             if credit["left"] >= -0.005:
                 break
-    return lines, reversals, bound
+    return lines, reversals, bound, gaps
 
 
 # Why a line is still owed, from the cartons.
@@ -320,6 +339,7 @@ FLAG_KINDS = {
     "loose": "Paid before that sale started",
     "unplaced": "No sale to put it on",
     "elsewhere": "Cartons point to another delivery",
+    "unlisted": "Paid without a product line",
 }
 
 # How far either side of the payment a candidate sale may have started.
@@ -436,6 +456,15 @@ def payment_flags(sales: list[dict], payments: list[dict]) -> dict:
                      f"Nothing on the book could take {_rand(line['left'])} of this payment: "
                      f"delivery note {line.get('dn')} has no unpaid sales of this product.")
 
+    # Unlisted: the payment paid more than it itemised, and no whole days of
+    # its delivery's unpaid sales come to the difference.
+    for gap in extra["gaps"]:
+        if gap["left"] > 0.01:
+            flag("unlisted", gap, gap["left"],
+                 f"This payment came to {gap['paid']:,.2f} but the market only listed "
+                 f"{gap['listed']:,.2f} of products under it. The other {gap['left']:,.2f} "
+                 f"is not itemised, and no run of unpaid sales on that delivery adds up to it.")
+
     # Elsewhere and loose, from where the money actually went.
     for pl in extra["placements"]:
         line, row = pl["line"], pl["row"]
@@ -471,12 +500,20 @@ def payment_flags(sales: list[dict], payments: list[dict]) -> dict:
                  f"cannot be for fruit that had not sold yet: either an earlier sales report "
                  f"is missing, or it belongs to another delivery.", on)
 
+    gap_of = {g["accsale"]: g for g in extra["gaps"]}
     for f in flags.values():
+        if f["kind"] == "unlisted":
+            # No product to go by: the delivery's own sales that still owe.
+            rows = _delivery_rows(gap_of[f["accsale"]], filled, extra["bound"])
+            mine = {int(r["consignment_id"]) for r in rows if r.get("consignment_id")}
+            f["candidates"] = sorted((summaries[c] for c in mine if summaries[c]["owed"] > 0.01),
+                                     key=lambda c: c["started"] or "")[:6]
+            continue
         here = {p["consignment_id"] for p in f["placed_on"]}
         f["candidates"] = candidates(
             {"accsale": f["accsale"], "product": f["product"], "date": f["date"]}, exclude=here)
 
-    order = {"unplaced": 0, "elsewhere": 1, "loose": 2}
+    order = {"unplaced": 0, "unlisted": 1, "elsewhere": 2, "loose": 3}
     items = sorted(flags.values(), key=lambda f: (order[f["kind"]], -f["amount"]))
     return {
         "items": items,
@@ -496,6 +533,79 @@ def line_key(row: dict) -> tuple:
     return ("k", reconcile._key(row.get("dn"), row.get("product")))
 
 
+def _by_day(rows: list[dict]) -> list[tuple[str, list[dict]]]:
+    days: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        if (d := selling_day(r)):
+            days[d].append(r)
+    return sorted(days.items())
+
+
+def _one_run(rows: list[dict], line: dict, left: dict) -> list[dict]:
+    """The one unbroken run of selling days a payment line pays for exactly.
+
+    Only days nothing has been paid on yet and that had sold by the day the
+    line was paid. To the cent, and to the carton where the line counts them.
+    Two runs that would both fit are a guess, so neither is taken.
+    """
+    if not line.get("date"):
+        return []
+    days = _by_day(rows)
+    fits: list[list[dict]] = []
+    for i in range(len(days)):
+        money = cartons = 0.0
+        run: list[dict] = []
+        for day, group in days[i:]:
+            if day > line["date"]:
+                break
+            if any(abs(left[id(r)] - max(reconcile._num(r.get("sales_total")), 0.0)) > 0.005
+                   or left[id(r)] <= 0.005 for r in group):
+                break
+            run += group
+            money += sum(left[id(r)] for r in group)
+            cartons += sum(analytics.row_cartons(r) for r in group)
+            if money > line["left"] + 0.005:
+                break
+            if abs(money - line["left"]) < 0.005 and (
+                    line.get("cartons") is None or abs(cartons - line["cartons"]) <= CARTON_SLACK):
+                fits.append(run)
+                break
+        if len(fits) > 1:
+            return []
+    return fits[0] if len(fits) == 1 else []
+
+
+def _delivery_rows(gap: dict, sales: list[dict], bound: dict) -> list[dict]:
+    """The sales of the delivery a payment was for: by its FMS id where that is
+    tied to a delivery, else by its delivery note at the market it was paid at."""
+    delivery = bound.get(str(gap["fms_id"])) if gap.get("fms_id") else None
+    if delivery is not None:
+        return [r for r in sales if reconcile.delivery_of(r.get("consignment_id")) == delivery]
+    if reconcile._degenerate_ref(gap.get("dn")):
+        return []
+    market = payment_details.destination(gap.get("accsale") or "").get("market")
+    dn = reconcile._norm_dn(gap["dn"])
+    return [r for r in sales if reconcile._norm_dn(r.get("dn")) == dn
+            and (not market or r.get("market") == market)]
+
+
+def _whole_days(rows: list[dict], gap: dict, left: dict) -> list[dict]:
+    """The delivery's unpaid sales, oldest day first, if whole days of them
+    come to the unitemised money to the cent; otherwise nothing."""
+    owing = [r for r in rows if left[id(r)] > 0.005
+             and gap.get("date") and (selling_day(r) or "9999") <= gap["date"]]
+    taken: list[dict] = []
+    money = 0.0
+    for _, group in _by_day(owing):
+        taken += group
+        money += sum(left[id(r)] for r in group)
+        if abs(money - gap["left"]) < 0.005:
+            return taken
+        if money > gap["left"]:
+            break
+    return []
+
+
 def _allocate(sales: list[dict], payments: list[dict]):
     """Settle each payment against the sale it was actually for.
 
@@ -513,6 +623,18 @@ def _allocate(sales: list[dict], payments: list[dict]):
       3. Anything still left goes to any unpaid sale, oldest first, so a date
          that is out by a day never turns a real payment into credit.
 
+    Between 1 and 2, a line tied to its consignment by FMS id that pays, to the
+    cent and to the carton, for one unbroken run of that consignment's selling
+    days, and for no other run, is the payment for those days. The market pays
+    a run of days at a time, and the oldest-first rule of pass 2 would otherwise
+    put Durban's R 71 100,00 for 1 to 4 September on the August days before
+    them, and call August paid and September owed when it was the other way.
+
+    Last, money a payment paid without itemising it (its Gross above its lines)
+    goes to the unpaid sales of the same delivery, oldest day first, but only
+    when whole days of them add up to it to the cent. Anything else is left for
+    a person to place, and flagged.
+
     Value never decides WHETHER a line matches -- the two reports legitimately
     disagree on what a consignment sold -- only how much of a sale it settles.
 
@@ -520,7 +642,7 @@ def _allocate(sales: list[dict], payments: list[dict]):
     per key, and a dict of what else was found: the reversals, the Gross paid
     per sale, the FMS bindings and which keys had sales behind them).
     """
-    lines, reversals, bound = _payment_lines(payments, sales)
+    lines, reversals, bound, gaps = _payment_lines(payments, sales)
     by_consignment: dict[tuple, list[dict]] = defaultdict(list)
     by_ref: dict[tuple, list[dict]] = defaultdict(list)
     label: dict[tuple, dict] = {}
@@ -555,7 +677,7 @@ def _allocate(sales: list[dict], payments: list[dict]):
             placements.append({"line": line, "row": row, "amount": amount,
                                "pass": stage["pass"]})
 
-    def settle_pool(rows: list[dict], pool: list[dict]) -> None:
+    def settle_pool(rows: list[dict], pool: list[dict], runs: bool = False) -> None:
         # A sale with no date cannot be placed in the order, so it settles last
         # rather than taking credit from a sale known to be older.
         rows = sorted(rows, key=lambda r: (selling_day(r) is None, selling_day(r) or ""))
@@ -574,6 +696,13 @@ def _allocate(sales: list[dict], payments: list[dict]):
                           if abs(sum(l["left"] for l in combo) - left[id(row)]) < 0.005), ())
             for line in match:
                 pay(row, line, line["left"])
+        if runs:
+            for line in pool:
+                if line["left"] <= 0.005 or abs(line["left"] - line["gross"]) >= 0.005:
+                    continue
+                run = _one_run(rows, line, left)
+                for row in run:
+                    pay(row, line, left[id(row)])
         for dated_only in (True, False):
             stage["pass"] = "dated" if dated_only else "loose"
             for line in pool:
@@ -590,10 +719,16 @@ def _allocate(sales: list[dict], payments: list[dict]):
     # The exact ties first, then the fallback on what is still owing.
     for key, rows in by_consignment.items():
         if key in lines:
-            settle_pool(rows, lines[key])
+            settle_pool(rows, lines[key], runs=True)
     for key, rows in by_ref.items():
         if key in lines:
             settle_pool(rows, lines[key])
+
+    # Money paid without a line: whole days of the same delivery, or nothing.
+    stage["pass"] = "unlisted"
+    for gap in gaps:
+        for row in _whole_days(_delivery_rows(gap, sales, bound), gap, left):
+            pay(row, gap, left[id(row)])
 
     owed: dict[int, float] = {}
     paid_nett: dict[int, float] = {}
@@ -614,6 +749,7 @@ def _allocate(sales: list[dict], payments: list[dict]):
         "cartons": _carton_tally(sales, lines),
         "placements": placements,
         "lines": lines,
+        "gaps": gaps,
         "gross_paid": {k: round(v, 2) for k, v in gross_paid.items()},
         "bound": bound,
         "sold_keys": set(by_consignment) | set(by_ref),

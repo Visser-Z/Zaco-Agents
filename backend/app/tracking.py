@@ -199,7 +199,10 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
         base = max(listed, paid) if rec_lines else paid
         nett = reconcile._num(rec.get("nett"))
         day = str(rec.get("date") or "")[:10] or None
-        if rec_lines and not clawback and paid - listed > 0.01:
+        # A payment that lists no products at all is the same thing, all of
+        # it unitemised: Subtropico's SPR*SUB*46255 paid R 3 850,00 on 20
+        # August for delivery 14615's first two days and printed no lines.
+        if not clawback and paid - listed > 0.01:
             gaps.append({"gross": round(paid - listed, 2), "left": round(paid - listed, 2),
                          "date": day, "rate": nett / base if base else 0.0,
                          "dn": rec.get("dn"), "product": NOT_LISTED,
@@ -1004,7 +1007,15 @@ def payment_status(sales: list[dict], payments: list[dict],
         if unexplained(r) < -0.01
         and not ((lo and str(r.get("date") or "")[:10] < lo)
                  or (hi and str(r.get("date") or "")[:10] > hi))]
-    unattributed = reconcile.unattributed(payments)
+    # Payments printed with no products under them, less what whole days of
+    # their own delivery accounted for: only what is still unplaced is news.
+    blank = [g for g in extra["gaps"] if g["listed"] == 0 and g["left"] > 0.01]
+    unattributed = {
+        "count": len(blank),
+        "gross": round(sum(g["left"] for g in blank), 2),
+        "nett": round(sum(g["left"] * g["rate"] for g in blank), 2),
+        "accsales": [g["accsale"] for g in blank if g.get("accsale")],
+    }
 
     outstanding_rows.sort(key=lambda r: r["owed"], reverse=True)
     dates = [d for r in outstanding_rows if (d := r.get("unpaid_since") or r["date"])]

@@ -190,21 +190,29 @@ def test_a_clean_delete_reports_nothing_left_behind(monkeypatch):
     assert (out["remaining"], out["payments_remaining"]) == (0, 0)
 
 
-def test_a_payment_received_in_another_month_goes_with_its_sales(monkeypatch):
-    """An August sale settled in September carries a September paid_on, so a
-    delete scoped to August never touched it. Tracking then reported it as
-    money paid with nothing left to have paid for -- for ever."""
-    db = _DB([_sale("2026-08-01")], [_payment("2026-09-03")], [])
+def test_a_payment_received_in_another_month_stays_for_its_sales_to_come_back(monkeypatch):
+    """An August sale settled in September carries a September paid_on. Deleting
+    August used to delete that payment too, and reloading August then left the
+    sale owing: PRE*BT*397227, R 7 200,00, was lost that way. The payment is the
+    market's record and stays; it is not counted as paid while its sale is gone,
+    and pays the sale again the moment it is loaded back."""
+    sale, pay = _sale("2026-08-01"), _payment("2026-09-03")
+    db = _DB([dict(sale)], [pay], [])
     _wire(monkeypatch, db)
 
     out = asyncio.run(main.delete_history(scope=None, month="2026-08", week=None, user=USER))
     assert out["deleted"] == 1
-    assert out["payments_deleted"] == 1, "the orphaned September payment must go too"
-    assert db.rows["payments"] == []
+    assert out["payments_deleted"] == 0, "September's payment is not August's to delete"
+    assert db.rows["payments"] == [pay]
 
-    after = _track()
-    assert after["payments"]["total_paid"] == 0
-    assert after["payments"]["unmatched"] == []
+    gone = _track()
+    assert gone["payments"]["total_paid"] == 0
+    assert len(gone["payments"]["unmatched"]) == 1
+
+    db.rows["statements"].append(dict(sale))
+    back = _track()
+    assert back["payments"]["still_to_come"] == 0
+    assert back["payments"]["unmatched"] == []
 
 
 def test_a_payment_still_settling_a_surviving_sale_is_kept(monkeypatch):

@@ -244,3 +244,28 @@ def test_a_claw_back_that_also_pays_for_something_still_pays_for_it():
     # The return left R 1 500,00, the claw-back took R 1 488,00: R 12,00 is
     # still to Zaco's credit on the cherries.
     assert status["still_to_come"] == -12.0
+
+
+def test_a_payment_with_no_lines_at_all_pays_the_whole_days_it_adds_up_to():
+    """SPR*SUB*46255 paid R 3 850,00 on 20 August and printed no products. It
+    is delivery 14615's first two days to the cent; the payment of the 25th
+    paid the days after them, line by line."""
+    nec, plum = "NECTARINES OTHER CLASS 1 MEDIUM (DOMPEL JUMBLE 7kg)", "PLUMS BLACK DIAMOND CLASS 1 MEDIUM (DOMPEL JUMBLE 5kg)"
+    sales = [day(239848203, 14615, nec, 5, 1150.0, "2026-08-18", first="2026-08-18", sent=79),
+             day(239848201, 14615, plum, 8, 1480.0, "2026-08-18", first="2026-08-18", sent=13),
+             day(239848203, 14615, nec, 2, 440.0, "2026-08-19", first="2026-08-18", sent=79),
+             day(239848201, 14615, plum, 3, 540.0, "2026-08-19", first="2026-08-18", sent=13),
+             day(239848201, 14615, plum, 2, 200.0, "2026-08-20", first="2026-08-18", sent=13),
+             day(239848203, 14615, nec, 5, 800.0, "2026-08-20", first="2026-08-18", sent=79)]
+    pays = [payment("SPR*SUB*46255", 14615, "2026-08-20", 3610.0, [], fms=108554),
+            payment("SPR*SUB*46424", 14615, "2026-08-25", 1000.0,
+                    [line(1, plum, 2, 200.0, 13), line(3, nec, 5, 800.0, 79)], fms=108554)]
+    status = tracking.payment_status(sales, pays)
+    assert status["still_to_come"] == 0.0
+    assert status["unattributed"]["count"] == 0
+
+    pays[0].update(gross=3000.0, nett=2550.0)   # no whole days come to this: left alone
+    status = tracking.payment_status(sales, pays)
+    assert status["still_to_come"] == 3610.0
+    assert status["unattributed"] == {"count": 1, "gross": 3000.0, "nett": 2550.0,
+                                      "accsales": ["SPR*SUB*46255"]}

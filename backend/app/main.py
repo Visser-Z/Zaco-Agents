@@ -1273,13 +1273,13 @@ async def delete_history(
     # identical from here unless we go back and count.
     payments_left = len(await db_get(
         user, "payments", {"select": "accsale", "and": pay_window, "limit": "20000"}))
-    # Payments whose sales have just gone. A sale made in August and settled in
-    # September has a September paid_on, so deleting August left it behind to be
-    # reported as money paid against nothing, for ever. Cleared by what it
-    # matches rather than by its own date, which is the only thing that ties it
-    # to the period being removed.
-    orphan_payments = await _prune_payments(user)
-    payments += orphan_payments
+    # Payments dated outside the period stay, even where their sales have just
+    # gone. Each one is the market's record of money received, and it matches
+    # its sales again the moment they are loaded back. Clearing them with
+    # their sales lost PRE*BT*397227, R 7 200,00 paid on 1 September for 31
+    # August: August was deleted and reloaded, September's report was not,
+    # and the payment was simply gone. Until the sales return it is listed
+    # as a payment with no matching sale, never counted as paid.
     closed = await _prune_dismissals(user)
 
     # Say plainly what is still there. A delete that removes nothing because the
@@ -1305,44 +1305,6 @@ async def delete_history(
         "from": lo,
         "to": hi,
     }
-
-
-async def _prune_payments(user: User) -> list[dict]:
-    """Recorded payments that no longer match any sale on the book.
-
-    A payment is tied to the period by what it settles, not by the day it was
-    received: an August sale paid in September carries a September date, so a
-    delete scoped to August never touched it and Tracking went on reporting it
-    as money paid, with nothing left to have paid for.
-
-    Only payments matching nothing at all are removed. One that still settles a
-    surviving sale is left alone, whichever period that sale falls in.
-    """
-    payments = await _saved_payments(user)
-    if not payments:
-        return []
-    sales = await _history_rows(user)
-    live_refs = {r.get("payment_refs") for r in sales if r.get("payment_refs")}
-    live_keys = {
-        (str(r.get("supplier_ref")), reconcile.normalise_product(r.get("product")))
-        for r in sales
-    }
-
-    gone: list[dict] = []
-    for pay in payments:
-        accsale = pay.get("accsale")
-        if accsale and any(accsale in (refs or "") for refs in live_refs):
-            continue
-        # Otherwise it is kept only if one of its commodity lines still has a
-        # sale under the same supplier ref -- the fallback the matcher uses.
-        keyed = {(str(pay.get("dn")), reconcile.normalise_product(l.get("product")))
-                 for l in (pay.get("lines") or [])}
-        if keyed & live_keys:
-            continue
-        if not accsale:
-            continue
-        gone += await db_delete(user, "payments", {"accsale": f"eq.{accsale}"})
-    return gone
 
 
 async def _delete_everything(user: User) -> dict:

@@ -148,3 +148,24 @@ def test_a_run_must_match_the_cartons_as_well_as_the_money():
     filled = tracking.valued(sales)
     owed_rows, *_ = tracking._allocate(filled, pays)
     assert owed_rows[id(filled[0])] == 0.0     # oldest first again
+
+
+# --- how long a line has been owed ---------------------------------------------
+
+def test_a_line_is_owed_since_its_oldest_unpaid_sale_not_its_first_sale():
+    """Delivery 1855491Z sold from 27 August. 1 to 4 September is paid, so what
+    is owed has been waiting since the 27th; with the August days paid instead
+    it would be waiting since 1 September."""
+    sales, pays = durban()
+    line = tracking.payment_status(sales, pays)["outstanding"][0]
+    assert line["date"] == "2026-08-27" and line["unpaid_since"] == "2026-08-27"
+
+    pays[0]["gross"] = 56060.0
+    pays[0]["lines"] = [line(1, CELEB, 147, 56060.0, 336)] if False else \
+        [{"line_no": 1, "product": CELEB, "sold": 147, "sales_total": 56060.0, "delivered": 336}]
+    pays[0]["date"] = "2026-09-02"
+    status = tracking.payment_status(sales, pays)
+    owed = status["outstanding"][0]
+    assert owed["date"] == "2026-08-27"
+    assert owed["unpaid_since"] == "2026-09-01"
+    assert status["oldest_outstanding"] == "2026-09-01"

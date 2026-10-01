@@ -896,6 +896,12 @@
   .why em { font-style: normal; font-weight: 400; color: var(--ink-faint); }
   .why.t-debt { color: var(--warn); }
   .why.t-check { color: var(--accent-strong); }
+  /* How long a line has been owed, under its name: the first thing to read
+     when deciding which line to chase. */
+  .owed-when { display: flex; align-items: baseline; gap: 7px; margin-top: 3px;
+               white-space: nowrap; overflow: hidden; }
+  .owed-when .wsig { text-transform: none; letter-spacing: 0; font-size: 10.5px; }
+  .owed-when em { font-style: normal; font-size: 11px; color: var(--ink-faint); }
   @media (max-width: 700px) {
     .smkt-head { grid-template-columns: auto minmax(0, 1fr) auto; }
     .smkt-tiers { grid-column: 2 / -1; justify-content: flex-start; }
@@ -2567,8 +2573,19 @@ function renderTracking() {
       <div class="trk-body"><p class="ins-empty">${message}</p></div></section>`;
 
   // --- outstanding ---------------------------------------------------------
+  /* How long a line has been owed, from its oldest sale still unpaid. Green
+     inside two weeks, which is a normal payment run; orange to a month; red
+     past that. */
+  const owedAge = r => {
+    const since = r.unpaid_since || r.date;
+    const d = ageInDays(since);
+    if (d == null) return "";
+    const tier = d > 30 ? "red" : d > 14 ? "orange" : "green";
+    return `<span class="owed-when"><span class="wsig t-${tier}">${fmtInt(d)} day${d === 1 ? "" : "s"} unpaid</span>
+      <em>since ${esc(niceDate(since) || since)}</em></span>`;
+  };
   const owedRow = r => `<li>
-      ${nameCell(r, undefined, owedWhy(r))}
+      ${nameCell(r, undefined, owedAge(r) + owedWhy(r))}
       <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
       <span class="trk-n num">R ${fmt(r.owed)}</span>
       <button class="xbtn" title="Close this one off"

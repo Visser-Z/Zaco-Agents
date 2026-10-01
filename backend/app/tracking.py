@@ -786,7 +786,7 @@ def owed_by_market(rows: list[dict]) -> list[dict]:
     out = []
     for m in markets.values():
         m["lines"].sort(key=lambda r: r.get("owed", 0.0), reverse=True)
-        days = [d for r in m["lines"] if (d := r.get("date"))]
+        days = [d for r in m["lines"] if (d := r.get("unpaid_since") or r.get("date"))]
         out.append({**m, "agents": " · ".join(sorted(m["agents"])) or None,
                     "owed": round(m["owed"], 2), "items": len(m["lines"]),
                     "oldest": min(days) if days else None})
@@ -869,6 +869,12 @@ def payment_status(sales: list[dict], payments: list[dict],
             matched += 1
             continue
         entry["owed"] = owed
+        # How long the money has been waiting: from the oldest sale on the
+        # line that is still unpaid, not from the line's first sale. A
+        # consignment paid for its first week and not its second has been
+        # owing since the second week began.
+        waiting = [d for r in rows if owed_by_row[id(r)] > 0.005 and (d := selling_day(r))]
+        entry["unpaid_since"] = min(waiting) if waiting else entry["date"]
         entry["status"] = ("credit" if owed < 0
                            else "over" if entry["payment_gross"] else "unpaid")
         # A closed line stays visible on its own list with its value, so closing
@@ -937,7 +943,7 @@ def payment_status(sales: list[dict], payments: list[dict],
     unattributed = reconcile.unattributed(payments)
 
     outstanding_rows.sort(key=lambda r: r["owed"], reverse=True)
-    dates = [r["date"] for r in outstanding_rows if r["date"]]
+    dates = [d for r in outstanding_rows if (d := r.get("unpaid_since") or r["date"])]
     oldest = min(dates) if dates else None
 
     # What is owed, split by why. Only the first two are money to chase; the

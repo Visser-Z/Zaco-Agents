@@ -732,16 +732,23 @@ def settlement_context(rows: list[dict], payments: list[dict],
         out.append("Each line is one consignment across ALL the days it sold, dated by the "
                    "day it FIRST sold. A consignment that started in one month and carried on "
                    "into the next belongs partly to each, so never filter or add these lines "
-                   "up to get a month's figure: use the month table above.")
+                   "up to get a month's figure: use the month table above. 'Unpaid since' "
+                   "is the oldest sale on the line still waiting for money, and 'days "
+                   "unpaid' counts from it to today: that is how long a line has been owed.")
         out.append("market | agent | delivery note | product | sold (R) | paid (R) | "
-                   "owed (R) | first sold | cartons sold | cartons paid for | why")
+                   "owed (R) | first sold | unpaid since | days unpaid | cartons sold | "
+                   "cartons paid for | why")
+        today = date.today()
         for r in lines[:MAX_OUTSTANDING]:
             paid_ctn = r.get("cartons_paid")
+            since = r.get("unpaid_since") or r.get("date")
+            waited = (today - date.fromisoformat(since[:10])).days if since else None
             out.append(" | ".join([
                 str(r.get("market") or ""), str(r.get("market_agent") or ""),
                 str(r.get("dn") or ""), str(r.get("product") or ""),
                 _fmt(r.get("daily_total")), _fmt(r.get("payment_gross")),
                 _fmt(r.get("owed")), str(r.get("date") or ""),
+                str(since or ""), "" if waited is None else str(waited),
                 _count(r.get("cartons_sold") or 0),
                 "not printed" if paid_ctn is None else _count(paid_ctn),
                 tracking.REASONS.get(r.get("reason"), "")]))

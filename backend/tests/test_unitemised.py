@@ -169,3 +169,78 @@ def test_a_line_is_owed_since_its_oldest_unpaid_sale_not_its_first_sale():
     assert owed["date"] == "2026-08-27"
     assert owed["unpaid_since"] == "2026-09-01"
     assert status["oldest_outstanding"] == "2026-09-01"
+
+
+# --- a return the market had already paid for -----------------------------------
+
+def tshwane_14587():
+    """Delivery 14587 as the market reported it: paid in full to 25 August,
+    100 cartons back on the 26th, R 22 910,00 sold after, R 7 090,00 clawed
+    back on 18 September. Sold and paid both come to R 201 696,70."""
+    m, prod = "TSHWANE MARKET", "GRAPES SUGRAONE CLASS 2 NO SIZE (PUNNET 5kg)"
+    days = [("2026-08-11", 499, 178746.70), ("2026-08-25", 101, 30200.0),
+            ("2026-08-26", -100, -30000.0), ("2026-08-31", 39, 8830.0),
+            ("2026-09-01", 50, 6000.0), ("2026-09-03", 3, 1080.0),
+            ("2026-09-07", 11, 4400.0), ("2026-09-16", 26, 2600.0)]
+    sales = [{"consignment_id": 118309101, "dn": 14587, "product": prod, "market": m,
+              "market_agent": "Farmers Trust", "cartons_sold": c, "price": abs(v / c),
+              "sales_total": v, "last_sale": d, "date_received": "2026-07-30",
+              "group_date": "2026-07-30", "qty_received": 600} for d, c, v in days]
+    line = lambda sold, value: [{"product": prod, "sold": sold, "sales_total": value}]
+    pays = [payment("PRE*BT*1", 14587, "2026-08-12", 178746.70, line(499, 178746.70)),
+            payment("PRE*BT*396073", 14587, "2026-08-26", 30200.0, line(101, 30200.0)),
+            {"accsale": "PRE*BT*400352", "dn": 14587, "date": "2026-09-18", "gross": -7090.0,
+             "nett": 0.0, "lines": line(28, -7090.0)}]
+    return sales, pays
+
+
+def test_a_return_already_paid_for_pays_the_sales_after_it():
+    sales, pays = tshwane_14587()
+    status = tracking.payment_status(sales, pays)
+    assert status["still_to_come"] == 0.0
+    assert status["outstanding"] == []
+    # The claw-back took back exactly what the return left over: settled, not
+    # a R 7 090,00 exposure on top.
+    assert status["reversals"] == []
+    for month in ("2026-08", "2026-09"):
+        lo, hi = analytics_bounds(month)
+        assert tracking.payment_status(sales, pays, lo=lo, hi=hi)["still_to_come"] == 0.0
+
+
+def test_a_claw_back_bigger_than_the_return_left_is_still_reported():
+    sales, pays = tshwane_14587()
+    pays[2]["gross"] = pays[2]["lines"][0]["sales_total"] = -9090.0
+    status = tracking.payment_status(sales, pays)
+    assert [r["gross"] for r in status["reversals"]] == [-2000.0]
+
+
+def analytics_bounds(month):
+    from app import analytics
+    return analytics.period_bounds(month)
+
+
+def test_a_claw_back_that_also_pays_for_something_still_pays_for_it():
+    """PRE*BT*395300 took back R 1 488,00 of cherries and paid R 210,00 for
+    granadillas. The account sale is negative as a whole, but the granadillas
+    are paid, and the cherries take back what their return left over."""
+    m = "TSHWANE MARKET"
+    cher, gran = "CHERRIES OTHER CLASS 1 LARGE (HALF TRAY 2.5kg)", "GRANADILLAS NO VARIETY NOT GRADED NO SIZE (STANDARD TRAY)"
+    row = lambda cid, prod, c, v, d: {"consignment_id": cid, "dn": 14628, "product": prod,
+                                      "market": m, "market_agent": "Farmers Trust",
+                                      "cartons_sold": c, "price": abs(v / c), "sales_total": v,
+                                      "last_sale": d, "date_received": "2026-08-10",
+                                      "group_date": "2026-08-10", "qty_received": 171}
+    sales = [row(118584704, cher, 20, 5000.0, "2026-08-11"),
+             row(118584704, cher, -6, -1500.0, "2026-08-15"),
+             row(118584705, gran, 6, 210.0, "2026-08-18")]
+    pays = [payment("PRE*BT*394232", 14628, "2026-08-14", 5000.0,
+                    [{"product": cher, "sold": 20, "sales_total": 5000.0}]),
+            {"accsale": "PRE*BT*395300", "dn": 14628, "date": "2026-08-21", "gross": -1278.0,
+             "nett": 0.0, "lines": [{"product": cher, "sold": 0, "sales_total": -1488.0},
+                                    {"product": gran, "sold": 6, "sales_total": 210.0}]}]
+    status = tracking.payment_status(sales, pays)
+    assert status["outstanding"] == []
+    assert status["reversals"] == []
+    # The return left R 1 500,00, the claw-back took R 1 488,00: R 12,00 is
+    # still to Zaco's credit on the cherries.
+    assert status["still_to_come"] == -12.0

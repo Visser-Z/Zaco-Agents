@@ -182,9 +182,13 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
     reversals: list[dict] = []
     gaps: list[dict] = []
     for rec in payments:
-        if is_reversal(rec):
+        # A claw-back is reported apart, but its positive lines are payments
+        # like any other: PRE*BT*395300 took back R 1 488,00 of cherries and
+        # paid R 210,00 for granadillas in the same account sale, and holding
+        # the whole of it apart left the granadillas owing for weeks.
+        clawback = is_reversal(rec)
+        if clawback:
             reversals.append(rec)
-            continue
         rec_lines = rec.get("lines") or []
         listed = sum(reconcile._num(l.get("sales_total")) for l in rec_lines)
         paid = reconcile._num(rec.get("gross"))
@@ -195,7 +199,7 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
         base = max(listed, paid) if rec_lines else paid
         nett = reconcile._num(rec.get("nett"))
         day = str(rec.get("date") or "")[:10] or None
-        if rec_lines and paid - listed > 0.01:
+        if rec_lines and not clawback and paid - listed > 0.01:
             gaps.append({"gross": round(paid - listed, 2), "left": round(paid - listed, 2),
                          "date": day, "rate": nett / base if base else 0.0,
                          "dn": rec.get("dn"), "product": NOT_LISTED,
@@ -205,7 +209,7 @@ def _payment_lines(payments: list[dict], sales: list[dict]):
                          "listed": round(listed, 2), "paid": round(paid, 2)})
         for l in rec_lines:
             gross = reconcile._num(l.get("sales_total"))
-            if not gross:
+            if not gross or (clawback and gross < 0):
                 continue
             # A link the operator made by hand beats everything: it is the one
             # match here a person has looked at. Then the FMS id, then the
@@ -730,11 +734,61 @@ def _allocate(sales: list[dict], payments: list[dict]):
         for row in _whole_days(_delivery_rows(gap, sales, bound), gap, left):
             pay(row, gap, left[id(row)])
 
+    # A return pays what is still owed on its own consignment. The market keeps
+    # one running balance per delivery: fruit it paid for and then took back
+    # is money already in Zaco's hands, and the next sales of that delivery
+    # are set against it before anything new is paid. Tshwane 14587 was paid
+    # R 33 480,00 on 26 August for sales that included 100 cartons returned
+    # the same day (R 30 000,00); that credit covered the R 22 910,00 sold
+    # after it, and the R 7 090,00 left over was clawed back on 18 September.
+    # Held apart, the return sat as a credit in August while September's
+    # sales read as unpaid, though the delivery was settled to the cent.
+    back: dict[int, float] = {}
+    for rows in by_consignment.values():
+        returns = sorted((r for r in rows if reconcile._num(r.get("sales_total")) < 0),
+                         key=lambda r: selling_day(r) or "")
+        if not returns:
+            continue
+        owing = sorted((r for r in rows if left[id(r)] > 0.005),
+                       key=lambda r: (selling_day(r) is None, selling_day(r) or ""))
+        for ret in returns:
+            credit = -reconcile._num(ret.get("sales_total"))
+            for row in owing:
+                if credit <= 0.005:
+                    break
+                take = min(credit, left[id(row)])
+                if take > 0.005:
+                    left[id(row)] -= take
+                    credit -= take
+            back[id(ret)] = credit
+
+    # And a claw-back takes back what such a credit left over. The two are
+    # then one settled account, not a credit on one side and a debt on the
+    # other; whatever a claw-back does not account for is reported as before.
+    absorbed: dict[int, float] = {}
+    for rev in reversals:
+        taken = 0.0
+        for l in rev.get("lines") or []:
+            want = -reconcile._num(l.get("sales_total"))
+            rows = by_ref.get(("k", reconcile._key(rev.get("dn"), l.get("product"))), [])
+            for ret in sorted((r for r in rows if back.get(id(r), 0) > 0.005),
+                              key=lambda r: selling_day(r) or ""):
+                if want <= 0.005:
+                    break
+                take = min(want, back[id(ret)])
+                back[id(ret)] -= take
+                want -= take
+                taken += take
+        absorbed[id(rev)] = round(taken, 2)
+
     owed: dict[int, float] = {}
     paid_nett: dict[int, float] = {}
     for row in sales:
         value = reconcile._num(row.get("sales_total"))
-        owed[id(row)] = round(left[id(row)] if value > 0 else value, 2)
+        if value > 0:
+            owed[id(row)] = round(left[id(row)], 2)
+        else:
+            owed[id(row)] = round(-back[id(row)], 2) if id(row) in back else value
         paid_nett[id(row)] = round(nett[id(row)], 2)
 
     credit: dict[tuple, float] = {}
@@ -746,6 +800,8 @@ def _allocate(sales: list[dict], payments: list[dict]):
             credit[key] = spare
     extra = {
         "reversals": reversals,
+        # How much of each claw-back went to a return's leftover credit.
+        "absorbed": absorbed,
         "cartons": _carton_tally(sales, lines),
         "placements": placements,
         "lines": lines,
@@ -932,14 +988,22 @@ def payment_status(sales: list[dict], payments: list[dict],
     # Ref 14587 reads R14 080 sold and R7 090 clawed back, so its exposure is
     # either R14 080 (the default here) or R21 170 with the claw-back added.
     # Both figures are in this payload; the dashboard shows the first.
+    # What each claw-back took that a return had not already accounted for.
+    # One that only took back a return's leftover is settled, not exposure.
+    def unexplained(r: dict) -> float:
+        taken = (sum(min(reconcile._num(l.get("sales_total")), 0.0) for l in r["lines"])
+                 if r.get("lines") else reconcile._num(r.get("gross")))
+        return round(taken + extra["absorbed"].get(id(r), 0.0), 2)
+
     reversals = [{
         "accsale": r.get("accsale"), "dn": r.get("dn"), "date": r.get("date"),
-        "gross": round(reconcile._num(r.get("gross")), 2),
+        "gross": unexplained(r),
         "nett": round(reconcile._num(r.get("nett")), 2),
         "products": [l.get("product") for l in r.get("lines") or []],
     } for r in extra["reversals"]
-        if not ((lo and str(r.get("date") or "")[:10] < lo)
-                or (hi and str(r.get("date") or "")[:10] > hi))]
+        if unexplained(r) < -0.01
+        and not ((lo and str(r.get("date") or "")[:10] < lo)
+                 or (hi and str(r.get("date") or "")[:10] > hi))]
     unattributed = reconcile.unattributed(payments)
 
     outstanding_rows.sort(key=lambda r: r["owed"], reverse=True)

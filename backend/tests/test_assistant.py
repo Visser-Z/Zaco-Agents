@@ -231,19 +231,21 @@ def test_the_chat_is_told_to_answer_a_month_from_the_month_table():
     assert "Never work a month's figure out by adding up outstanding lines" in assistant.SYSTEM
 
 
-def test_a_month_holding_a_credit_says_so_and_still_adds_up():
-    """A return booked in September against August's sales leaves September
-    below zero. The market line and the credit together must equal the month."""
-    rows = SPANNING + [{
+def test_a_return_comes_off_what_its_delivery_still_owes_oldest_first():
+    """A return booked in September against a delivery whose August sales are
+    unpaid: the market keeps one balance per delivery, so the return comes off
+    the oldest money still owed on it. September is not left below zero, and
+    the months still add up to the same total."""
+    ret = {
         "consignment_id": 300, "dn": 1855491, "product": "GRAPES SUGRAONE",
         "market": "DURBAN MARKET", "market_agent": "Grow Port Natal", "cartons_sold": -60,
         "price": 400.0, "sales_total": -24000.0, "last_sale": "2026-09-10",
-        "date_received": "2026-08-27", "group_date": "2026-08-27", "qty_received": 125}]
-    months = {m["month"]: m for m in assistant.month_settlement(rows, [])}
-    sept = months["2026-09"]
-    assert sept["owed"] == -4000.0
-    text = assistant.settlement_context(rows, [])
-    assert "2026-09 comes out below zero" in text
+        "date_received": "2026-08-27", "group_date": "2026-08-27", "qty_received": 125}
+    before = {m["month"]: m for m in assistant.month_settlement(SPANNING, [])}
+    after = {m["month"]: m for m in assistant.month_settlement(SPANNING + [ret], [])}
+    assert after["2026-09"]["owed"] == before["2026-09"]["owed"]
+    assert after["2026-08"]["owed"] == before["2026-08"]["owed"] - 24000.0
+    assert "below zero" not in assistant.settlement_context(SPANNING + [ret], [])
 
 
 # --- a debt, or a question: the chat knows which ---------------------------

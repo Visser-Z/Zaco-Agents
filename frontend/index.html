@@ -3915,7 +3915,6 @@ function renderProcure() {
     ${table}
     ${(d.caveats || []).length ? `<div class="banner warn caveats"><span class="bi">${icon("alert", 14)}</span>
       <div><b>Read these with the figures.</b><ul>${d.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul></div></div>` : ""}
-    <div class="ins-grid-2">${cashBlock(d.payment_lag)}</div>
     ${ask}
   </section>`;
 }
@@ -3948,22 +3947,6 @@ function dispatchBlock(d) {
         take in ${esc(planHorizon(d))}, then to the next${D.split_lines ? `; ${fmtInt(D.split_lines)} product${D.split_lines === 1 ? " is" : "s are"} split` : ""}.</p>
       <ul class="dsp-list">${rows}</ul>
     </div>`;
-}
-
-function cashBlock(lag) {
-  if (!lag || !lag.length) return "";
-  const slowest = Math.max(...lag.map(l => l.days_to_pay), 1);
-  return `<div class="card ins-card">
-    <div class="ins-card-head"><h2>When the money lands</h2>
-      <span class="rep-c">median days, last sale to payment</span></div>
-    <ul class="bars">${lag.map(l => `<li class="bar">
-      <div class="bl"><span class="bt">${esc(l.market_agent)}</span></div>
-      <div class="btrack"><span class="bfill" style="width:${Math.max(3, Math.round(l.days_to_pay / slowest * 100))}%"></span></div>
-      <div class="bv">${l.days_to_pay} d</div></li>`).join("")}</ul>
-    <p class="rep-note">Measured from the last sale on a consignment to the payment against
-      it, across ${fmtInt(lag.reduce((n, l) => n + l.payments, 0))} payments. Slowest single
-      settlement: ${fmtInt(Math.max(...lag.map(l => l.slowest_days)))} days.</p>
-  </div>`;
 }
 
 function renderReports() {

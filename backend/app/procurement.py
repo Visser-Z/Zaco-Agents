@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from . import analytics, forecast, scorecard, tracking
+from . import analytics, dispatch, forecast, scorecard, tracking
 
 # Weights on the four things that decide what to back again. Clearance leads:
 # fruit that does not sell earns nothing and holds a slot on the floor.
@@ -421,7 +421,7 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
         in_band.sort(key=lambda l: (l["take_on"] == 0, -l["score"]))
 
     take = [l for l in lines if l["take_on"] > 0]
-    return {
+    plan = {
         "month": projection["month"],
         "horizon": {"days": days, "label": horizon_label(days),
                     "scale": round(scale, 4), "is_month": days == MONTH_DAYS},
@@ -475,3 +475,7 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
         # How long each agent takes to pay, so a plan can be read as cash.
         "payment_lag": forecast.payment_lag(rows, payments),
     }
+    # Each line's order split across the markets that sell it, and the same
+    # grouped by market and agent: the sheet the trucks are loaded from.
+    plan["dispatch"] = dispatch.build(plan, rows, payments, months)
+    return plan

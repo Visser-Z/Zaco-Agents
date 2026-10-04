@@ -38,7 +38,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from . import market_summary, overlap
+from . import dispatch_sheet, market_summary, overlap
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -1506,6 +1506,26 @@ async def get_order_sheet(
         pdf, media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="{order_sheet.filename(plan)}"',
+                 "Cache-Control": "no-store"})
+
+
+@app.get("/api/procurement/dispatch.pdf")
+async def get_dispatch_sheet(
+    months: int = Query(scorecard.DEFAULT_MONTHS, ge=0, le=24),
+    days: int = Query(procurement.DEFAULT_DAYS, ge=1, le=365),
+    prepared_for: str | None = Query(None, max_length=80),
+    user: User | None = Depends(require_user),
+) -> Response:
+    """Where the plan's cartons go, market by market, as a PDF for whoever
+    loads the trucks. Drawn from the same plan as the screen."""
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    plan = procurement.build(rows, payments, months, days=days)
+    pdf = await run_in_threadpool(dispatch_sheet.build, plan, None, prepared_for)
+    return Response(
+        pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{dispatch_sheet.filename(plan)}"',
                  "Cache-Control": "no-store"})
 
 

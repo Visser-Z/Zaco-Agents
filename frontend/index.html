@@ -719,6 +719,19 @@
   .pl-grow { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px;
              background: var(--surface-2); font-size: 12px; line-height: 1.5; }
   .pl-grow + .pl-grow { margin-top: -4px; }
+  .pl-send { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; }
+  .dsp-card { margin-bottom: 16px; }
+  .dsp-list { list-style: none; margin: 4px 0 0; padding: 0; }
+  .dsp-row { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0;
+             border-top: 1px solid var(--line); }
+  .dsp-name { display: flex; flex-direction: column; min-width: 0; }
+  .dsp-name b { font-size: 13px; }
+  .dsp-name span, .dsp-name em { font-size: 11.5px; color: var(--ink-faint); font-style: normal; }
+  .dsp-name em.dsp-warn { color: var(--crit); font-weight: 600; }
+  .dsp-fig { display: flex; flex-direction: column; align-items: flex-end; text-align: right; flex: none; }
+  .dsp-fig b { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .dsp-fig span { font-size: 11.5px; color: var(--ink-soft); }
+  .dsp-over { color: var(--warn) !important; font-style: normal; font-weight: 600; }
   .pl-grow b { color: var(--ink); }
   .pl-grow .gm { color: var(--ok); font-weight: 650; }
   .pl-grow .gt { color: var(--accent-strong); font-weight: 650; }
@@ -3526,7 +3539,10 @@ function planRow(l) {
           : `R ${fmt(l.expected_low)} to R ${fmt(l.expected_high)}`}</span></td>
       <td class="pl-cell">${growCell(l)}</td>
       <td class="pl-cell">${S.procure.groupBy === "market" ? stands
-        : `<span class="pl-prod">${esc(l.market || "—")}</span>
+        : (l.send || []).length > 1
+          ? `<span class="pl-prod">${esc(l.send.map(a => `${fmtInt(a.cartons)} ${shortMarket(a.market)}`).join(" · "))}</span>
+             <span class="pl-sub">split across ${fmtInt(l.send.length)} markets</span>`
+          : `<span class="pl-prod">${esc(l.market || "—")}</span>
            <span class="pl-sub">${esc(l.market_agent || "no destination on record")}</span>`}</td>
       <td class="pl-open"><span class="chev">${icon(open ? "up" : "down", 12)}</span></td>
     </tr>${open ? `<tr class="plan-detail"><td colspan="7">${planDetail(l)}</td></tr>` : ""}`;
@@ -3563,7 +3579,12 @@ function planDetail(l) {
         ? ` (${esc(t.market_agent)})` : ""}, worth about <b>R ${fmt(t.worth)}</b> more than the
       same cartons here if it behaves like the rest of its fruit. ${esc(t.why)}.
       Watch what it fetches against the market average and how long it takes to clear.</p>` : "");
+  const send = (l.send || []).length ? `<div class="pl-send"><b>Send:</b> ${l.send.map(a =>
+      `<span class="pl-chip"><b>${fmtInt(a.cartons)}</b> to ${esc(a.market)}${a.market_agent ? ` · ${esc(a.market_agent)}` : ""}${
+        a.over ? ` <em class="dsp-over">${fmtInt(a.over)} over what it takes</em>` : ""}</span>`).join("")}
+      ${l.send.length > 1 ? `<span class="pl-sub">Split by what each market has shown it can take.</span>` : ""}</div>` : "";
   return `<div class="pl-body">
+      ${send}
       ${grow}
       <div class="pl-why">${(l.reasons || []).map(r => `<span class="pl-chip">${esc(r)}</span>`).join("")}
         <span class="pl-chip">${esc(l.confidence)} · ${(l.months_used || []).map(monthLabel).join(", ")}</span></div>
@@ -3678,18 +3699,21 @@ function orderSheet(d) {
  *  usually wanted as is a button of its own. The server draws it, because the
  *  file has to be the same document whichever machine asked for it.
  */
-async function saveOrderSheet() {
+/** Download one of the plan's sheets: the order ("sheet") or where it goes
+ *  ("dispatch"). Both are drawn on the server from the plan on screen. */
+async function saveOrderSheet(kind) {
   const P = S.procure;
+  kind = kind === "dispatch" ? "dispatch" : "sheet";
   if (P.savingPdf) return;
   if (!S.live) { P.pdfError = "Saving the sheet needs the live app."; render(); return; }
   P.savingPdf = true; P.pdfError = null; render();
   let url = null;
   try {
     const qs = new URLSearchParams({ months: String(P.months), days: String(P.days) });
-    const res = await api(`/api/procurement/sheet.pdf?${qs}`);
+    const res = await api(`/api/procurement/${kind}.pdf?${qs}`);
     const blob = await res.blob();
     const name = (res.headers.get("Content-Disposition") || "")
-      .split("filename=")[1] || `zaco-procurement-${(P.data && P.data.month) || "plan"}.pdf`;
+      .split("filename=")[1] || `zaco-${kind === "dispatch" ? "dispatch" : "procurement"}-${(P.data && P.data.month) || "plan"}.pdf`;
     url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -3757,8 +3781,11 @@ function renderProcure() {
           <div class="seg sm">${[[3, "3 months"], [0, "All time"]].map(([m, l]) =>
             `<button class="${P.months === m ? "on" : ""}" onclick="setPlanMonths(${m})">${l}</button>`).join("")}</div>
         </label>
-        <button class="btn ghost sm" onclick="saveOrderSheet()" ${P.savingPdf ? "disabled" : ""}>${
-          P.savingPdf ? `<span class="spin"></span>Building` : `${icon("download")}Save as PDF`}</button>
+        <button class="btn ghost sm" onclick="saveOrderSheet('sheet')" ${P.savingPdf ? "disabled" : ""}
+          title="What to take on, as a PDF">${
+          P.savingPdf ? `<span class="spin"></span>Building` : `${icon("download")}Order sheet`}</button>
+        <button class="btn primary sm" onclick="saveOrderSheet('dispatch')" ${P.savingPdf ? "disabled" : ""}
+          title="What goes to which market, as a PDF for whoever loads the trucks">${icon("download")}Dispatch sheet</button>
         <button class="btn ghost sm" onclick="printOrderSheet()">${icon("print")}Print</button>
         <button class="btn ghost sm refresh" onclick="loadProcurement()">${icon("refresh")}Refresh</button>
       </div>
@@ -3883,6 +3910,7 @@ function renderProcure() {
     ${head}
     ${pdfError}
     ${kpis}
+    ${dispatchBlock(d)}
     ${brief}
     ${table}
     ${(d.caveats || []).length ? `<div class="banner warn caveats"><span class="bi">${icon("alert", 14)}</span>
@@ -3890,6 +3918,36 @@ function renderProcure() {
     <div class="ins-grid-2">${cashBlock(d.payment_lag)}</div>
     ${ask}
   </section>`;
+}
+
+/** Where the order goes, market by market: the dispatch sheet in brief.
+ *  Each market carries how it pays, and a warning where it is sitting on
+ *  old money, because that is worth knowing before another load goes. */
+function dispatchBlock(d) {
+  const D = d.dispatch;
+  if (!D || !(D.markets || []).length) return "";
+  const rows = D.markets.map(g => {
+    const placed = g.market !== "No destination on record";
+    const pays = [g.days_to_pay != null ? `pays in about ${fmtInt(g.days_to_pay)} day${g.days_to_pay === 1 ? "" : "s"}` : "",
+                  g.owed && !g.note ? `owes R ${fmt(g.owed)}` : ""].filter(Boolean).join(" · ");
+    return `<li class="dsp-row">
+      <div class="dsp-name"><b>${esc(placed ? g.market : "Not placed yet")}</b>
+        <span>${esc(placed ? (g.market_agent || "") : "no market has sold these well enough")}</span>
+        ${g.note ? `<em class="dsp-warn">${esc(g.note[0].toUpperCase() + g.note.slice(1))}</em>`
+          : pays ? `<em>${esc(pays)}</em>` : ""}</div>
+      <div class="dsp-fig"><b>${fmtInt(g.cartons)} ctn</b>
+        <span>${g.value ? "R " + fmt(g.value) : "—"}${g.optional ? ` · +${fmtInt(g.optional)} optional` : ""}</span>
+        ${g.over ? `<span class="dsp-over">${fmtInt(g.over)} more than it usually takes</span>` : ""}</div>
+    </li>`;
+  }).join("");
+  return `<div class="card ins-card dsp-card">
+      <div class="ins-card-head"><h2>Where it goes</h2>
+        <button class="btn ghost sm" onclick="saveOrderSheet('dispatch')">${icon("download")}Dispatch sheet</button></div>
+      <p class="ins-sub">${fmtInt(D.cartons)} cartons to ${fmtInt(D.markets.filter(g => g.market !== "No destination on record").length)} markets.
+        Each product goes first to the market that returns it best, up to what that market has shown it can
+        take in ${esc(planHorizon(d))}, then to the next${D.split_lines ? `; ${fmtInt(D.split_lines)} product${D.split_lines === 1 ? " is" : "s are"} split` : ""}.</p>
+      <ul class="dsp-list">${rows}</ul>
+    </div>`;
 }
 
 function cashBlock(lag) {

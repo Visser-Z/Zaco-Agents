@@ -21,7 +21,7 @@ import asyncio
 import os
 from datetime import date
 
-from . import analytics, forecast, procurement, scorecard, tracking
+from . import analytics, forecast, market_summary, procurement, scorecard, tracking
 
 # Claude Haiku 4.5, the operator's choice: they hold the key and pay for what it
 # uses. Overridable per deployment with ZACON_ASSISTANT_MODEL -- to try Sonnet if
@@ -626,7 +626,7 @@ def month_settlement(rows: list[dict], payments: list[dict],
 
 
 def settlement_context(rows: list[dict], payments: list[dict],
-                       closed=frozenset()) -> str:
+                       closed=frozenset(), summaries: list[dict] | None = None) -> str:
     """What has been paid and what is still owed, market by market.
 
     This block exists because of a real wrong answer. Asked what Durban still
@@ -725,6 +725,25 @@ def settlement_context(rows: list[dict], payments: list[dict],
                        f"{m['items']} | {m.get('oldest') or ''}")
 
     lines = status.get("outstanding") or []
+    # Each line held against the market's own Summary of Deliveries, where one
+    # has been loaded, so "does the market agree?" has an answer.
+    market = (market_summary.check(rows, payments or [], summaries, lines)
+              if summaries else None)
+    if market:
+        out.append("")
+        out.append("### Checked against the market's own Summary of Deliveries")
+        out.append(f"The market's summaries cover {market['checked']} delivery lines, as of "
+                   f"{market['as_of']}; {market['agree']} agree with the app to the cent. On "
+                   "each outstanding line below, 'market says' gives the market's view: "
+                   "'agrees' (the market also says it is unpaid, so it is a real debt), "
+                   "'market says paid' (a payment is missing from the book: fetch the Payment "
+                   "Details for the dates given), or 'not checked' (no summary loaded covers "
+                   "that delivery: fetch the Summary of Deliveries for the month named, or the "
+                   "market left that product off its summary).")
+        for m in market["unchecked_months"]:
+            out.append(f"Not checked yet: deliveries sent in {m['month_name']}, "
+                       f"{_fmt(m['owed'])} owed. The {m['month_name']} Summary of Deliveries "
+                       f"would settle them.")
     if lines:
         out.append("")
         out.append(f"### Every outstanding line, all months together "
@@ -737,7 +756,7 @@ def settlement_context(rows: list[dict], payments: list[dict],
                    "unpaid' counts from it to today: that is how long a line has been owed.")
         out.append("market | agent | delivery note | product | sold (R) | paid (R) | "
                    "owed (R) | first sold | unpaid since | days unpaid | cartons sold | "
-                   "cartons paid for | why")
+                   "cartons paid for | why" + (" | market says" if market else ""))
         today = date.today()
         for r in lines[:MAX_OUTSTANDING]:
             paid_ctn = r.get("cartons_paid")
@@ -751,7 +770,8 @@ def settlement_context(rows: list[dict], payments: list[dict],
                 str(since or ""), "" if waited is None else str(waited),
                 _count(r.get("cartons_sold") or 0),
                 "not printed" if paid_ctn is None else _count(paid_ctn),
-                tracking.REASONS.get(r.get("reason"), "")]))
+                tracking.REASONS.get(r.get("reason"), "")]
+                + ([_market_says(r.get("market_view") or {})] if market else [])))
     return "\n".join(out)
 
 
@@ -904,8 +924,23 @@ def plan_block(rows: list[dict], payments: list[dict], today=None) -> str:
     return "\n".join(out)
 
 
+def _market_says(m: dict) -> str:
+    """One outstanding line's verdict from the market, in a few words."""
+    v = m.get("verdict")
+    if v == "agrees":
+        return f"agrees it is unpaid (as of {m.get('as_of')})"
+    if v == "market_paid":
+        return (f"market says paid as of {m.get('as_of')}: payment missing from the book, "
+                f"fetch Payment Details {m.get('fetch_from')} to {m.get('fetch_to')}")
+    if v == "owes_more":
+        return f"market says {_fmt(m.get('market_unpaid'))} unpaid, more than the app"
+    if m.get("reason") == "not_listed":
+        return "not checked: the market's summary leaves this product off"
+    return f"not checked: needs the {m.get('month_name') or 'right'} Summary of Deliveries"
+
+
 def data_block(rows: list[dict], payments: list[dict] | None = None,
-               closed=frozenset()) -> str:
+               closed=frozenset(), summaries: list[dict] | None = None) -> str:
     """Everything the model is given: what happened, then what is expected.
 
     Built in one place so a question and the panel always see the same book.
@@ -914,7 +949,7 @@ def data_block(rows: list[dict], payments: list[dict] | None = None,
     """
     parts = [build_context(rows)]
     if rows:
-        parts.append(settlement_context(rows, payments or [], closed))
+        parts.append(settlement_context(rows, payments or [], closed, summaries))
         parts.append(stock_context(rows, closed))
         parts.append(daily_context(rows, payments or [], closed))
         parts.append(markets_context(rows))
@@ -1148,7 +1183,7 @@ def conversation(history: list[dict] | None, question: str) -> list[dict]:
 def ask(question: str, rows: list[dict],
         payments: list[dict] | None = None,
         history: list[dict] | None = None,
-        closed=frozenset()) -> str:
+        closed=frozenset(), summaries: list[dict] | None = None) -> str:
     """Answer `question` against the recorded sales `rows`.
 
     `history` is the conversation this question belongs to, so a follow-up can
@@ -1169,7 +1204,7 @@ def ask(question: str, rows: list[dict],
         # follow-up question cheap. It re-caches whenever new sales are saved.
         {
             "type": "text",
-            "text": data_block(rows, payments, closed),
+            "text": data_block(rows, payments, closed, summaries),
             "cache_control": {"type": "ephemeral"},
         },
     ]

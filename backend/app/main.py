@@ -38,7 +38,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from . import overlap
+from . import market_summary, overlap
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -350,6 +350,7 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 _MIGRATIONS = {
     "sale_day": "0020_unique_per_sale_day.sql",
     "dismissals": "0016_dismissals.sql",
+    "market_summaries": "0024_market_summaries.sql",
     "period_month": "0017_period_blocks.sql",
     "payments": "0015_payments.sql",
     "statements_unique_per_agent": "0014_statements_per_day.sql",
@@ -896,6 +897,55 @@ async def persist_payments(user: User | None, records: list[dict]) -> str | None
     return None
 
 
+async def persist_market_summaries(user: User | None, records: list[dict]) -> dict:
+    """Keep the market's summaries, never letting an older run replace a newer.
+
+    Returns what was kept, for the payments screen to say so.
+    """
+    out = {"deliveries": len({r["delivery_id"] for r in records}),
+           "lines": len(records),
+           "run_at": max((r["run_at"] for r in records if r.get("run_at")), default=None),
+           "unpaid": round(sum(r["unpaid"] for r in records), 2), "kept": 0, "older": 0}
+    if user is None or not records:
+        return out
+    ids = sorted({r["delivery_id"] for r in records})
+    try:
+        held = await db_get(user, "market_summaries", {
+            "select": "delivery_id,product,run_at",
+            "delivery_id": f"in.({','.join(map(str, ids))})", "limit": "10000"})
+    except Exception as exc:  # noqa: BLE001
+        migration = _pending_migration(exc) or "0024_market_summaries.sql"
+        out["warning"] = (f"The Summary of Deliveries was read but not kept: the database "
+                          f"is missing the {migration} migration.")
+        return out
+    newest = {(int(h["delivery_id"]), h["product"]): (h.get("run_at") or "") for h in held}
+    fresh = [r for r in records
+             if (r.get("run_at") or "") >= newest.get((r["delivery_id"], r["product"]), "")]
+    out["older"] = len(records) - len(fresh)
+    rows = [{**r, "created_by": user.id} for r in fresh]
+    if rows:
+        try:
+            await db_post(user, "market_summaries", rows, upsert=True,
+                          on_conflict="delivery_id,product", resolution="merge-duplicates")
+        except Exception as exc:  # noqa: BLE001
+            out["warning"] = f"The Summary of Deliveries was read but could not be kept: {exc}"
+            return out
+    out["kept"] = len(rows)
+    return out
+
+
+async def _market_summaries(user: User | None) -> list[dict] | None:
+    """The market's summaries on file, or None where there is no table yet."""
+    if user is None:
+        return None
+    try:
+        return await db_get(user, "market_summaries", {
+            "select": "delivery_id,product,product_name,agent,supplier_ref,date_sent,"
+                      "sold,gross,paid,unpaid,run_at", "limit": "20000"})
+    except Exception:  # noqa: BLE001 -- before migration 0024
+        return None
+
+
 async def _saved_payments(user: User | None) -> list[dict]:
     """Every recorded payment, read as the caller so RLS applies."""
     if user is None:
@@ -1046,6 +1096,11 @@ async def get_tracking(
                            closed=closed, month=month, week=week)
     # What has been decided, so a decision can be seen and undone.
     out["flags"]["decisions"] = await _payment_checks(user)
+    # Every outstanding line held against the market's own summaries.
+    summaries = await _market_summaries(user)
+    if summaries is not None:
+        out["market_check"] = market_summary.check(
+            sales, payments, summaries, out["payments"]["outstanding"])
     return out
 
 
@@ -1595,7 +1650,7 @@ async def ask_assistant(
         # figure on the screen behind it, not one that still counts them.
         closed = await _closed_refs(user)
         answer = await run_in_threadpool(assistant.ask, question, rows, payments, history,
-                                         closed)
+                                         closed, await _market_summaries(user))
     except assistant.AssistantError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -1773,8 +1828,14 @@ async def check_documents(
 async def reconcile_payments(
     files: list[UploadFile] = File(...), user: User | None = Depends(require_user)
 ) -> dict:
-    """Reconcile Payment Details report(s) against the accumulated daily history."""
+    """Reconcile Payment Details report(s) against the accumulated daily history.
+
+    A Summary of Deliveries dropped in the same place is the market's own
+    statement of what it has paid; it is kept for Tracking to check every
+    outstanding line against, and not matched as a payment.
+    """
     records: list[dict] = []
+    summaries: list[dict] = []
     warnings: list[str] = []
     empty: list[str] = []
     lo: str | None = None
@@ -1793,8 +1854,12 @@ async def reconcile_payments(
         else:
             pages = pdf_to_page_texts(data)
             text = "\n".join(pages)
+            if market_summary.is_delivery_summary(text):
+                summaries.extend(market_summary.parse(text, name))
+                continue
             if not payment_details.is_payment_details(text):
-                raise HTTPException(400, f"“{name}” is not a Payment Details report.")
+                raise HTTPException(400, f"“{name}” is not a Payment Details report "
+                                         f"or a Summary of Deliveries.")
             found = payment_details.parse_payment_details(pages, name)
             records.extend(found)
             rlo, rhi = payment_details.date_range(text)
@@ -1808,6 +1873,15 @@ async def reconcile_payments(
                 empty.append(f"“{name}” records no payments{span}.")
         lo = rlo if lo is None else min(lo, rlo or lo)
         hi = rhi if hi is None else max(hi, rhi or hi)
+
+    summary_note = await persist_market_summaries(user, summaries) if summaries else None
+    if summaries and not records:
+        # Only summaries in this drop: nothing to match, so say what was kept.
+        return {"warnings": warnings + ([summary_note["warning"]]
+                                        if summary_note.get("warning") else []),
+                "reconciliation": [], "netts": {}, "payment_count": 0,
+                "date_range": {"from": None, "to": None}, "daily_rows": 0,
+                "market_summary": summary_note}
 
     if empty:
         head = (f"{len(empty)} of the {len(files)} files carry no payments"
@@ -1900,6 +1974,7 @@ async def reconcile_payments(
         # Money the report itself gives no product breakdown for, so it can
         # never match. Reported so the gap is explained rather than missing.
         "unattributed": reconcile.unattributed(records),
+        "market_summary": summary_note,
     }
 
 

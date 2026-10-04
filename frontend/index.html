@@ -902,6 +902,15 @@
                white-space: nowrap; overflow: hidden; }
   .owed-when .wsig { text-transform: none; letter-spacing: 0; font-size: 10.5px; }
   .owed-when em { font-style: normal; font-size: 11px; color: var(--ink-faint); }
+  /* What the market's own summary says about the line. */
+  .mkt-says { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-faint);
+              white-space: normal; line-height: 1.4; }
+  .mkt-says.t-ok { color: var(--ok); }
+  .mkt-says.t-crit { color: var(--crit); font-weight: 600; }
+  .mkt-says.t-warn { color: var(--warn); }
+  .mkt-card { padding: 16px 18px; margin-bottom: 18px; }
+  .mkt-card .flag-top .bi { color: var(--ok); }
+  .mkt-hint { margin: 0 0 14px; }
   @media (max-width: 700px) {
     .smkt-head { grid-template-columns: auto minmax(0, 1fr) auto; }
     .smkt-tiers { grid-column: 2 / -1; justify-content: flex-start; }
@@ -2077,6 +2086,67 @@ function undoFlag(idx) {
  *  makes both the Outstanding list and the Paid figure wrong until it is
  *  settled. Each one says why in plain words and offers where else it could
  *  go; a person decides, and the decision is kept and can be undone. */
+/** What the market's own Summary of Deliveries says about one outstanding
+ *  line. Nothing is shown until a summary has been loaded at all. */
+function marketSays(m) {
+  if (!m) return "";
+  const on = m.as_of ? ` ${esc((niceDate(m.as_of) || m.as_of).replace(/ \d{4}$/, ""))}` : "";
+  if (m.verdict === "agrees") {
+    return `<span class="mkt-says t-ok" title="The market's Summary of Deliveries also shows this unpaid, so it is a real debt.">Market agrees it is unpaid${on}</span>`;
+  }
+  if (m.verdict === "market_paid") {
+    return `<span class="mkt-says t-crit" title="The market says this is paid, so a payment is missing from the book. Fetch the Payment Details for these dates and drop them in.">Market says paid${on}: fetch payments ${esc(niceDate(m.fetch_from) || m.fetch_from || "")} to ${esc(niceDate(m.fetch_to) || m.fetch_to || "")}</span>`;
+  }
+  if (m.verdict === "owes_more") {
+    return `<span class="mkt-says t-warn">Market says R ${fmt(m.market_unpaid)} unpaid${on}</span>`;
+  }
+  if (m.reason === "not_listed") {
+    return `<span class="mkt-says" title="The market summarised this delivery but left this product off its summary.">Not on the market's summary</span>`;
+  }
+  return `<span class="mkt-says" title="No Summary of Deliveries loaded covers this delivery yet.">Not checked: needs the ${esc(m.month_name || "right")} summary</span>`;
+}
+
+/** Every outstanding line held against the market's own Summary of
+ *  Deliveries: how many agree, which the market says are paid (with the
+ *  payment dates to fetch), and which months' summaries would check the rest.
+ *  This is the check that found every wrong "owed" line by hand. */
+function marketBlock(M) {
+  if (!M) return "";
+  if (!M.summaries) {
+    return `<p class="trk-note mkt-hint">Drop the market's <b>Summary of Deliveries</b> in with the
+      payments and every outstanding line here is checked against what the market itself says it has paid.</p>`;
+  }
+  const paid = (M.disagree || []).filter(v => v.verdict === "market_paid");
+  const more = (M.disagree || []).filter(v => v.verdict === "owes_more");
+  const gaps = (M.disagree || []).filter(v => v.verdict === "agrees" && v.sales_gap);
+  const item = (v, what) => `<li><b>DN ${esc(v.supplier_ref || "")}</b> ${esc(shortProduct(v.product || ""))}
+      <span class="flag-meta">sent ${esc(niceDate(v.date_sent) || v.date_sent || "")}</span>
+      <span class="trk-n num">R ${fmt(v.difference || v.sales_gap || 0)}</span><div class="flag-why">${what}</div></li>`;
+  const months = M.unchecked_months || [];
+  return `<section class="card mkt-card">
+      <header class="flag-top">
+        <span class="bi">${icon("check", 15)}</span>
+        <div><h2>Checked against the market</h2>
+          <span class="trk-sum">${fmtInt(M.agree)} of ${fmtInt(M.checked)} delivery lines agree with the
+            market's own figures to the cent${M.as_of ? `, as of ${esc(niceDate(M.as_of) || M.as_of)}` : ""}.</span></div>
+      </header>
+      ${paid.length ? `<ul class="flag-list">${paid.map(v => item(v,
+        `The market says this is paid; the book has no payment for it. Fetch the Payment Details for
+         ${esc(niceDate(v.fetch_from) || v.fetch_from || "")} to ${esc(niceDate(v.fetch_to) || v.fetch_to || "")}
+         and drop them in.`)).join("")}</ul>` : ""}
+      ${more.length ? `<ul class="flag-list">${more.map(v => item(v,
+        `The market says R ${fmt(v.market_unpaid)} is unpaid, more than the R ${fmt(v.app_owed)} the app has.
+         ${v.sales_gap > 0 ? "It sold more than the book holds: a sales report is missing days." : "The book holds a payment the market does not count."}`)).join("")}</ul>` : ""}
+      ${gaps.length ? `<ul class="flag-list">${gaps.map(v => item(v,
+        v.sales_gap > 0 ? `The market sold R ${fmt(v.sales_gap)} more than the book holds: a sales report is missing days.`
+                        : `The book holds R ${fmt(-v.sales_gap)} more sales than the market's summary.`)).join("")}</ul>` : ""}
+      ${months.length || M.not_listed ? `<p class="trk-note">Not checked yet:
+        ${months.map(m => `R ${fmt(m.owed)} on deliveries sent in ${esc(m.month_name)}`).join(" · ")}${
+          months.length ? `. Load the Summary of Deliveries for ${months.length === 1 ? "that month" : "those months"} to check ${months.length === 1 ? "it" : "them"}.` : ""}${
+          M.not_listed ? ` R ${fmt(M.not_listed)} is on products the market left off its summary.` : ""}</p>` : ""}
+    </section>`;
+}
+
 function flagsBlock(F) {
   if (!F) return "";
   const items = F.items || [];
@@ -2585,7 +2655,7 @@ function renderTracking() {
       <em>since ${esc(niceDate(since) || since)}</em></span>`;
   };
   const owedRow = r => `<li>
-      ${nameCell(r, undefined, owedAge(r) + owedWhy(r))}
+      ${nameCell(r, undefined, owedAge(r) + owedWhy(r) + marketSays(r.market_view))}
       <span class="trk-d">${r.dn != null ? "DN " + esc(r.dn) : ""}</span>
       <span class="trk-n num">R ${fmt(r.owed)}</span>
       <button class="xbtn" title="Close this one off"
@@ -2816,6 +2886,7 @@ function renderTracking() {
           undefined, { tone: "warn", icon: "clock" })}
       </div>
       ${flagsBlock(T.data.flags)}
+      ${marketBlock(T.data.market_check)}
       <div class="trk-grid">
         ${owedBlock}${stockBlock}${salesBlock}
       </div>
@@ -4254,6 +4325,11 @@ function reconcileBody(R) {
       <div class="pm-k"><b>R ${fmt(nettMatched)}</b><span>Nett matched</span></div>
     </div>
     ${deductionNote(d.deductions)}
+    ${d.market_summary ? `<div class="banner good"><span class="bi">✓</span><span><b>Summary of Deliveries kept:</b>
+      ${fmtInt(d.market_summary.deliveries)} deliver${d.market_summary.deliveries === 1 ? "y" : "ies"}${
+      d.market_summary.run_at ? `, as the market saw them on ${esc(niceDate(d.market_summary.run_at.slice(0, 10)))}` : ""}.
+      Tracking now checks every outstanding line against it.${d.market_summary.older
+        ? ` ${fmtInt(d.market_summary.older)} line${d.market_summary.older === 1 ? " was" : "s were"} older than the summary already held and left alone.` : ""}</span></div>` : ""}
     ${nettCount ? `<p class="pm-note">${nettCount} Nett${nettCount === 1 ? " is" : "s are"} reconciled and shown here.</p>` : ""}
     <div class="pm-list">
       ${rows.map(r => {

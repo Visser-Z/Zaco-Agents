@@ -4,7 +4,7 @@
 <!-- Without this a phone or tablet lays the page out at desktop width and
      shrinks it to fit, so every figure is too small to read or tap. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#FFFFFF">
+<meta name="theme-color" content="#04235F">
 <title>ZacoAgents</title>
 <style>
   /* Light only, one theme. Neutrals carry the interface; colour is reserved for
@@ -28,10 +28,20 @@
     /* One accent, for primary actions and for every chart that plots a single
        measure. Bars are NOT coloured per category: the category is already on
        the axis, and a hue per bar double-encodes the length it already shows. */
-    --accent: #1B63C4;
-    --accent-strong: #144B99;
-    --accent-tint: #E8F0FC;
-    --accent-soft: #F5F8FE;
+    /* Zaco's own navy, from the logo. The logo's #04235F is the strong step;
+       the accent is a shade lighter so a bar or a button still reads as
+       colour rather than as black at a glance. */
+    --accent: #163C86;
+    --accent-strong: #04235F;
+    --accent-tint: #E6EBF5;
+    --accent-soft: #F4F6FB;
+    /* And its gold. Gold on white is under 2.5:1, so it never carries text on
+       a light ground: it marks (the brand, the open tab, a highlight rule) and
+       the -ink step is the one that may be read. */
+    --gold: #CFB058;
+    --gold-ink: #7A6420;
+    --gold-tint: #F7F0DC;
+    --brand: #04235F;
 
     /* Status. Two steps each, because they do two different jobs: the first is
        text and holds 4.5:1 on white and on its own tint; the -mark step is the
@@ -66,13 +76,21 @@
 
   .app { min-height: 100vh; display: flex; flex-direction: column; }
   .topbar { display: flex; align-items: center; gap: 14px; padding: 0 22px; height: 56px;
-             background: linear-gradient(180deg, #FFFFFF, var(--accent-soft));
-             border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; font-size: 15px; }
-  .brand .glyph { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center;
-                  color: #fff; font-size: 15px;
-                  background: linear-gradient(145deg, #3E86E8, var(--accent-strong));
-                  box-shadow: 0 1px 2px rgba(20, 75, 153, .35); }
+             background: var(--brand); color: #fff;
+             border-bottom: 2px solid var(--gold); position: sticky; top: 0; z-index: 20; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: .08em;
+           font-size: 14px; text-transform: uppercase; color: var(--gold); }
+  .brand .glyph, .auth-brand .glyph { width: 34px; height: 34px; border-radius: 50%; display: block;
+                  background: var(--brand) url("data:image/jpeg;base64,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") center / cover no-repeat;
+                  color: transparent; font-size: 0; box-shadow: 0 0 0 1px rgba(207, 176, 88, .45); flex: none; }
+  /* What sits in the navy bar is drawn light on it. */
+  .topbar .ask-open { background: transparent; border-color: rgba(255, 255, 255, .35); color: #fff; }
+  .topbar .ask-open:hover { border-color: var(--gold); color: var(--gold); }
+  .topbar .ask-open.on { background: var(--gold); border-color: var(--gold); color: var(--brand); }
+  .topbar .user-chip { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .22); color: #fff; }
+  .topbar .user-chip button { color: rgba(255, 255, 255, .75); }
+  .topbar .user-chip button:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+  .topbar .user-chip .role { background: var(--gold); color: var(--brand); }
   .brand .sub { color: var(--ink-faint); font-weight: 500; font-size: 12px; letter-spacing: .02em; }
   .topbar .spacer { flex: 1; }
   .wb-pill { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
@@ -91,7 +109,7 @@
   .tabs { display: flex; gap: 2px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 56px; z-index: 19; }
   .tab { position: relative; z-index: 1; appearance: none; border: 0; background: none; font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 9px 9px 0 0; transition: color .15s, border-color .15s, background .15s; }
   .tab:hover { color: var(--ink); background: var(--accent-soft); }
-  .tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); background: var(--accent-tint); }
+  .tab.active { color: var(--accent-strong); border-bottom: 3px solid var(--gold); background: var(--accent-tint); }
   .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
   .rail { border-right: 1px solid var(--line); padding: 26px 18px; background: var(--surface); }
   .rail h2 { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px 6px; font-weight: 650; }
@@ -170,8 +188,8 @@
                box-shadow: var(--shadow-lg); transform: translateY(-1px); }
   .drop .big { width: 48px; height: 48px; margin: 0 auto 12px; border-radius: 14px;
                display: grid; place-items: center; font-size: 20px; color: #fff;
-               background: linear-gradient(145deg, #3E86E8, var(--accent-strong));
-               box-shadow: 0 2px 6px -1px rgba(20, 75, 153, .40); }
+               background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+               box-shadow: 0 2px 6px -1px rgba(4, 35, 95, .40); }
   /* Payments is money coming in, and reads in the same green the Paid tile and
      the Connected badge use. */
   [data-drop="payments"] .drop .big { background: linear-gradient(145deg, #2FB870, #146B41);
@@ -188,8 +206,8 @@
   .actions .spacer { flex: 1; }
   .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: background .15s, border-color .15s, transform .08s, box-shadow .15s; }
   .btn.sm { padding: 8px 13px; font-size: 13px; }
-  .btn.primary { background: linear-gradient(180deg, #2B72D4, var(--accent)); color: #fff;
-                 box-shadow: 0 1px 2px rgba(20, 75, 153, .30); }
+  .btn.primary { background: linear-gradient(180deg, #1F4A9B, var(--accent)); color: #fff;
+                 box-shadow: 0 1px 2px rgba(4, 35, 95, .30); }
   .btn.primary:hover { background: linear-gradient(180deg, var(--accent), var(--accent-strong)); }
   .btn.primary:active { transform: translateY(1px); }
   .btn.primary:disabled { background: var(--line-strong); color: var(--ink-faint); cursor: not-allowed; }
@@ -260,7 +278,7 @@
     border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 32px 30px;
   }
   .auth-brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -.01em; margin-bottom: 4px; }
-  .auth-brand .glyph { width: 28px; height: 28px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 16px; }
+  .auth-brand { color: var(--brand); text-transform: uppercase; letter-spacing: .08em; }
   .auth-card h1 { font-size: 20px; margin: 20px 0 4px; letter-spacing: -.015em; }
   .auth-card .sub { color: var(--ink-soft); font-size: 13px; margin: 0 0 24px; line-height: 1.5; }
   .auth-form { display: flex; flex-direction: column; gap: 14px; }
@@ -1468,7 +1486,7 @@
 
 <div class="app">
   <header class="topbar">
-    <div class="brand"><span class="glyph">◧</span><span>ZacoAgents</span></div>
+    <div class="brand"><span class="glyph" role="img" aria-label="Zaco Agents"></span><span>Zaco Agents</span></div>
     <span class="spacer"></span>
     <button type="button" class="ask-open" id="askOpen" onclick="toggleDock()"
       title="Ask about the book">◧ Ask</button>
@@ -1864,7 +1882,7 @@ function renderAuth(mode = "signin", message = "") {
   const invite = mode === "invite";
   host.innerHTML = `
     <div class="auth-card">
-      <div class="auth-brand"><span class="glyph">◧</span><span>ZacoAgents</span></div>
+      <div class="auth-brand"><span class="glyph" role="img" aria-label="Zaco Agents"></span><span>Zaco Agents</span></div>
       <h1>${invite ? "Choose a password" : "Sign in"}</h1>
       <p class="sub">${invite
         ? "Set a password for your account to finish setting it up."

@@ -721,6 +721,37 @@
   .pl-grow + .pl-grow { margin-top: -4px; }
   .pl-send { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; }
   .dsp-card { margin-bottom: 16px; }
+  .sup-card { margin-bottom: 16px; }
+  .sup-box { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 9px 11px;
+             border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+             color: var(--ink); resize: vertical; }
+  .sup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .sup-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .sup-table th { text-align: left; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+                  color: var(--ink-faint); padding: 4px 6px; border-bottom: 1px solid var(--line-strong); }
+  .sup-table th.num, .sup-table td.num { text-align: right; }
+  .sup-table td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: normal; }
+  .sup-table tr.unsure td { background: var(--warn-tint); }
+  .sup-text { color: var(--ink-soft); }
+  .sup-n { width: 72px; text-align: right; font: inherit; padding: 4px 6px; border: 1px solid var(--line-strong);
+           border-radius: 6px; background: var(--surface); }
+  .sup-pick { width: 100%; max-width: 360px; font: inherit; font-size: 12.5px; padding: 4px 6px;
+              border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+  .sup-pick.unsure { border-color: var(--warn); }
+  .sup-result { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .sup-market { margin: 6px 0; font-size: 12.5px; }
+  .sup-market summary { cursor: pointer; font-weight: 600; }
+  .sup-market ul { margin: 6px 0 0; padding-left: 18px; }
+  .sup-market li span { display: block; font-size: 11.5px; color: var(--ink-faint); }
+  .sup-notes { margin: 8px 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-soft); }
+  @media (max-width: 640px) {
+    .sup-table thead { display: none; }
+    .sup-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px;
+                    padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .sup-table td { border: 0; padding: 0; }
+    .sup-table td:nth-child(3) { grid-column: 1 / -1; }
+    .sup-pick { max-width: none; }
+  }
   .dsp-list { list-style: none; margin: 4px 0 0; padding: 0; }
   .dsp-row { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0;
              border-top: 1px solid var(--line); }
@@ -1525,6 +1556,10 @@ const S = {
   // need an assistant key and must still be there when there is none.
   // The buy plan: what to take on, how much, and where to send it.
   procure: { data: null, loading: false, error: null, months: 3, open: {},
+             // This week's stock from the supplier: the list as pasted, what
+             // each line was matched to, and where it all goes.
+             supply: { text: "", items: null, products: [], result: null, brief: null,
+                       busy: null, error: null },
              brief: null, briefBusy: false, briefError: null,
              // The plan is one table: which priorities to show, whether to
              // group it by market, and what it is sorted on.
@@ -3914,6 +3949,7 @@ function renderProcure() {
     ${head}
     ${pdfError}
     ${kpis}
+    ${supplyBlock()}
     ${dispatchBlock(d)}
     ${brief}
     ${table}
@@ -3926,10 +3962,186 @@ function renderProcure() {
 /** Where the order goes, market by market: the dispatch sheet in brief.
  *  Each market carries how it pays, and a warning where it is sitting on
  *  old money, because that is worth knowing before another load goes. */
-function dispatchBlock(d) {
-  const D = d.dispatch;
-  if (!D || !(D.markets || []).length) return "";
-  const rows = D.markets.map(g => {
+/* This week's stock from the supplier. The supplier has a fixed amount each
+   week, so the plan's own order is a wish; this is what there actually is.
+   The list is read by rules on the server and every line it is unsure of is
+   left for a person to pick, because a line matched to the wrong product is
+   fruit sent to the wrong market. The split is computed; the agent only
+   writes it up. */
+const SUPPLY_KEY = "zacon.supply";
+function supplyState() {
+  const U = S.procure.supply;
+  if (!U.loaded) {
+    U.loaded = true;
+    try { const saved = JSON.parse(localStorage.getItem(SUPPLY_KEY) || "null");
+          if (saved) { U.text = saved.text || ""; U.items = saved.items || null; U.products = saved.products || []; }
+    } catch { /* a private window keeps nothing; the card still works */ }
+  }
+  return U;
+}
+function keepSupply() {
+  const U = S.procure.supply;
+  try { localStorage.setItem(SUPPLY_KEY, JSON.stringify({ text: U.text, items: U.items, products: U.products })); }
+  catch { /* nothing kept, nothing lost */ }
+}
+
+async function supplyCall(path, body) {
+  const r = await api(path, { method: "POST", body });
+  if (!r.ok) {
+    const out = await r.json().catch(() => ({}));
+    throw new Error(out.detail || `HTTP ${r.status}`);
+  }
+  return r;
+}
+
+function supplyForm(extra) {
+  const P = S.procure, U = P.supply;
+  const body = new FormData();
+  body.append("months", String(P.months));
+  // The supplier's stock comes in by the week, so it is planned as a week
+  // whatever the plan above is set to.
+  body.append("days", "7");
+  body.append("items", JSON.stringify((U.items || []).map(i => ({
+    text: i.text, product: i.product || null, cartons: Number(i.cartons) || 0 }))));
+  Object.entries(extra || {}).forEach(([k, v]) => body.append(k, v));
+  return body;
+}
+
+async function readSupply() {
+  const P = S.procure, U = supplyState();
+  const box = document.getElementById("supplyText");
+  if (box) U.text = box.value;
+  if (!U.text.trim()) { U.error = "Paste the supplier's list first."; render(); return; }
+  U.busy = "read"; U.error = null; U.result = null; U.brief = null; render();
+  try {
+    const body = new FormData();
+    body.append("text", U.text);
+    body.append("months", String(P.months));
+    const out = await (await supplyCall("/api/procurement/supply/read", body)).json();
+    U.items = out.items || []; U.products = out.products || [];
+    keepSupply();
+  } catch (e) { U.error = e.message || String(e); }
+  finally { U.busy = null; render(); }
+}
+
+function setSupplyProduct(i, value) {
+  const U = S.procure.supply;
+  if (U.items && U.items[i]) { U.items[i].product = value || null; U.result = null; U.brief = null; keepSupply(); }
+}
+function setSupplyCartons(i, value) {
+  const U = S.procure.supply;
+  if (U.items && U.items[i]) { U.items[i].cartons = Math.max(0, parseInt(value, 10) || 0); U.result = null; U.brief = null; keepSupply(); }
+}
+
+async function planSupply() {
+  const U = supplyState();
+  U.busy = "plan"; U.error = null; U.brief = null; render();
+  try { U.result = await (await supplyCall("/api/procurement/supply/plan", supplyForm())).json(); }
+  catch (e) { U.error = e.message || String(e); }
+  finally { U.busy = null; render(); }
+}
+
+async function briefSupply() {
+  const U = supplyState();
+  U.busy = "brief"; U.error = null; render();
+  try { U.brief = (await (await supplyCall("/api/procurement/supply/brief", supplyForm())).json()).text; }
+  catch (e) { U.error = e.message || String(e); }
+  finally { U.busy = null; render(); }
+}
+
+async function supplySheet() {
+  const U = supplyState();
+  U.busy = "pdf"; U.error = null; render();
+  let url = null;
+  try {
+    const res = await supplyCall("/api/procurement/supply/dispatch.pdf", supplyForm());
+    const name = ((res.headers.get("Content-Disposition") || "").split("filename=")[1] || "zaco-supply-dispatch.pdf")
+      .replace(/["';]/g, "").trim();
+    url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { U.error = e.message || String(e); }
+  finally {
+    if (url) setTimeout(() => URL.revokeObjectURL(url), 30000);
+    U.busy = null; render();
+  }
+}
+
+function clearSupply() {
+  const U = S.procure.supply;
+  Object.assign(U, { text: "", items: null, products: [], result: null, brief: null, error: null });
+  keepSupply(); render();
+}
+
+function supplyBlock() {
+  const U = supplyState();
+  const busy = what => U.busy === what;
+  const items = U.items || [];
+  const pick = (it, i) => {
+    const first = it.candidates || [];
+    const rest = (U.products || []).filter(p => !first.includes(p));
+    const opt = p => `<option value="${esc(p)}"${it.product === p ? " selected" : ""}>${esc(shortProduct(p))}</option>`;
+    return `<select class="sup-pick${it.product ? "" : " unsure"}" onchange="setSupplyProduct(${i}, this.value)">
+        <option value=""${it.product ? "" : " selected"}>${first.length ? "Pick which one" : "Not one of ours: leave out"}</option>
+        ${first.length ? `<optgroup label="Closest">${first.map(opt).join("")}</optgroup>` : ""}
+        ${rest.length ? `<optgroup label="Everything else">${rest.map(opt).join("")}</optgroup>` : ""}
+      </select>`;
+  };
+  const table = items.length ? `<table class="sup-table">
+      <thead><tr><th>Their line</th><th class="num">Cartons</th><th>Our product</th></tr></thead>
+      <tbody>${items.map((it, i) => `<tr class="${it.product ? "" : "unsure"}">
+        <td class="sup-text">${esc(it.text)}</td>
+        <td class="num"><input class="sup-n" type="number" min="0" inputmode="numeric" value="${it.cartons ?? ""}"
+          onchange="setSupplyCartons(${i}, this.value)"></td>
+        <td>${pick(it, i)}</td></tr>`).join("")}</tbody></table>
+      <p class="ins-sub">${fmtInt(items.filter(i => !i.product).length)} line${items.filter(i => !i.product).length === 1 ? "" : "s"}
+        to pick by hand. Lines left as "leave out" are listed as not matched.</p>` : "";
+  const R = U.result;
+  const D = R && R.dispatch;
+  const sup = R && R.supply;
+  const notes = sup ? [
+    ...(sup.over || []).map(x => `<li><b>${esc(shortProduct(x.product))}</b>: ${fmtInt(x.have)} cartons, more than the about ${fmtInt(x.plan)} the markets have been taking in a week.</li>`),
+    ...(sup.short || []).map(x => `<li><b>${esc(shortProduct(x.product))}</b>: ${fmtInt(x.have)} cartons, less than the ${fmtInt(x.plan)} the markets would take this week.</li>`),
+    ...(sup.unknown || []).map(x => `<li>Not matched: "${esc(x.text)}", ${fmtInt(x.cartons)} cartons.</li>`)] : [];
+  const result = D ? `<div class="sup-result">
+      <p class="ins-sub"><b>${fmtInt(D.cartons)} cartons</b> of ${fmtInt(sup.products)} products to
+        ${fmtInt((D.markets || []).filter(g => g.market !== "No destination on record").length)} markets.</p>
+      <ul class="dsp-list">${dispatchRows(D)}</ul>
+      ${(D.markets || []).map(g => `<details class="sup-market"><summary>${esc(g.market)}: what goes on the truck</summary>
+        <ul>${g.lines.map(l => `<li><b>${fmtInt(l.cartons)}</b> ${esc(shortProduct(l.product))}${
+          l.over ? ` <em class="dsp-over">${fmtInt(l.over)} more than it usually takes</em>` : ""}
+          <span>${esc(l.why || "")}</span></li>`).join("")}</ul></details>`).join("")}
+      ${notes.length ? `<ul class="sup-notes">${notes.join("")}</ul>` : ""}
+      <div class="sup-actions">
+        <button class="btn primary sm" onclick="briefSupply()" ${U.busy ? "disabled" : ""}>${busy("brief")
+          ? `<span class="spin"></span>Asking` : `${icon("chat")}Ask the agent where to send it`}</button>
+        <button class="btn ghost sm" onclick="supplySheet()" ${U.busy ? "disabled" : ""}>${busy("pdf")
+          ? `<span class="spin"></span>Building` : `${icon("download")}Dispatch sheet`}</button>
+      </div>
+      ${U.brief ? `<div class="where-brief"><div class="wb-text">${mdLite(U.brief)}</div></div>` : ""}
+    </div>` : "";
+  return `<div class="card ins-card sup-card">
+      <div class="ins-card-head"><h2>Supplier's stock this week</h2>
+        ${U.text || items.length ? `<button class="linklike" onclick="clearSupply()">Start again</button>` : ""}</div>
+      <p class="ins-sub">Paste what the supplier has, one product per line, as it came:
+        "Sugraone 5kg 240 ctn". Exactly that stock is split across the markets for the week, and nothing more.</p>
+      <textarea id="supplyText" class="sup-box" rows="4" placeholder="Sugraone class 1 240 ctn&#10;Crimson seedless cl2 120&#10;Nectarines 80"
+        oninput="S.procure.supply.text = this.value">${esc(U.text || "")}</textarea>
+      <div class="sup-actions">
+        <button class="btn ${items.length ? "ghost" : "primary"} sm" onclick="readSupply()" ${U.busy ? "disabled" : ""}>${
+          busy("read") ? `<span class="spin"></span>Reading` : "Read it"}</button>
+        ${items.length ? `<button class="btn primary sm" onclick="planSupply()" ${U.busy ? "disabled" : ""}>${
+          busy("plan") ? `<span class="spin"></span>Working it out` : "Plan where it goes"}</button>` : ""}
+      </div>
+      ${U.error ? `<div class="banner bad"><span class="bi">!</span><span>${esc(U.error)}</span></div>` : ""}
+      ${table}
+      ${result}
+    </div>`;
+}
+
+function dispatchRows(D) {
+  return (D.markets || []).map(g => {
     const placed = g.market !== "No destination on record";
     const pays = [g.days_to_pay != null ? `pays in about ${fmtInt(g.days_to_pay)} day${g.days_to_pay === 1 ? "" : "s"}` : "",
                   g.owed && !g.note ? `owes R ${fmt(g.owed)}` : ""].filter(Boolean).join(" · ");
@@ -3943,6 +4155,12 @@ function dispatchBlock(d) {
         ${g.over ? `<span class="dsp-over">${fmtInt(g.over)} more than it usually takes</span>` : ""}</div>
     </li>`;
   }).join("");
+}
+
+function dispatchBlock(d) {
+  const D = d.dispatch;
+  if (!D || !(D.markets || []).length) return "";
+  const rows = dispatchRows(D);
   return `<div class="card ins-card dsp-card">
       <div class="ins-card-head"><h2>Where it goes</h2>
         <button class="btn ghost sm" onclick="saveOrderSheet('dispatch')">${icon("download")}Dispatch sheet</button></div>

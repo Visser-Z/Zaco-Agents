@@ -38,7 +38,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from . import dispatch_sheet, market_summary, overlap
+from . import dispatch_sheet, market_summary, overlap, supply
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -1526,6 +1526,98 @@ async def get_dispatch_sheet(
         pdf, media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="{dispatch_sheet.filename(plan)}"',
+                 "Cache-Control": "no-store"})
+
+
+# --- the supplier's stock ----------------------------------------------------
+# The supplier has a fixed amount each week. These read the list as pasted,
+# split exactly that stock across the markets, have the agent write it up, and
+# draw it as a dispatch sheet. The split is computed; the agent only words it.
+
+def _supply_items(items: str) -> list[dict]:
+    import json
+
+    try:
+        parsed = json.loads(items or "[]")
+    except ValueError as exc:
+        raise HTTPException(400, f"Could not read the stock list: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise HTTPException(400, "The stock list should be a list of products and cartons.")
+    return parsed
+
+
+async def _supply_plan(user: User | None, items: str, months: int, days: int) -> dict:
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    full = procurement.build(rows, payments, months, days=days)
+    return supply.plan(full, _supply_items(items), rows, payments, months)
+
+
+@app.post("/api/procurement/supply/read")
+async def read_supply(
+    text: str = Form(..., max_length=20000),
+    months: int = Form(scorecard.DEFAULT_MONTHS),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """The supplier's list as pasted, each line matched to the products it
+    could be. Nothing is decided here: a line two products fit is left for a
+    person to pick."""
+    rows = await _history_rows(user)
+    payments = await _saved_payments(user)
+    full = procurement.build(rows, payments, months)
+    return {"items": supply.read(text, full.get("lines") or []),
+            "products": sorted(l["product"] for l in full.get("lines") or [])}
+
+
+@app.post("/api/procurement/supply/plan")
+async def plan_supply(
+    items: str = Form(...),
+    months: int = Form(scorecard.DEFAULT_MONTHS),
+    days: int = Form(7),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Exactly the supplier's stock, split across the markets."""
+    plan = await _supply_plan(user, items, months, days)
+    return {"dispatch": plan["dispatch"], "supply": plan["supply"],
+            "horizon": plan.get("horizon"),
+            "lines": [{"product": l["product"], "cartons": l["take_on"],
+                       "planned": l.get("planned"), "send": l.get("send") or []}
+                      for l in plan["lines"]]}
+
+
+@app.post("/api/procurement/supply/brief")
+async def brief_supply(
+    items: str = Form(...),
+    months: int = Form(scorecard.DEFAULT_MONTHS),
+    days: int = Form(7),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """The agent's loading instructions for this week's stock."""
+    if not assistant.configured():
+        raise HTTPException(503, assistant.NOT_SET_UP)
+    plan = await _supply_plan(user, items, months, days)
+    try:
+        text = await run_in_threadpool(assistant.supply_brief, plan)
+    except assistant.AssistantError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return {"text": text, "model": assistant.model()}
+
+
+@app.post("/api/procurement/supply/dispatch.pdf")
+async def supply_dispatch_sheet(
+    items: str = Form(...),
+    months: int = Form(scorecard.DEFAULT_MONTHS),
+    days: int = Form(7),
+    prepared_for: str | None = Form(None),
+    user: User | None = Depends(require_user),
+) -> Response:
+    """This week's stock as a dispatch sheet, by market."""
+    plan = await _supply_plan(user, items, months, days)
+    pdf = await run_in_threadpool(dispatch_sheet.build, plan, None, prepared_for)
+    name = dispatch_sheet.filename(plan).replace("zaco-dispatch", "zaco-supply-dispatch")
+    return Response(
+        pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{name}"',
                  "Cache-Control": "no-store"})
 
 

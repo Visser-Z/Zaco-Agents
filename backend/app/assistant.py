@@ -1086,6 +1086,59 @@ def plan_brief(rows: list[dict], payments: list[dict], months: int) -> str:
     return _short_answer(PLAN_SYSTEM, plan_context(plan))
 
 
+SUPPLY_SYSTEM = """You tell the operator of Zaco Agents, a South African fresh-produce business, where to send this week's stock from the supplier.
+
+How the business works: Zaco takes fruit on consignment, sends it to market agents at fresh-produce markets, and earns a commission on what the market returns. There is no purchase price anywhere in this data, so never talk about margin, cost or profit: every rand figure is what the market is expected to return.
+
+You are given the supplier's stock and the split already computed: for each market and agent, the cartons of each product to send there, why that market (it sold what it got, how fast it clears, how much it has shown it can take), where a market is being sent more than it has taken before, and how each market pays, including money it owes and for how long. Use only those figures. Never move cartons between markets yourself, never add or estimate anything, and never name a product or market that is not in the list.
+
+Write it as loading instructions:
+- Open with one line: how many cartons of how many products, to how many markets.
+- Then market by market, biggest load first: the market and agent, then each product and its cartons on one line, with the one reason that matters.
+- Where a market is being sent more than it has taken before, say so plainly and that the price may give.
+- Where a market is sitting on old money, say so before its load, and that it is the owner's call whether to send it more.
+- Where the supplier has more of a product than the markets have been taking, or less than the plan wanted, say so in one line each.
+- List anything on the supplier's list that could not be matched to a product on the book.
+- Under 300 words. Plain sentences, short lists, no headings. Money as "R 12 500,00"."""
+
+
+def supply_context(plan: dict) -> str:
+    """The supplier's stock as split, for the model to write up."""
+    d = plan.get("dispatch") or {}
+    sup = plan.get("supply") or {}
+    days = (plan.get("horizon") or {}).get("label") or "this week"
+    out = ["## This week's supplier stock, split by market (computed, do not recalculate)",
+           f"Stock: {sup.get('cartons', 0)} cartons of {sup.get('products', 0)} products, "
+           f"for {days}."]
+    for g in d.get("markets") or []:
+        head = f"\n### {g['market']}" + (f" via {g['market_agent']}" if g.get("market_agent") else "")
+        out.append(head + f": {g['cartons']} cartons, expected back {_rand(g.get('value') or 0)}.")
+        if g.get("note"):
+            out.append(f"Payment warning: {g['note']}.")
+        elif g.get("days_to_pay") is not None:
+            out.append(f"Pays about {g['days_to_pay']:.0f} days after the sale.")
+        for l in g["lines"]:
+            over = (f" That is {l['over']} cartons more than this market has taken in the time."
+                    if l.get("over") else "")
+            out.append(f"- {l['product']}: {l['cartons']} cartons. Why: {l.get('why') or 'n/a'}.{over}")
+    for x in sup.get("over") or []:
+        out.append(f"Supplier has more than the markets have been taking: {x['product']}, "
+                   f"{x['have']} cartons against about {x['plan']} the plan expected to sell.")
+    for x in sup.get("short") or []:
+        out.append(f"Supplier has less than the plan wanted: {x['product']}, {x['have']} "
+                   f"cartons against {x['plan']}.")
+    for x in sup.get("unknown") or []:
+        out.append(f"Not matched to any product on the book: \"{x['text']}\" ({x['cartons']} cartons).")
+    return "\n".join(out)
+
+
+def supply_brief(plan: dict) -> str:
+    """Where to send this week's supplier stock, written over the computed split."""
+    if not (plan.get("dispatch") or {}).get("markets") and not (plan.get("supply") or {}).get("unknown"):
+        raise AssistantError("Nothing on the supplier's list matched a product with history.")
+    return _short_answer(SUPPLY_SYSTEM, supply_context(plan))
+
+
 WHERE_SYSTEM = """You write the recommendation at the top of the "Where to send it" section of ZacoAgents, for the operator of Zaco Agents, a South African fresh-produce business that consigns fruit to market agents at several fresh-produce markets.
 
 You are given a computed comparison of every market and agent each product has gone to. Every figure in it is exact. Use only those figures: never add, average or estimate anything yourself, and never invent a destination.

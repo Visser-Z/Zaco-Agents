@@ -946,6 +946,16 @@
                white-space: nowrap; overflow: hidden; }
   .owed-when .wsig { text-transform: none; letter-spacing: 0; font-size: 10.5px; }
   .owed-when em { font-style: normal; font-size: 11px; color: var(--ink-faint); }
+  /* A month-start question, under the tabs on every page. */
+  .notice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 22px;
+            background: var(--warn-tint); border-bottom: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+            font-size: 13px; color: var(--ink); }
+  .notice[hidden] { display: none; }
+  .notice .bi { color: var(--warn); display: inline-flex; }
+  .notice-text { flex: 1 1 320px; min-width: 0; line-height: 1.45; }
+  .notice-acts { display: flex; gap: 8px; flex: none; }
+  .carry-tag { font-size: 10.5px; font-weight: 650; padding: 1px 7px; border-radius: 999px;
+               background: var(--accent-tint); color: var(--accent-strong); margin-left: 6px; white-space: nowrap; }
   /* What the market's own summary says about the line. */
   .mkt-says { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-faint);
               white-space: normal; line-height: 1.4; }
@@ -1478,6 +1488,7 @@
     <button class="tab" data-module="procure" onclick="setModule('procure')">Procurement</button>
   </nav>
 
+  <div class="notice" id="notice" hidden></div>
   <div class="body">
     <main class="main" id="main"></main>
   </div>
@@ -1993,10 +2004,11 @@ function setModule(m) {
 function go(screen) { S.screen = screen; render(); main.scrollTo(0, 0); }
 function render() {
   syncModuleNav();
+  renderDock();
+  renderNotice();
   const kept = document.querySelector('.chart-wrap[data-keep="day"]');
   if (kept) S.chartScroll = kept.scrollLeft;
   setTimeout(settleCharts);
-  renderDock();
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
   if (S.module === "reports") return renderReports();
@@ -2004,6 +2016,76 @@ function render() {
   if (S.busy) return renderBusy();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
+}
+
+/* The start of a month: last month's unsold stock is still on the floor, and
+   the new month's Stock on Hand will not show it until it is carried in.
+   Asked once a month, on whatever page is open, and the answer is shared by
+   the whole team. "Not now" is remembered on this device only. */
+const CARRY_KEY = "zacon.carry.later";
+async function checkCarryover() {
+  if (!S.live) return;
+  try {
+    const r = await api("/api/tracking/carryover");
+    if (r.ok) { S.carry = await r.json(); render(); }
+  } catch { /* the notice is a nicety; the app works without it */ }
+}
+function monthName(m) {
+  try { return new Date(m + "-01T00:00:00").toLocaleString("en-ZA", { month: "long" }); }
+  catch { return m; }
+}
+function renderNotice() {
+  const el = document.getElementById("notice");
+  if (!el) return;
+  const C = S.carry;
+  let later = null;
+  try { later = localStorage.getItem(CARRY_KEY); } catch { /* private window */ }
+  if (!C || !C.pending || later === C.month) { el.hidden = true; el.innerHTML = ""; return; }
+  const to = monthName(C.month), from = monthName(C.from_month);
+  el.hidden = false;
+  el.innerHTML = `<span class="bi">${icon("box", 15)}</span>
+    <span class="notice-text"><b>It's ${esc(to)}.</b> ${fmtInt(C.cartons)} cartons from ${esc(from)} and before
+      are still at ${fmtInt(C.markets)} market${C.markets === 1 ? "" : "s"}. Move them into ${esc(to)}'s stock on hand?
+      What they sell for from now counts in ${esc(to)}, and so does the money; what sold in ${esc(from)} stays in ${esc(from)}.</span>
+    <span class="notice-acts">
+      <button class="btn primary sm" onclick="carryStockOver()" ${C.busy ? "disabled" : ""}>${C.busy
+        ? `<span class="spin"></span>Moving` : `Move into ${esc(to)}`}</button>
+      <button class="btn ghost sm" onclick="carryLater()">Not now</button>
+    </span>`;
+}
+async function carryStockOver() {
+  const C = S.carry;
+  if (!C) return;
+  C.busy = true; renderNotice();
+  try {
+    const body = new FormData();
+    body.append("month", C.month);
+    const r = await api("/api/tracking/carryover", { method: "POST", body });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.detail || `HTTP ${r.status}`);
+    C.pending = false;
+    toast(`${fmtInt(out.cartons)} cartons moved into ${monthName(C.month)}'s stock on hand`);
+    if (S.module === "tracking") loadTracking();
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    C.busy = false; render();
+  }
+}
+async function undoCarryover(month) {
+  try {
+    const body = new FormData();
+    body.append("month", month);
+    const r = await api("/api/tracking/carryover/undo", { method: "POST", body });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    toast(`Carried stock taken back out of ${monthName(month)}`);
+    await checkCarryover();
+    if (S.module === "tracking") loadTracking();
+  } catch (e) { toast(e.message || String(e), true); }
+}
+function carryLater() {
+  try { localStorage.setItem(CARRY_KEY, S.carry.month); } catch { /* shown again next load */ }
+  renderNotice();
 }
 
 /** A chart that scrolls opens on its newest days, and stays where it was put
@@ -2787,7 +2869,9 @@ function renderTracking() {
       <span class="trk-d" title="${r.arrived_basis === "received"
         ? "The market's delivery date."
         : "The Daily Sales report prints no arrival date, so this is the first day it sold."}">${
-        r.arrived_basis === "received" ? "Received" : "First sold"} ${esc(shortDate(r.arrived))}</span>
+        r.arrived_basis === "received" ? "Received" : "First sold"} ${esc(shortDate(r.arrived))}${
+        r.carried_from ? `<span class="carry-tag" title="Carried into this month's stock on hand">from ${esc(monthName(r.carried_from))}</span>` : ""}${
+        r.carried_to ? `<span class="carry-tag" title="Still on the floor, and carried into a later month">moved to ${esc(monthName(r.carried_to))}</span>` : ""}</span>
       <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
       <button class="xbtn" title="Close this one off"
         onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></li>`;
@@ -5980,6 +6064,8 @@ async function startApp() {
   showUserChip();
   await loadCodes();
   render();
+  // The start of a month asks whether to carry last month's stock in.
+  checkCarryover();
 }
 
 (async function init() {

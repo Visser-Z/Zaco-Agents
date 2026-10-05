@@ -1534,7 +1534,8 @@ def on_hand(group: list[dict]) -> tuple[float, float]:
 
 def stock_on_hand(sales: list[dict], today: date | None = None,
                   closed: set[str] | frozenset[str] = frozenset(),
-                  lo: str | None = None, hi: str | None = None) -> dict:
+                  lo: str | None = None, hi: str | None = None,
+                  carried: list[dict] | None = None) -> dict:
     """Everything still unsold, grouped by the market it is sitting at.
 
     A line is one consignment: cartons sent less cartons sold, counted once per
@@ -1575,10 +1576,27 @@ def stock_on_hand(sales: list[dict], today: date | None = None,
             "tier": stock_tier(days),
         })
     # Scoped by when the stock arrived, as slow stock always was: "August's
-    # stock" is what August put on the floor.
+    # stock" is what August put on the floor. Stock carried into the month in
+    # view is that month's too, from the day it was carried; stock carried on
+    # out of it is still shown where it arrived, and says where it went.
     if lo or hi:
-        lines = [r for r in lines
-                 if not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)]
+        month = (lo or hi)[:7]
+        into = {c["ref"] for c in carried or [] if c.get("month") == month}
+        moved = {}
+        for c in carried or []:
+            if hi and c.get("month", "") > hi[:7]:
+                moved.setdefault(c["ref"], c["month"])
+        kept = []
+        for r in lines:
+            inside = not (lo and r["arrived"] < lo) and not (hi and r["arrived"] > hi)
+            if r["ref"] in into and not inside:
+                r["carried_from"] = r["arrived"][:7]
+            elif not inside:
+                continue
+            if r["ref"] in moved:
+                r["carried_to"] = moved[r["ref"]]
+            kept.append(r)
+        lines = kept
     shut = [r for r in lines if is_closed("slow", r, closed)]
     lines = [r for r in lines if not is_closed("slow", r, closed)]
 
@@ -1662,10 +1680,40 @@ def in_period(sales: list[dict], lo: str | None, hi: str | None) -> list[dict]:
     return out
 
 
+def carryover_status(sales: list[dict], today: date | None = None,
+                     closed: set[str] | frozenset[str] = frozenset(),
+                     carried: list[dict] | None = None) -> dict:
+    """Whether this month still has last month's unsold stock to carry in.
+
+    What is offered is every consignment still on the floor that arrived
+    before the first of this month. Once any of it has been carried into this
+    month the question has been answered, and is not asked again.
+    """
+    today = today or date.today()
+    month = today.strftime("%Y-%m")
+    start = today.replace(day=1).isoformat()
+    previous = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    left = [r for m in stock_on_hand(sales, today, closed)["markets"] for r in m["lines"]
+            if r["arrived"] < start]
+    done = [c for c in carried or [] if c.get("month") == month]
+    return {
+        "month": month,
+        "from_month": previous,
+        "lines": len(left),
+        "cartons": sum(r["cartons_left"] for r in left),
+        "markets": len({r.get("market") for r in left}),
+        "carried": len(done),
+        "carried_cartons": sum(int(c.get("cartons") or 0) for c in done),
+        "pending": bool(left) and not done,
+        "_left": left,
+    }
+
+
 def compute(sales: list[dict], payments: list[dict], today: date | None = None,
             start: str | None = None, end: str | None = None,
             closed: set[str] | frozenset[str] = frozenset(),
-            month: str | None = None, week: str | None = None) -> dict:
+            month: str | None = None, week: str | None = None,
+            carried: list[dict] | None = None) -> dict:
     """Everything the Tracking tab renders.
 
     A month answers for its own sales. Every sale on the book is settled
@@ -1698,7 +1746,7 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
         "sales_by_day": sales_by_day(filled, d_start, d_end,
                                      settled=(owed_by_row, paid_by_row)),
         "slow_stock": slow_stock(sales, today, closed, lo, hi),
-        "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi),
+        "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi, carried),
         # Across the whole book: a payment to check does not belong to a month.
         "flags": payment_flags(sales, payments),
         "span": date_span(sales),

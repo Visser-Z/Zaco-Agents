@@ -351,6 +351,7 @@ _MIGRATIONS = {
     "sale_day": "0020_unique_per_sale_day.sql",
     "dismissals": "0016_dismissals.sql",
     "market_summaries": "0024_market_summaries.sql",
+    "stock_carryovers": "0025_stock_carryovers.sql",
     "period_month": "0017_period_blocks.sql",
     "payments": "0015_payments.sql",
     "statements_unique_per_agent": "0014_statements_per_day.sql",
@@ -1016,6 +1017,73 @@ def _apply_checks(payments: list[dict], checks: list[dict]) -> None:
                 line["check"] = "keep"
 
 
+async def _stock_carryovers(user: User | None) -> list[dict]:
+    """Stock carried from one month into the next, read as the caller."""
+    if user is None:
+        return []
+    try:
+        return await db_get(user, "stock_carryovers", {
+            "select": "month,ref,consignment_id,cartons,arrived", "limit": "20000"})
+    except Exception:  # noqa: BLE001 -- before migration 0025 nothing is carried
+        return []
+
+
+@app.get("/api/tracking/carryover")
+async def carryover_status(user: User | None = Depends(require_user)) -> dict:
+    """Whether this month still has last month's unsold stock to carry in, for
+    the notice the app shows on any page at the start of a month."""
+    if user is None:
+        return {"pending": False}
+    status = tracking.carryover_status(await _history_rows(user), None,
+                                       await _closed_refs(user), await _stock_carryovers(user))
+    status.pop("_left", None)
+    return status
+
+
+@app.post("/api/tracking/carryover")
+async def carry_stock_over(
+    month: str = Form(..., pattern=r"^\d{4}-\d{2}$"),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Carry everything still on the floor from before `month` into it.
+
+    Only where it is shown changes: a carton sold in the new month is that
+    month's sale and its money lands in that month, as it always did.
+    """
+    if user is None:
+        raise HTTPException(401, "Sign in to carry stock over.")
+    sales = await _history_rows(user)
+    closed = await _closed_refs(user)
+    first = date.fromisoformat(month + "-01")
+    left = [r for m in tracking.stock_on_hand(sales, first, closed)["markets"]
+            for r in m["lines"] if r["arrived"] < first.isoformat()]
+    rows = [{"month": month, "ref": r["ref"], "consignment_id": r.get("consignment_id"),
+             "product": r.get("product"), "market": r.get("market"),
+             "cartons": r["cartons_left"], "arrived": r["arrived"], "created_by": user.id}
+            for r in left]
+    if rows:
+        try:
+            await db_post(user, "stock_carryovers", rows, upsert=True,
+                          on_conflict="month,ref", resolution="merge-duplicates")
+        except Exception as exc:  # noqa: BLE001
+            if (migration := _pending_migration(exc)):
+                raise HTTPException(400, f"Carrying stock over needs the {migration} migration.") from exc
+            raise HTTPException(400, f"Could not carry the stock over: {exc}") from exc
+    return {"month": month, "lines": len(rows), "cartons": sum(r["cartons"] for r in rows)}
+
+
+@app.post("/api/tracking/carryover/undo")
+async def undo_carry_over(
+    month: str = Form(..., pattern=r"^\d{4}-\d{2}$"),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Take a month's carried stock back out of it."""
+    if user is None:
+        raise HTTPException(401, "Sign in to undo a carry-over.")
+    await db_delete(user, "stock_carryovers", {"month": f"eq.{month}"})
+    return {"month": month, "undone": True}
+
+
 async def _closed_refs(user: User | None) -> set[str]:
     """Tracking lines the team has closed off, read as the caller."""
     if user is None:
@@ -1092,8 +1160,13 @@ async def get_tracking(
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
     closed = await _closed_refs(user)
+    carried = await _stock_carryovers(user)
     out = tracking.compute(sales, payments, start=date_from, end=date_to,
-                           closed=closed, month=month, week=week)
+                           closed=closed, month=month, week=week, carried=carried)
+    # Whether this month still has last month's unsold stock to carry in.
+    status = tracking.carryover_status(sales, None, closed, carried)
+    status.pop("_left", None)
+    out["carryover"] = status
     # What has been decided, so a decision can be seen and undone.
     out["flags"]["decisions"] = await _payment_checks(user)
     # Every outstanding line held against the market's own summaries.

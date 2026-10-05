@@ -1680,21 +1680,38 @@ def in_period(sales: list[dict], lo: str | None, hi: str | None) -> list[dict]:
     return out
 
 
+def last_months_stock(sales: list[dict], month: str, today: date | None = None,
+                      closed: set[str] | frozenset[str] = frozenset(),
+                      carried: list[dict] | None = None) -> list[dict]:
+    """What the month before `month` showed as its Stock on Hand: the stock
+    that arrived in it, and whatever had been carried into it.
+
+    Not everything still listed as unsold from before. The first draft offered
+    that, and on 1 October 2026 it put 328 cartons of April strawberries,
+    172 days old, beside September's 54: stock the market's report never
+    marked sold or written off, which is no more on the floor in October than
+    it was in September.
+    """
+    first = date.fromisoformat(month + "-01")
+    last = first - timedelta(days=1)
+    lo, hi = last.replace(day=1).isoformat(), last.isoformat()
+    shown = stock_on_hand(sales, today or date.today(), closed, lo, hi, carried)
+    return [r for m in shown["markets"] for r in m["lines"]]
+
+
 def carryover_status(sales: list[dict], today: date | None = None,
                      closed: set[str] | frozenset[str] = frozenset(),
                      carried: list[dict] | None = None) -> dict:
     """Whether this month still has last month's unsold stock to carry in.
 
-    What is offered is every consignment still on the floor that arrived
-    before the first of this month. Once any of it has been carried into this
-    month the question has been answered, and is not asked again.
+    What is offered is last month's Stock on Hand as that month shows it (see
+    ``last_months_stock``). Once any of it has been carried into this month
+    the question has been answered, and is not asked again.
     """
     today = today or date.today()
     month = today.strftime("%Y-%m")
-    start = today.replace(day=1).isoformat()
     previous = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-    left = [r for m in stock_on_hand(sales, today, closed)["markets"] for r in m["lines"]
-            if r["arrived"] < start]
+    left = last_months_stock(sales, month, today, closed, carried)
     done = [c for c in carried or [] if c.get("month") == month]
     return {
         "month": month,

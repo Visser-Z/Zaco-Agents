@@ -54,3 +54,22 @@ def test_carrying_stock_moves_no_sale_and_no_payment():
     moved = tracking.compute([SEPT, OCT], [], today=TODAY, month="2026-09", carried=carried)
     assert plain["payments"] == moved["payments"]
     assert plain["sales_by_day"] == moved["sales_by_day"]
+
+
+def test_only_last_months_stock_on_hand_is_offered_not_everything_ever_unsold():
+    """1 October 2026 offered 440 cartons: September's 54, and 328 cartons of
+    April strawberries the market's report never marked sold. Only what
+    September's own Stock on Hand shows is offered."""
+    april = sale(117230101, 217, 31, "2026-04-16", product="STRAWBERRIES NO VARIETY NOT GRADED")
+    status = tracking.carryover_status([april, SEPT, OCT], TODAY)
+    assert status["cartons"] == 40 and status["lines"] == 1
+
+
+def test_stock_carried_into_last_month_is_offered_on_again():
+    """Carried from August into September, still unsold: it is September's
+    stock on hand, so it is offered to October too."""
+    aug = sale(118000001, 80, 20, "2026-08-20", product="PLUMS RUBY STAR CLASS 1 LARGE")
+    ref = lines(tracking.stock_on_hand([aug], TODAY))[118000001]["ref"]
+    carried = [{"month": "2026-09", "ref": ref, "cartons": 60}]
+    status = tracking.carryover_status([aug, SEPT, OCT], TODAY, carried=carried)
+    assert status["cartons"] == 100 and status["lines"] == 2

@@ -2062,8 +2062,8 @@ function renderNotice() {
   const to = monthName(C.month), from = monthName(C.from_month);
   el.hidden = false;
   el.innerHTML = `<span class="bi">${icon("box", 15)}</span>
-    <span class="notice-text"><b>It's ${esc(to)}.</b> ${fmtInt(C.cartons)} cartons from ${esc(from)} and before
-      are still at ${fmtInt(C.markets)} market${C.markets === 1 ? "" : "s"}. Move them into ${esc(to)}'s stock on hand?
+    <span class="notice-text"><b>It's ${esc(to)}.</b> ${esc(from)}'s stock on hand is ${fmtInt(C.cartons)} carton${C.cartons === 1 ? "" : "s"}
+      on ${fmtInt(C.lines)} line${C.lines === 1 ? "" : "s"} at ${fmtInt(C.markets)} market${C.markets === 1 ? "" : "s"}. Move it into ${esc(to)}'s stock on hand?
       What they sell for from now counts in ${esc(to)}, and so does the money; what sold in ${esc(from)} stays in ${esc(from)}.</span>
     <span class="notice-acts">
       <button class="btn primary sm" onclick="carryStockOver()" ${C.busy ? "disabled" : ""}>${C.busy

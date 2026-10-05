@@ -1054,9 +1054,8 @@ async def carry_stock_over(
         raise HTTPException(401, "Sign in to carry stock over.")
     sales = await _history_rows(user)
     closed = await _closed_refs(user)
-    first = date.fromisoformat(month + "-01")
-    left = [r for m in tracking.stock_on_hand(sales, first, closed)["markets"]
-            for r in m["lines"] if r["arrived"] < first.isoformat()]
+    left = tracking.last_months_stock(sales, month, None, closed,
+                                      await _stock_carryovers(user))
     rows = [{"month": month, "ref": r["ref"], "consignment_id": r.get("consignment_id"),
              "product": r.get("product"), "market": r.get("market"),
              "cartons": r["cartons_left"], "arrived": r["arrived"], "created_by": user.id}

@@ -613,6 +613,7 @@ def month_settlement(rows: list[dict], payments: list[dict],
             "month": month,
             "sold": round(sold, 2),
             "paid": status["total_paid"],
+            "paid_gross": status["total_paid_gross"],
             "owed": status["still_to_come"],
             "debt": status["debt"],
             "to_check": status["to_check"],
@@ -649,7 +650,8 @@ def settlement_context(rows: list[dict], payments: list[dict],
            "leaves blank. It is NOT whether a consignment has been paid. What was paid "
            "comes from the payment reports and is matched onto the sales here. Use this "
            "section for anything about money owed or received.",
-           f"Paid so far: {_rand(status['total_paid'])} nett over "
+           f"Paid so far: {_rand(status['total_paid_gross'])} gross, as the market counts it, "
+           f"of which {_rand(status['total_paid'])} reached Zaco nett, over "
            f"{status['batches_paid']} settled batches.",
            f"Still to come: {_rand(status['still_to_come'])} over "
            f"{status['batches_outstanding']} batches"
@@ -691,10 +693,14 @@ def settlement_context(rows: list[dict], payments: list[dict],
                    "its own sales, and the months add up to the totals above. For any "
                    "question about a particular month, answer from this table and nowhere "
                    "else.")
-        out.append("month | sold (R) | paid for it (R, nett) | still owed on it (R) | "
-                   "of which to chase (R) | of which to check (R) | lines outstanding")
+        out.append("'Paid, gross' is what the market itself reports as paid to date, before "
+                   "the agent's deductions; compare it with the market's own reports. 'Reached "
+                   "Zaco, nett' is what arrived after the deductions.")
+        out.append("month | sold (R) | paid, gross (R) | reached Zaco, nett (R) | still owed "
+                   "on it (R) | of which to chase (R) | of which to check (R) | lines outstanding")
         for m in months:
-            out.append(f"{m['month']} | {_fmt(m['sold'])} | {_fmt(m['paid'])} | "
+            out.append(f"{m['month']} | {_fmt(m['sold'])} | {_fmt(m['paid_gross'])} | "
+                       f"{_fmt(m['paid'])} | "
                        f"{_fmt(m['owed'])} | {_fmt(m['debt'])} | {_fmt(m['to_check'])} | "
                        f"{m['lines']}")
         owing = [m for m in months if m["markets"] or m["credit"]]

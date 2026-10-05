@@ -762,6 +762,10 @@ def _allocate(sales: list[dict], payments: list[dict]):
                 take = min(credit, left[id(row)])
                 if take > 0.005:
                     left[id(row)] -= take
+                    # Paid, as the market counts it: its Sales and Cashflow
+                    # report shows 14587's September R 14 080,00 as paid to
+                    # date. No new money arrived for it, so the Nett stays put.
+                    gross_paid[id(row)] += take
                     credit -= take
             back[id(ret)] = credit
 
@@ -904,6 +908,10 @@ def payment_status(sales: list[dict], payments: list[dict],
     # Paid means paid FOR this window's sales, whenever the money came in, so
     # the month the fruit sold in is the month that shows it paid.
     paid_for_window = round(sum(paid_by_row[id(r)] for rows in scoped.values() for r in rows), 2)
+    # The same, before the agents' deductions: what the market itself reports
+    # as "paid to date" for these sales, so the two can be held side by side.
+    gross_for_window = round(sum(extra["gross_paid"][id(r)] for rows in scoped.values()
+                                 for r in rows), 2)
 
     still_to_come = 0.0
     matched = outstanding = 0
@@ -1032,6 +1040,7 @@ def payment_status(sales: list[dict], payments: list[dict],
 
     return {
         "total_paid": paid_for_window,
+        "total_paid_gross": gross_for_window,
         "received_in_window": paid_in_window,
         "payments_in_window": len(in_window),
         "still_to_come": round(still_to_come, 2),

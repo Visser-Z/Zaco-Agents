@@ -269,3 +269,15 @@ def test_a_payment_with_no_lines_at_all_pays_the_whole_days_it_adds_up_to():
     assert status["still_to_come"] == 3610.0
     assert status["unattributed"] == {"count": 1, "gross": 3000.0, "nett": 2550.0,
                                       "accsales": ["SPR*SUB*46255"]}
+
+
+def test_sales_a_return_paid_for_count_as_paid_the_way_the_market_counts_them():
+    """The market's Sales and Cashflow report shows 14587's September R 14 080,00
+    as paid to date: the August return covered it. Before the agents' cut that
+    is paid; after it, no new money reached Zaco for it."""
+    sales, pays = tshwane_14587()
+    lo, hi = analytics_bounds("2026-09")
+    sept = tracking.payment_status(sales, pays, lo=lo, hi=hi)
+    assert sept["total_paid_gross"] == 14080.0
+    assert sept["total_paid"] == 0.0
+    assert sept["still_to_come"] == 0.0

@@ -3020,14 +3020,14 @@ function renderTracking() {
     <section class="screen ins">
       ${head}
       <div class="kpis kpis-2">
-        ${kpiCard("Paid", "R " + fmt(p.total_paid_gross != null ? p.total_paid_gross : p.total_paid),
+        ${kpiCard("Paid", "R " + fmt(p.total_paid),
           // Paid is money for THIS period's sales, whenever it arrived. What
           // actually came in during the period differs by the sales on either
           // edge of it, so it is named beside the figure, not swapped in.
-          // The headline is before the agents' deductions, the way the market's
-          // own Sales and Cashflow report counts "paid to date"; what reached
-          // Zaco after them is right under it.
-          (p.total_paid_gross != null ? `R ${fmt(p.total_paid)} reached you after the agents' cut · ` : "")
+          // The headline is what reached Zaco after the agents' deductions;
+          // under it, the figure before them, which is how the market's own
+          // Sales and Cashflow report counts "paid to date".
+          (p.total_paid_gross != null ? `R ${fmt(p.total_paid_gross)} paid before the agents' cut · ` : "")
           + `${fmtInt(p.batches_paid)} batch${p.batches_paid === 1 ? "" : "es"} settled`
           + ((T.month || T.week) && p.received_in_window !== undefined
              ? ` · R ${fmt(p.received_in_window)} came in during ${esc(trackingScope(T))}` : ""),

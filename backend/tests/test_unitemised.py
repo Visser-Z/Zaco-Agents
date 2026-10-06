@@ -281,3 +281,33 @@ def test_sales_a_return_paid_for_count_as_paid_the_way_the_market_counts_them():
     assert sept["total_paid_gross"] == 14080.0
     assert sept["total_paid"] == 0.0
     assert sept["still_to_come"] == 0.0
+
+
+def test_a_payment_with_no_lines_pays_one_product_on_a_mixed_delivery():
+    """Tshwane PRE*BT*376973, 22 April, R 20 128,00, no products listed: DN
+    14890's strawberries on 20 and 21 April. The Red Globe sold the same days,
+    so whole days of the delivery never come to it; the strawberries alone do,
+    once their 23 April return is counted, and the later itemised payments were
+    already placed by date on the oldest days."""
+    m, straw, globe = "TSHWANE MARKET", "STRAWBERRIES NO VARIETY NOT GRADED", "GRAPES RED GLOBE CLASS 1"
+    row = lambda cid, prod, c, v, d: {"consignment_id": cid, "dn": 14890, "product": prod,
+                                      "market": m, "market_agent": "Farmers Trust",
+                                      "cartons_sold": c, "price": abs(v / c) if c else 0,
+                                      "sales_total": v, "last_sale": d, "date_received": "2026-04-20",
+                                      "group_date": "2026-04-20", "qty_received": 103}
+    sales = [row(117264101, straw, 8, 2978.0, "2026-04-20"),
+             row(117264101, straw, 49, 17150.0, "2026-04-21"),
+             row(117264101, straw, 27, 8700.0, "2026-04-22"),
+             row(117264101, straw, -6, -2650.0, "2026-04-23"),
+             row(117264101, straw, 2, 700.0, "2026-04-24"),
+             row(117264101, straw, 23, 147.2, "2026-04-25"),
+             row(117264201, globe, 82, 10004.0, "2026-04-21")]
+    pays = [payment("PRE*BT*376973", 14890, "2026-04-22", 20128.0, []),
+            payment("PRE*BT*376975", 14890, "2026-04-22", 10004.0, []),
+            payment("PRE*BT*377356", 14890, "2026-04-24", 6050.0,
+                    [{"line_no": 1, "product": straw, "sold": 21, "sales_total": 6050.0}]),
+            payment("PRE*BT*377743", 14890, "2026-04-28", 847.2,
+                    [{"line_no": 1, "product": straw, "sold": 25, "sales_total": 847.2}])]
+    status = tracking.payment_status(sales, pays)
+    assert status["outstanding"] == []
+    assert tracking.payment_flags(sales, pays)["count"] == 0

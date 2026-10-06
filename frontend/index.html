@@ -2297,12 +2297,25 @@ function marketBlock(M) {
 
 function flagsBlock(F) {
   if (!F) return "";
-  const items = F.items || [];
+  const all = F.items || [];
   const decisions = F.decisions || [];
-  if (!items.length && !decisions.length) return "";
+  if (!all.length && !decisions.length) return "";
+  // A payment to check is shown in the month it was paid and under All time,
+  // not in every month: an April payment sitting on October's page read as
+  // something wrong with October. The buttons keep each item's place in the
+  // full list, which is what they act on.
+  const T = S.tracking;
+  const month = T.month || null;
+  const shown = all.map((f, i) => [f, i]).filter(([f]) => !month || (f.date || "").startsWith(month));
+  const elsewhere = all.length - shown.length;
+  const items = shown.map(([f]) => f);
+  if (!items.length && !decisions.length) {
+    return elsewhere ? `<p class="trk-note warn">${fmtInt(elsewhere)} payment${elsewhere === 1 ? "" : "s"} from
+      other months to check. <button class="linklike" onclick="setTrackingMonth('')">Show all time</button></p>` : "";
+  }
   const shortDn = c => `DN ${c.dn}${c.started ? ` · from ${niceDate(c.started) || c.started}` : ""}`
     + ` · ${c.owed > 0.005 ? "owes R " + fmt(c.owed) : "paid up"}`;
-  const rows = items.map((f, i) => `<li class="flag">
+  const rows = shown.map(([f, i]) => `<li class="flag">
       <div class="flag-head">
         <span class="flag-kind t-${esc(f.kind)}">${esc(f.label)}</span>
         <b>${esc(f.accsale)}</b>
@@ -2333,9 +2346,11 @@ function flagsBlock(F) {
         <div><h2>${items.length ? `${fmtInt(items.length)} payment${items.length === 1 ? "" : "s"} to check`
           : "Payments checked by hand"}</h2>
           <span class="trk-sum">${items.length
-            ? `R ${fmt(F.value)} the system could not place with certainty. Until each is
+            ? `R ${fmt(items.reduce((t, f) => t + (f.amount || 0), 0))} the system could not place with certainty. Until each is
                settled, Outstanding and Paid may be out by that much.`
-            : "Nothing is waiting. Every payment is matched by the rules or by a person."}</span></div>
+            : "Nothing is waiting. Every payment is matched by the rules or by a person."}${
+            elsewhere ? ` ${fmtInt(elsewhere)} more from other months under
+              <button class="linklike" onclick="setTrackingMonth('')">All time</button>.` : ""}</span></div>
       </header>
       ${items.length ? `<ul class="flag-list">${rows}</ul>` : ""}
       ${done}

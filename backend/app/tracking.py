@@ -596,9 +596,9 @@ def _delivery_rows(gap: dict, sales: list[dict], bound: dict) -> list[dict]:
             and (not market or r.get("market") == market)]
 
 
-def _whole_days(rows: list[dict], gap: dict, left: dict) -> list[dict]:
-    """The delivery's unpaid sales, oldest day first, if whole days of them
-    come to the unitemised money to the cent; otherwise nothing."""
+def _first_days(rows: list[dict], gap: dict, left: dict) -> list[dict]:
+    """These sales, oldest day first, if whole days of them come to the
+    unitemised money to the cent; otherwise nothing."""
     owing = [r for r in rows if left[id(r)] > 0.005
              and gap.get("date") and (selling_day(r) or "9999") <= gap["date"]]
     taken: list[dict] = []
@@ -611,6 +611,46 @@ def _whole_days(rows: list[dict], gap: dict, left: dict) -> list[dict]:
         if money > gap["left"]:
             break
     return []
+
+
+def _whole_days(rows: list[dict], gap: dict, left: dict) -> list[dict]:
+    """The delivery's unpaid sales the unitemised money pays for, or nothing.
+
+    Whole days of the whole delivery first: Subtropico's SPR*SUB*47500 was a
+    delivery's first day across all its products. Then whole days of one
+    product on it: Tshwane's PRE*BT*376973 paid R 20 128,00 for DN 14890's
+    strawberries on 20 and 21 April, and the Red Globe sold the same days
+    kept the whole delivery from ever coming to that. Last, the whole of what
+    one product on the delivery still owes, to the cent. Two products that
+    would both fit are a guess, and neither is taken.
+    """
+    whole = _first_days(rows, gap, left)
+    if whole:
+        return whole
+    by_cons: dict = defaultdict(list)
+    for r in rows:
+        by_cons[r.get("consignment_id")].append(r)
+    fits = [found for group in by_cons.values() if (found := _first_days(group, gap, left))]
+    if len(fits) == 1:
+        return fits[0]
+    if fits:
+        return []
+    # Last, everything one product on the delivery still owes, to the cent,
+    # whatever days it sold on. The itemised payments are placed first and by
+    # date, so where they paid later days than they were for, the days no
+    # longer line up, but what is owed in total still does: DN 14890's
+    # strawberries were R 20 128,00 short, and that is what was paid.
+    # A return on it counts against what it owes: DN 14890's strawberries
+    # had R 2 650,00 come back on 23 April, so R 22 778,00 of sales less that
+    # is the R 20 128,00 paid. (Returns are set against their consignment
+    # after this, and take the rest.)
+    exact = []
+    for group in by_cons.values():
+        owing = [r for r in group if left[id(r)] > 0.005]
+        back = sum(min(reconcile._num(r.get("sales_total")), 0.0) for r in group)
+        if owing and abs(sum(left[id(r)] for r in owing) + back - gap["left"]) < 0.005:
+            exact.append(owing)
+    return exact[0] if len(exact) == 1 else []
 
 
 def _allocate(sales: list[dict], payments: list[dict]):
@@ -731,11 +771,13 @@ def _allocate(sales: list[dict], payments: list[dict]):
         if key in lines:
             settle_pool(rows, lines[key])
 
-    # Money paid without a line: whole days of the same delivery, or nothing.
+    # Money paid without a line: whole days of the same delivery, or one
+    # product on it, or nothing.
     stage["pass"] = "unlisted"
-    for gap in gaps:
+    for gap in sorted(gaps, key=lambda g: g.get("date") or ""):
         for row in _whole_days(_delivery_rows(gap, sales, bound), gap, left):
-            pay(row, gap, left[id(row)])
+            if (amount := min(gap["left"], left[id(row)])) > 0.005:
+                pay(row, gap, amount)
 
     # A return pays what is still owed on its own consignment. The market keeps
     # one running balance per delivery: fruit it paid for and then took back

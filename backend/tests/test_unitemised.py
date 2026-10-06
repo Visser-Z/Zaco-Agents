@@ -311,3 +311,26 @@ def test_a_payment_with_no_lines_pays_one_product_on_a_mixed_delivery():
     status = tracking.payment_status(sales, pays)
     assert status["outstanding"] == []
     assert tracking.payment_flags(sales, pays)["count"] == 0
+
+
+def test_a_claw_back_with_no_products_takes_back_its_deliverys_returns():
+    """Tshwane PRE*BT*378057, 30 April, -R 13 200,00 with no products listed:
+    DN 14878's strawberries came back on the 18th and 20th after being paid.
+    Set against the returns on its own delivery, April has nothing to credit
+    and nothing clawed back unexplained."""
+    m, straw = "TSHWANE MARKET", "STRAWBERRIES NO VARIETY NOT GRADED"
+    row = lambda c, v, d: {"consignment_id": 117230401, "dn": 14878, "product": straw,
+                           "market": m, "market_agent": "Farmers Trust", "cartons_sold": c,
+                           "price": abs(v / c), "sales_total": v, "last_sale": d,
+                           "date_received": "2026-04-13", "group_date": "2026-04-13",
+                           "qty_received": 300}
+    sales = [row(100, 30000.0, "2026-04-14"), row(-28, -9700.0, "2026-04-18"),
+             row(-10, -3500.0, "2026-04-20")]
+    pays = [payment("PRE*BT*1", 14878, "2026-04-17", 30000.0,
+                    [{"product": straw, "sold": 100, "sales_total": 30000.0}]),
+            {"accsale": "PRE*BT*378057", "dn": 14878, "date": "2026-04-30", "gross": -13200.0,
+             "nett": 0.0, "lines": []}]
+    lo, hi = analytics_bounds("2026-04")
+    april = tracking.payment_status(sales, pays, lo=lo, hi=hi)
+    assert april["still_to_come"] == 0.0
+    assert april["credits"] == [] and april["reversals"] == []

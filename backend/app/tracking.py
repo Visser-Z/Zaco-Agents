@@ -815,19 +815,33 @@ def _allocate(sales: list[dict], payments: list[dict]):
     # then one settled account, not a credit on one side and a debt on the
     # other; whatever a claw-back does not account for is reported as before.
     absorbed: dict[int, float] = {}
+
+    def take_back(rows: list[dict], want: float) -> float:
+        taken = 0.0
+        for ret in sorted((r for r in rows if back.get(id(r), 0) > 0.005),
+                          key=lambda r: selling_day(r) or ""):
+            if want <= 0.005:
+                break
+            take = min(want, back[id(ret)])
+            back[id(ret)] -= take
+            want -= take
+            taken += take
+        return taken
+
     for rev in reversals:
         taken = 0.0
         for l in rev.get("lines") or []:
             want = -reconcile._num(l.get("sales_total"))
             rows = by_ref.get(("k", reconcile._key(rev.get("dn"), l.get("product"))), [])
-            for ret in sorted((r for r in rows if back.get(id(r), 0) > 0.005),
-                              key=lambda r: selling_day(r) or ""):
-                if want <= 0.005:
-                    break
-                take = min(want, back[id(ret)])
-                back[id(ret)] -= take
-                want -= take
-                taken += take
+            taken += take_back(rows, want)
+        if not rev.get("lines"):
+            # A claw-back printed with no products, only a total: Tshwane's
+            # PRE*BT*378057 took back R 13 200,00 on 30 April against DN
+            # 14878's strawberries returned on the 18th and 20th. Its own
+            # delivery, by FMS id or delivery note, is where to look.
+            rows = _delivery_rows({"fms_id": rev.get("fms_id"), "dn": rev.get("dn"),
+                                   "accsale": rev.get("accsale")}, sales, bound)
+            taken += take_back(rows, -reconcile._num(rev.get("gross")))
         absorbed[id(rev)] = round(taken, 2)
 
     owed: dict[int, float] = {}

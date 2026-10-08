@@ -965,8 +965,10 @@ async def _saved_payments(user: User | None) -> list[dict]:
         return []
     columns = "accsale,stm_no,market_agent,supplier_ref,dn,paid_on,nett,gross,lines"
     rows = None
-    # With the FMS id where migration 0021 has run, without it before.
-    for select in (columns + ",fms_id", columns):
+    # With the FMS id where migration 0021 has run, without it before. The
+    # market's deductions and the VAT on them were stored all along but never
+    # read, so Tracking could show what the market took only as one sum.
+    for select in (columns + ",deductions,vat,fms_id", columns + ",fms_id", columns):
         try:
             rows = await db_get(user, "payments", {"select": select, "limit": "10000"})
             break

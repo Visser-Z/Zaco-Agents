@@ -44,11 +44,11 @@ PRODUCTS = [
     ("GRANADILLAS NO VARIETY NOT GRADED NO SIZE (CARTON 5kg)", "Grana", 210),
 ]
 WHERE = [
-    ("TSHWANE MARKET", "Farmers Trust"),
-    ("JOBURG MKT - TFRESH", "Subtropico"),
-    ("JOBURG MKT - BR / MAR", "Growfresh Marco"),
-    ("DURBAN MARKET", "Growfresh Port Natal"),
-    ("SPRINGS MARKET", "Subtropico"),
+    ("TSHWANE MARKET", "Farmers Trust", "PRE*BT"),
+    ("JOBURG MKT - TFRESH", "Subtropico", "JOH*SUB"),
+    ("JOBURG MKT - BR / MAR", "Growfresh Marco", "JOH*MAR"),
+    ("DURBAN MARKET", "Growfresh Port Natal", "DUR*13"),
+    ("SPRINGS MARKET", "Subtropico", "SPR*SUB"),
 ]
 
 
@@ -65,9 +65,9 @@ def fixtures() -> tuple[list[dict], list[dict]]:
         for _ in range(rnd.randint(1, 4)):
             dn += 1
             product, desc, base = rnd.choice(PRODUCTS)
-            market, agent = rnd.choice(WHERE)
+            market, agent, prefix = rnd.choice(WHERE)
             sent = rnd.choice([60, 120, 240, 336, 480, 600])
-            stm = 118000000 + dn
+            stm = (1180000 + dn) * 100 + 1     # delivery id, line 1
             # A delivery sells down over a few days, which is what makes the
             # per-day chart and the slow-stock ageing look like real trade.
             left = sent
@@ -96,11 +96,18 @@ def fixtures() -> tuple[list[dict], list[dict]]:
             if rnd.random() < 0.55:
                 gross = round(sum(r["sales_total"] for r in sales if r["dn"] == dn), 2)
                 if gross:
+                    # The market's own split: deductions, VAT on them, nett.
+                    deductions = round(gross * 0.139, 2)
+                    vat = round(deductions * 0.15, 2)
                     payments.append({
-                        "accsale": f"PRE*BT*{dn}", "dn": dn, "stm_no": stm,
+                        "accsale": f"{prefix}*{dn}", "dn": dn, "stm_no": stm,
+                        "fms_id": str(stm // 100),
+                        "market_agent": agent,
                         "date": (day + timedelta(days=rnd.randint(3, 20))).isoformat(),
-                        "gross": gross, "nett": round(gross * 0.84, 2),
-                        "lines": [{"product": product, "sales_total": gross}],
+                        "gross": gross, "deductions": deductions, "vat": vat,
+                        "nett": round(gross - deductions - vat, 2),
+                        "lines": [{"product": product, "sales_total": gross,
+                                   "line_no": stm % 100}],
                     })
     return sales, payments
 
@@ -129,6 +136,9 @@ def api(path: str, params: dict) -> dict:
     if path == "/api/tracking":
         return tracking.compute(SALES, PAYMENTS, closed=set(),
                                 month=params.get("month"), week=params.get("week"))
+    if path == "/api/sales-days":
+        return tracking.daily(SALES, PAYMENTS, start=params.get("from"), end=params.get("to"),
+                              month=params.get("month"), week=params.get("week"))
     if path == "/api/analytics":
         month, week = params.get("month"), params.get("week")
         scoped = analytics.filter_rows(SALES, month, week)

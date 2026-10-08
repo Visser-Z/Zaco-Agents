@@ -1135,6 +1135,156 @@ def payment_status(sales: list[dict], payments: list[dict],
     }
 
 
+# --- payments per delivery note -------------------------------------------
+
+def payments_by_delivery(sales: list[dict], payments: list[dict],
+                         owed_by_row: dict[int, float] | None = None,
+                         lo: str | None = None, hi: str | None = None) -> dict:
+    """Every payment, grouped by the delivery it paid, grouped by market.
+
+    A delivery is its FMS id: one per delivery, printed on every account sale
+    that delivery is ever paid on. Its delivery note is read off the sales book
+    through the FMS binding, not off the payment, whose ref is operator text
+    ("1", "142") and often names no delivery at all. Only where the FMS id is
+    not bound does the payment's own ref stand in, and only when the book has
+    a delivery note of that number at the same market.
+
+    Per payment the market's own columns, as printed: Gross, Deductions, VAT on
+    the deductions, Nett. What the market took is the deductions plus their
+    VAT, which is Gross less Nett to the cent. Nothing here is a percentage.
+
+    The window picks payments by the day they were paid. A delivery's sold
+    value and what it still owes are its whole position, whatever the window.
+    """
+    owed_by_row = owed_by_row or {}
+    bound = reconcile.bind_deliveries(sales, payments)
+
+    # What the book knows about each delivery.
+    book: dict[int, dict] = {}
+    by_dn: dict[tuple, int] = {}
+    for row in sales:
+        delivery = reconcile.delivery_of(row.get("consignment_id"))
+        if delivery is None:
+            continue
+        b = book.setdefault(delivery, {"rows": [], "dns": set()})
+        b["rows"].append(row)
+        if row.get("dn") is not None:
+            b["dns"].add(str(row["dn"]))
+            by_dn.setdefault(((row.get("market") or "").strip(),
+                              reconcile._norm_dn(row["dn"])), delivery)
+
+    def num(v) -> float:
+        return reconcile._num(v)
+
+    groups: dict[str, dict] = {}
+    for rec in payments:
+        paid_on = str(rec.get("date") or "")[:10]
+        if (lo and paid_on < lo) or (hi and paid_on > hi):
+            continue
+        dest = payment_details.destination(rec.get("accsale") or "")
+        market = rec.get("market") or dest.get("market") or UNPLACED
+        fms = str(rec.get("fms_id") or "").strip() or None
+        delivery = bound.get(fms) if fms else None
+        basis = "fms" if delivery is not None else None
+        if delivery is None and not reconcile._degenerate_ref(rec.get("dn")):
+            delivery = by_dn.get((market, reconcile._norm_dn(rec.get("dn"))))
+            basis = "ref" if delivery is not None else None
+        # One delivery note can cover two deliveries (two FMS ids), and the
+        # operator asks after the note, so the note is the group.
+        dns = sorted(book[delivery]["dns"]) if delivery is not None else []
+        key = (f"n{market}|{' · '.join(dns)}" if dns
+               else f"d{delivery}" if delivery is not None
+               else f"f{fms}" if fms else f"a{rec.get('accsale')}")
+        g = groups.setdefault(key, {
+            "key": key, "deliveries": set(), "fms": set(), "basis": set(), "dns": dns,
+            "market": market, "agents": set(), "payments": [],
+        })
+        if delivery is not None:
+            g["deliveries"].add(delivery)
+        if fms:
+            g["fms"].add(fms)
+        g["basis"].add(basis)
+        if rec.get("market_agent"):
+            g["agents"].add(str(rec["market_agent"]).strip())
+        gross, nett = num(rec.get("gross")), num(rec.get("nett"))
+        has_split = rec.get("deductions") is not None or rec.get("vat") is not None
+        g["payments"].append({
+            "accsale": rec.get("accsale"), "date": paid_on or None,
+            "gross": round(gross, 2), "nett": round(nett, 2),
+            "deductions": round(num(rec.get("deductions")), 2) if has_split else None,
+            "vat": round(num(rec.get("vat")), 2) if has_split else None,
+            "took": round(gross - nett, 2),
+            "ref": rec.get("supplier_ref") or (str(rec["dn"]) if rec.get("dn") is not None else None),
+            "lines": [{"product": l.get("product"), "sold": l.get("sold"),
+                       "total": round(num(l.get("sales_total")), 2)}
+                      for l in rec.get("lines") or []],
+        })
+
+    notes = []
+    for g in groups.values():
+        pays = sorted(g["payments"], key=lambda p: (p["date"] or "", p["accsale"] or ""))
+        dns = g["dns"]
+        # The whole note: every delivery on the book under it at this market,
+        # including one with no payment in the window.
+        rows = ([r for b in book.values() if set(dns) <= b["dns"] for r in b["rows"]
+                 if (r.get("market") or "").strip() == g["market"]] if dns
+                else [r for d in sorted(g["deliveries"]) for r in book[d]["rows"]])
+        split = all(p["deductions"] is not None for p in pays)
+        total = lambda f: round(sum(p[f] or 0.0 for p in pays), 2)  # noqa: E731
+        # Net of returns already: a return is a sale day worth less than nothing.
+        sold = round(sum(analytics.row_value(r) for r in rows), 2) if rows else None
+        days = sorted(d for r in rows if (d := selling_day(r)))
+        notes.append({
+            "key": g["key"], "fms_ids": sorted(g["fms"]),
+            # "fms" bound by FMS id, "ref" by the payment's own ref, None not
+            # found on the book; the weakest of the group's payments.
+            "basis": None if None in g["basis"] else "ref" if "ref" in g["basis"] else "fms",
+            "dn": " · ".join(dns) or None,
+            "market": g["market"],
+            "agents": " · ".join(sorted(g["agents"])) or None,
+            "products": sorted({str(r.get("product")) for r in rows if r.get("product")}),
+            "first_sale": days[0] if days else None,
+            "last_sale": days[-1] if days else None,
+            "sold": sold,
+            "owed": round(sum(owed_by_row.get(id(r), 0.0) for r in rows), 2) if rows else None,
+            "gross": total("gross"), "nett": total("nett"), "took": total("took"),
+            "deductions": total("deductions") if split else None,
+            "vat": total("vat") if split else None,
+            "last_paid": max((p["date"] for p in pays if p["date"]), default=None),
+            "count": len(pays),
+            "payments": pays,
+        })
+
+    markets: dict[str, dict] = {}
+    for n in notes:
+        m = markets.setdefault(n["market"], {"market": n["market"], "agents": set(),
+                                             "notes": []})
+        m["notes"].append(n)
+        if n["agents"]:
+            m["agents"].update(n["agents"].split(" · "))
+
+    def sums(items: list[dict]) -> dict:
+        split = all(i["deductions"] is not None for i in items)
+        return {
+            "gross": round(sum(i["gross"] for i in items), 2),
+            "deductions": round(sum(i["deductions"] for i in items), 2) if split else None,
+            "vat": round(sum(i["vat"] for i in items), 2) if split else None,
+            "took": round(sum(i["took"] for i in items), 2),
+            "nett": round(sum(i["nett"] for i in items), 2),
+            "payments": sum(i["count"] for i in items),
+        }
+
+    out = []
+    for m in markets.values():
+        # Latest paid first: the delivery last paid is the one being asked about.
+        m["notes"].sort(key=lambda n: (n["last_paid"] or "", n["gross"]), reverse=True)
+        out.append({"market": m["market"], "agents": " · ".join(sorted(m["agents"])) or None,
+                    "items": len(m["notes"]), **sums(m["notes"]), "notes": m["notes"]})
+    out.sort(key=lambda m: -m["gross"])
+    return {"markets": out, "deliveries": len(notes), **sums(notes),
+            "unplaced": sum(1 for n in notes if n["basis"] is None)}
+
+
 # --- sales per day, per product ------------------------------------------
 
 def report_name(row: dict) -> str:
@@ -1782,6 +1932,23 @@ def carryover_status(sales: list[dict], today: date | None = None,
     }
 
 
+def daily(sales: list[dict], payments: list[dict], start: str | None = None,
+          end: str | None = None, month: str | None = None,
+          week: str | None = None) -> dict:
+    """Sales per day on its own, for Insights: the same days Tracking used to
+    carry, settled on the same match so paid and owed agree with it."""
+    lo, hi = analytics.period_bounds(month, week)
+    filled = valued(sales)
+    owed_by_row, paid_by_row, _, _, _ = _allocate(filled, payments)
+    return {
+        "sales_by_day": sales_by_day(filled, start or lo, end or hi,
+                                     settled=(owed_by_row, paid_by_row)),
+        "span": date_span(sales),
+        "periods": available_periods(sales),
+        "filter": {"from": start or lo, "to": end or hi, "month": month, "week": week},
+    }
+
+
 def compute(sales: list[dict], payments: list[dict], today: date | None = None,
             start: str | None = None, end: str | None = None,
             closed: set[str] | frozenset[str] = frozenset(),
@@ -1820,6 +1987,8 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
                                      settled=(owed_by_row, paid_by_row)),
         "slow_stock": slow_stock(sales, today, closed, lo, hi),
         "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi, carried),
+        # Every payment, by the delivery note it paid, scoped by when it was paid.
+        "payments_by_delivery": payments_by_delivery(filled, payments, owed_by_row, lo, hi),
         # Across the whole book: a payment to check does not belong to a month.
         "flags": payment_flags(sales, payments),
         "span": date_span(sales),

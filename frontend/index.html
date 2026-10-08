@@ -573,6 +573,37 @@
   tr.trk-detail td { background: var(--surface-2); padding: 4px 14px 10px; }
   .kpi .kn .nb { white-space: nowrap; }
 
+  /* Insights overview: three cards, each a preview that opens its own page. */
+  .ins-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+  .ins-tile { padding: 0; display: flex; flex-direction: column; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
+  .ins-tile:hover { box-shadow: var(--shadow-lg); border-color: var(--line-strong); }
+  .ins-tile:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-tint); border-color: var(--accent); }
+  .tile-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 16px 18px 10px; }
+  .tile-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .tile-sub { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+  .tile-body { padding: 0 18px 12px; flex: 1; min-width: 0; }
+  .tile-foot { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px;
+               border-top: 1px solid var(--line); font-size: 13px; font-weight: 650; color: var(--accent); }
+  .ins-tile:hover .tile-foot { background: var(--accent-soft); }
+  .tile-rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .tile-rank li { display: grid; grid-template-columns: 1.4em minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; align-items: center; font-size: 13px; }
+  .tile-rank .tr-n { color: var(--ink-faint); font-weight: 650; font-size: 12px; }
+  .tile-rank .tr-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile-rank .tr-v { font-size: 12.5px; white-space: nowrap; }
+  .tile-rank .btrack { grid-column: 2 / 3; }
+  .tile-rank .tr-s { grid-column: 3 / 4; font-size: 11px; color: var(--ink-faint); text-align: right; }
+  .mini-days { display: block; width: 100%; height: 64px; margin: 2px 0 10px; }
+  .mini-days rect { fill: var(--accent); opacity: .85; }
+  .mini-days rect:hover { opacity: 1; }
+  .tile-days { list-style: none; margin: 0; padding: 0; }
+  .tile-days li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding: 6px 0;
+                  border-top: 1px solid var(--line); font-size: 12.5px; }
+  .tile-days li span:nth-child(2) { color: var(--ink-faint); }
+  .ins-crumb { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 13px; color: var(--ink-soft); font-weight: 600; }
+  .days-tools { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .days-pick { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+  @media (max-width: 1000px) { .ins-tiles { grid-template-columns: 1fr 1fr; } .ins-tiles > :last-child { grid-column: 1 / -1; } }
+  @media (max-width: 640px) { .ins-tiles { grid-template-columns: 1fr; } }
   .ins-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .ins-card { padding: 18px 20px; }
   .ins-card.wide { grid-column: 1 / -1; }
@@ -928,6 +959,59 @@
      column they do not: the name took the badge's column, the delivery note
      the stretchy one, and a long note ran into the amount beside it. */
   .trk-owed { padding: 0 4px 8px 26px; }
+  /* Payments per delivery note: market, then note, then its payments. Every
+     level carries the same three figures in the same columns, so they line up
+     down the card: what was paid, what the market took, what reached Zaco. */
+  .pmkt-head, .pdn-head { width: 100%; appearance: none; border: 0; background: none; cursor: pointer;
+               display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+               align-items: center; gap: 10px; text-align: left;
+               font-family: var(--sans); color: var(--ink); }
+  .pmkt-head { padding: 10px 4px; }
+  .pmkt-head:hover, .pdn-head:hover { background: var(--accent-soft); }
+  .pmkt.open > .pmkt-head { background: var(--surface-2); }
+  .pmkt-head .chev, .pdn-head .chev { color: var(--ink-faint); display: inline-flex; }
+  .pfigs { display: grid; grid-template-columns: repeat(3, 8.6em); gap: 12px; text-align: right; }
+  .pfig { display: flex; flex-direction: column; min-width: 0; }
+  .pfig em { font-style: normal; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+             color: var(--ink-faint); font-weight: 650; white-space: nowrap; }
+  .pfig b { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .pfig.took b { color: var(--crit); }
+  .pfig.nett b { color: var(--ok); font-weight: 700; }
+  .pdns { padding: 2px 0 8px 22px; }
+  .pdn { border-radius: 8px; margin-top: 4px; }
+  .pdn-head { padding: 7px 4px 7px 8px; border-radius: 8px; background: var(--surface-2); }
+  .pdn.open { background: var(--accent-soft); }
+  .pdn.open > .pdn-head { background: var(--accent-tint); }
+  .pdn-name { display: flex; flex-direction: column; min-width: 0; }
+  .pdn-name b { font-size: 12.5px; font-weight: 650; }
+  .pdn-name em { font-style: normal; font-size: 11px; color: var(--ink-faint);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pdn-body { padding: 8px 8px 10px; }
+  .pdn-pos { margin: 0 0 8px; font-size: 12px; color: var(--ink-soft); }
+  .pdn-pos .owe { color: var(--warn); }
+  .pdn-prod { display: block; color: var(--ink-faint); font-size: 11px; margin-top: 2px; }
+  .pt-wrap { overflow-x: auto; }
+  /* min-width:0 defeats the global workbook `table { min-width: 1560px }`. */
+  .pay-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: 12px; background: var(--surface);
+               border: 1px solid var(--line); }
+  .pay-table th { text-align: right; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+                  color: var(--ink-faint); font-weight: 650; padding: 7px 8px; border-bottom: 1px solid var(--line);
+                  white-space: nowrap; background: var(--surface-2); }
+  .pay-table th:nth-child(-n+2), .pay-table td:nth-child(-n+2) { text-align: left; }
+  .pay-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+  .pay-table tbody tr:last-child td { border-bottom: 0; }
+  .pay-table td.num { text-align: right; }
+  .pay-table .took { color: var(--crit); }
+  .pay-table .nett { color: var(--ok); font-weight: 650; }
+  .pay-table tfoot td { border-top: 1px solid var(--line-strong); border-bottom: 0; font-weight: 650; background: var(--surface-2); }
+  .pt-acc { font-family: var(--mono); font-size: 11.5px; }
+  .pt-sub { display: block; font-family: var(--sans); font-size: 11px; color: var(--ink-faint);
+            max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 700px) {
+    .pmkt-head, .pdn-head { grid-template-columns: auto minmax(0, 1fr); }
+    .pfigs { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; text-align: left; }
+    .pdns { padding-left: 4px; }
+  }
   .flag-card { padding: 16px 18px; margin-bottom: 18px;
                border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
   .flag-top { display: flex; gap: 11px; align-items: flex-start; }
@@ -1564,8 +1648,12 @@ const S = {
   saved: true,
   busy: false,
   demoPtr: 0,
-  insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false },
-  tracking: { data: null, loading: false, error: null, day: null, from: "", to: "",
+  // `page` is the card opened to its own page: null is the overview, then
+  // "best" | "markets" | "days". Sales per day reads its own endpoint.
+  insights: { data: null, loading: false, error: null, month: null, week: null, metric: "value", confirmDelete: false,
+              page: null,
+              days: { data: null, loading: false, error: null, from: "", to: "", chart: "value", day: null } },
+  tracking: { data: null, loading: false, error: null,
               open: null, chart: "value", month: null, week: null, confirmDelete: false },
   recon: { data: null, loading: false, error: null, applied: false },
   // Reports answer "what did these dates look like". The range is the whole
@@ -2016,6 +2104,11 @@ function setModule(m) {
   const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking
              : m === "reports" ? S.reports : m === "procure" ? S.procure : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
+  // Insights opens on its overview, with the days read fresh like the rest.
+  if (m === "insights") {
+    S.insights.page = null;
+    S.insights.days.data = null; S.insights.days.error = null; S.insights.days.loading = false;
+  }
   render();
   main.scrollTo(0, 0);
 }
@@ -2122,11 +2215,9 @@ function settleCharts() {
 
 async function loadTracking() {
   const T = S.tracking;
-  T.loading = true; T.error = null; S.chartReset = true; render();
+  T.loading = true; T.error = null; render();
   try {
     const qs = new URLSearchParams();
-    if (T.from) qs.set("from", T.from);
-    if (T.to) qs.set("to", T.to);
     if (T.month) qs.set("month", T.month);
     if (T.week) qs.set("week", T.week);
     const q = qs.toString();
@@ -2153,7 +2244,6 @@ function toggleTrackingMarket(kind, name) {
 
 function toggleTrackingBlock(key) {
   S.tracking.open = S.tracking.open === key ? null : key;
-  if (S.tracking.open !== "sales") S.tracking.day = null;
   render();
   main.scrollTo(0, 0);
 }
@@ -2427,7 +2517,6 @@ function setTrackingMonth(m) {
   const T = S.tracking;
   T.month = m || null;
   T.week = null;
-  T.from = ""; T.to = "";       // the day pickers are the finer control; reset
   // An open confirmation names the period it was opened for. Leaving it up
   // through a change of period would arm it against the new one.
   T.confirmDelete = false;
@@ -2436,33 +2525,61 @@ function setTrackingMonth(m) {
 
 function setTrackingWeek(w) {
   S.tracking.week = w || null;
-  S.tracking.from = ""; S.tracking.to = "";
   S.tracking.confirmDelete = false;
   loadTracking();
 }
 
-function setTrackingChart(metric) {
-  S.tracking.chart = metric;
+/* Sales per day lives on Insights. Its own data, so a day picker never
+   reloads the rest of the page. */
+async function loadSalesDays() {
+  const I = S.insights, D = I.days;
+  D.loading = true; D.error = null; S.chartReset = true; render();
+  try {
+    const qs = new URLSearchParams();
+    if (D.from) qs.set("from", D.from);
+    if (D.to) qs.set("to", D.to);
+    if (I.month) qs.set("month", I.month);
+    if (I.week) qs.set("week", I.week);
+    const q = qs.toString();
+    D.data = S.live ? await (await api(`/api/sales-days${q ? "?" + q : ""}`)).json() : null;
+    if (!S.live) D.error = "This reads your saved history, so it needs the live app.";
+  } catch (e) {
+    D.error = e.message || String(e);
+  } finally {
+    D.loading = false; render();
+  }
+}
+
+function setDaysChart(metric) {
+  S.insights.days.chart = metric;
   render();
 }
 
-function setTrackingDay(d) {
-  S.tracking.day = S.tracking.day === d ? null : d;
+function setDaysDay(d) {
+  const D = S.insights.days;
+  D.day = D.day === d ? null : d;
   render();
 }
 
-function setTrackingRange(which, value) {
-  S.tracking[which] = value || "";
-  S.tracking.day = null;          // a stale open day may be outside the new range
-  S.tracking.open = "sales";      // stay where the operator was working
-  loadTracking();
+function setDaysRange(which, value) {
+  const D = S.insights.days;
+  D[which] = value || "";
+  D.day = null;          // a stale open day may be outside the new range
+  loadSalesDays();
 }
 
-function clearTrackingRange() {
-  S.tracking.from = S.tracking.to = "";
-  S.tracking.day = null;
-  S.tracking.open = "sales";
-  loadTracking();
+function clearDaysRange() {
+  const D = S.insights.days;
+  D.from = D.to = "";
+  D.day = null;
+  loadSalesDays();
+}
+
+/** Open one Insights card as its own page, or go back to the overview. */
+function openInsightPage(page) {
+  S.insights.page = page || null;
+  render();
+  main.scrollTo(0, 0);
 }
 
 /** Print just the outstanding list. A class on <body> swaps the page over to a
@@ -2589,7 +2706,7 @@ function dayChart(days, metric, selected) {
     const state = selected ? (selected === r.date ? " on" : " off") : "";
     // The whole column is the target, not just the bar, so a thin day is as
     // easy to click as a big one.
-    return `<g class="cday${state}" onclick="event.stopPropagation(); setTrackingDay(${q(r.date)})">
+    return `<g class="cday${state}" onclick="event.stopPropagation(); setDaysDay(${q(r.date)})">
       <title>${esc(niceDate(r.date) || r.date)}: ${tick(r.total)}</title>
       <rect class="chit" x="${L + colW * i}" y="${T}" width="${colW}" height="${H - T}"/>
       ${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>
@@ -2598,8 +2715,8 @@ function dayChart(days, metric, selected) {
 
   return `<div class="chart-head">
       <div class="seg">
-        <button class="${metric === "value" ? "on" : ""}" onclick="event.stopPropagation(); setTrackingChart('value')">Rand</button>
-        <button class="${metric === "cartons" ? "on" : ""}" onclick="event.stopPropagation(); setTrackingChart('cartons')">Cartons</button>
+        <button class="${metric === "value" ? "on" : ""}" onclick="event.stopPropagation(); setDaysChart('value')">Rand</button>
+        <button class="${metric === "cartons" ? "on" : ""}" onclick="event.stopPropagation(); setDaysChart('cartons')">Cartons</button>
       </div>
     </div>
     <div class="chart-wrap"${narrow ? ` data-keep="day"` : ""}><svg viewBox="0 0 ${W} ${H}" class="daychart" role="img"${narrow ? ` style="width:${W}px;max-width:none"` : ""}
@@ -2635,7 +2752,7 @@ function dayBreakdown(day, colours, metric) {
     <div class="dbreak-head">
       <b>${esc(niceDate(day.date) || day.date)}</b>
       <span class="num">R ${fmt(day.value)} · ${fmtInt(day.cartons)} cartons · ${fmtInt(products.length)} product${products.length === 1 ? "" : "s"}</span>
-      <button class="btn ghost sm" onclick="event.stopPropagation(); setTrackingDay(${q(day.date)})">Close</button>
+      <button class="btn ghost sm" onclick="event.stopPropagation(); setDaysDay(${q(day.date)})">Close</button>
     </div>
     <ul class="dbreak-list">${rows}</ul>
   </div>`;
@@ -2716,7 +2833,7 @@ function owedWhy(r) {
 const BLOCK_MARK = {
   owed:  { tone: "warn",   icon: "clock" },
   stock: { tone: "crit",   icon: "box" },
-  sales: { tone: "accent", icon: "rand" },
+  pays:  { tone: "accent", icon: "rand" },
 };
 
 function renderTracking() {
@@ -2953,83 +3070,88 @@ function renderTracking() {
          ${closedList(soh.closed || [], "slow", r => fmtInt(r.cartons_left) + " of " + fmtInt(r.cartons_sent))}`)
     : emptyBlock("stock", "Stock on Hand", "nothing unsold", "Everything sent to market has sold.");
 
-  // --- sales per day -------------------------------------------------------
-  const span = T.data.span || {};
-  const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
-  const ranged = !!(T.from || T.to);
-
-  const PAID_TIP = "What reached you for these sales, after the agent's deductions, whenever it was paid.";
-  const OWED_TIP = "Sale value still waiting on a payment.";
-  const money = x => `<span class="sm-paid" title="${PAID_TIP}">paid R ${fmt(x.paid || 0)}</span>${
-    (x.owed || 0) > 0.005 ? ` · <span class="sm-owed" title="${OWED_TIP}">R ${fmt(x.owed)} owed</span>` : ""}`;
-
-  const dayRow = d => `<li>
-      <span class="trk-p"><span class="trk-nm">${esc(niceDate(d.date) || d.date)}</span></span>
-      <span class="trk-d">${fmtInt(d.cartons)} ctn${d.returned ? " · " + fmtInt(d.returned) + " back" : ""} · ${money(d)}</span>
-      <span class="trk-n num">R ${fmt(d.value)}</span></li>`;
-
-  /* Each month's total, above its days: the days added up. */
-  const monthOf = {};
-  ((T.data.sales_by_day || {}).months || []).forEach(m => { monthOf[m.month] = m; });
-  const monthLine = key => {
-    const m = monthOf[key];
-    if (!m) return "";
-    return `<span class="sm-name">${esc(monthLabel(key))}</span>
-      <span class="sm-figs">R ${fmt(m.value)} sold · ${fmtInt(m.cartons)} ctn · ${money(m)} · ${
-        fmtInt(m.days)} trading day${m.days === 1 ? "" : "s"}</span>`;
-  };
-  /** Days with their month's total ahead of the first day of each month. */
-  const byMonth = (list, month, day) => list.map((d, i) =>
-    (i === 0 || list[i - 1].date.slice(0, 7) !== d.date.slice(0, 7) ? month(d.date.slice(0, 7)) : "")
-    + day(d)).join("");
-
-  /* Every day, with exactly what sold under it. The product lines are always
-     visible: hiding them behind a click per day was the whole complaint. */
-  const dayBlock = d => `<div class="sday">
-      <div class="sday-head">
-        <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
-        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)} · ${money(d)}</span>
-      </div>
-      ${(d.dated && d.dated.delivered) ? `<div class="sday-src"><span class="src warn"
-          title="${fmtInt(d.dated.delivered)} of ${fmtInt(d.dated.delivered + d.dated.sold)} rows carry no sale date, so they are placed on the day their load was sent. That is an inference, not a reading.">
-          ${icon("alert", 12)} ${fmtInt(d.dated.delivered)} row${d.dated.delivered === 1 ? "" : "s"} dated by delivery, not by sale</span></div>` : ""}
-      ${(d.sources || []).length ? `<div class="sday-src">Read from ${(d.sources || []).map(s =>
-          `<span class="src" title="${esc(s.file)} — ${fmtInt(s.rows)} row${s.rows === 1 ? "" : "s"}, ${fmtInt(s.cartons)} cartons">${esc(s.file)}<em>${fmtInt(s.rows)}</em></span>`
-        ).join("")}</div>` : ""}
-      <table class="sday-items">
-        <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
-        <thead><tr><th>Product</th><th>Cartons</th>
-          <th title="The average the day fetched: the value divided by the cartons. Cartons on one day can go at different prices, so this will not always multiply back to the value exactly.">Avg / carton</th>
-          <th>Value</th></tr></thead>
-        <tbody>${d.products.map(x => {
-          const off = x.market_avg && x.price < x.market_avg * 0.7;
-          return `<tr>
-            <td class="sday-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}${x.returned ? `<span class="sday-back">${fmtInt(x.returned)} back</span>` : ""}</td>
-            <td class="num">${fmtInt(x.cartons)}</td>
-            <td class="num${off ? " under" : ""}">R ${fmt(x.price)}${x.market_avg ? `<span class="sday-mkt">mkt R ${fmt(x.market_avg)}</span>` : ""}</td>
-            <td class="num">R ${fmt(x.value)}</td></tr>`;
-        }).join("")}</tbody>
-      </table>
+  // --- payments per delivery note -----------------------------------------
+  /* Every payment, by the delivery note it paid, by market. Each figure is the
+     market's own column from the Payment Details report: what it paid before
+     its cut, what it took (deductions and the VAT on them), and what reached
+     Zaco. Amounts only, no percentages. */
+  const pbd = T.data.payments_by_delivery || { markets: [], deliveries: 0 };
+  const payFigs = x => `<span class="pfigs">
+      <span class="pfig"><em>Paid</em><b class="num">R ${fmt(x.gross)}</b></span>
+      <span class="pfig took"><em>Market took</em><b class="num">R ${fmt(x.took)}</b></span>
+      <span class="pfig nett"><em>Nett to Zaco</em><b class="num">R ${fmt(x.nett)}</b></span></span>`;
+  const payRow = y => `<tr>
+      <td>${esc(y.date ? shortDate(y.date) : "")}</td>
+      <td class="pt-acc" title="${esc((y.lines || []).map(l => shortProduct(l.product) + " · R " + fmt(l.total)).join("\n") || "No product lines printed")}">${esc(y.accsale || "")}${
+        (y.lines || []).length ? "" : `<span class="pt-sub">no product lines</span>`}</td>
+      <td class="num">R ${fmt(y.gross)}</td>
+      <td class="num">${y.deductions != null ? "R " + fmt(y.deductions) : "—"}</td>
+      <td class="num">${y.vat != null ? "R " + fmt(y.vat) : "—"}</td>
+      <td class="num took">R ${fmt(y.took)}</td>
+      <td class="num nett">R ${fmt(y.nett)}</td></tr>`;
+  const payNote = (n, market) => {
+    const k = "paydn|" + n.key;
+    const isOpen = !!openMarkets[k];
+    const label = n.dn ? "DN " + n.dn : "Delivery note not on the book";
+    const sub = [
+      `${fmtInt(n.count)} payment${n.count === 1 ? "" : "s"}`,
+      n.last_paid ? `last paid ${shortDate(n.last_paid)}` : "",
+      n.basis === "ref" ? "matched by the payment's ref" : "",
+      !n.dn && n.fms_ids.length ? `FMS ${n.fms_ids.join(", ")}` : "",
+    ].filter(Boolean).join(" · ");
+    return `<div class="pdn${isOpen ? " open" : ""}">
+      <button class="pdn-head" aria-expanded="${isOpen}"
+        onclick="event.stopPropagation(); toggleTrackingMarket('paydn', ${q(n.key)})">
+        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
+        <span class="pdn-name"><b>${esc(label)}</b><em>${esc(sub)}</em></span>
+        ${payFigs(n)}
+      </button>
+      ${isOpen ? `<div class="pdn-body">
+        ${n.sold != null ? `<p class="pdn-pos">Sold on this note <b class="num">R ${fmt(n.sold)}</b>${
+          n.owed > 0.005 ? ` · still owed <b class="num owe">R ${fmt(n.owed)}</b>`
+          : n.owed < -0.005 ? ` · <b class="num">R ${fmt(-n.owed)}</b> credited back` : " · settled"}${
+          n.products.length ? `<span class="pdn-prod">${esc(n.products.map(shortProduct).join(", "))}</span>` : ""}</p>` : ""}
+        <div class="pt-wrap"><table class="pay-table">
+          <thead><tr><th>Paid on</th><th>Account sale</th><th>Gross</th>
+            <th title="The market's commission and charges">Deductions</th>
+            <th title="VAT on the deductions">VAT</th>
+            <th>Market took</th><th>Nett</th></tr></thead>
+          <tbody>${n.payments.map(payRow).join("")}</tbody>
+          ${n.payments.length > 1 ? `<tfoot><tr><td colspan="2">Total</td>
+            <td class="num">R ${fmt(n.gross)}</td>
+            <td class="num">${n.deductions != null ? "R " + fmt(n.deductions) : "—"}</td>
+            <td class="num">${n.vat != null ? "R " + fmt(n.vat) : "—"}</td>
+            <td class="num took">R ${fmt(n.took)}</td>
+            <td class="num nett">R ${fmt(n.nett)}</td></tr></tfoot>` : ""}
+        </table></div></div>` : ""}
     </div>`;
-  const dayTable = `${dayChart(days, T.chart, T.day)}
-      <div class="sday-list">${byMonth(days, k => `<div class="smonth">${monthLine(k)}</div>`, dayBlock)}</div>`;
-
-  const pickers = `
-    <label class="ctl inline"><span>From</span><input type="date" value="${esc(T.from)}" ${bounds}
-      onclick="event.stopPropagation()" onchange="setTrackingRange('from', this.value)"></label>
-    <label class="ctl inline"><span>To</span><input type="date" value="${esc(T.to)}" ${bounds}
-      onclick="event.stopPropagation()" onchange="setTrackingRange('to', this.value)"></label>
-    ${ranged ? `<button class="btn ghost sm" onclick="event.stopPropagation(); clearTrackingRange()">Clear</button>` : ""}`;
-
-  const totalCartons = days.reduce((a, d) => a + d.cartons, 0);
-  const salesBlock = (days.length || ranged)
-    ? block("sales", "Sales per day", days.length,
-        `${fmtInt(days.length)} day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons${ranged ? " · filtered" : ""}`,
-        days.length ? `<ul class="trk-list">${byMonth(days.slice(0, 5), k => `<li class="smonth">${monthLine(k)}</li>`, dayRow)}</ul>`
-                    : `<p class="ins-empty">No sales in that range.</p>`,
-        days.length ? dayTable : `<p class="ins-empty">No sales in that range.</p>`,
-        pickers)
-    : emptyBlock("sales", "Sales per day", "nothing recorded", "No sales recorded yet.");
+  };
+  const payMarket = m => {
+    const isOpen = !!openMarkets["pays|" + m.market];
+    return `<div class="smkt pmkt${isOpen ? " open" : ""}">
+      <button class="pmkt-head" aria-expanded="${isOpen}"
+        onclick="event.stopPropagation(); toggleTrackingMarket('pays', ${q(m.market)})">
+        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
+        <span class="smkt-name"><b>${esc(m.market)}</b><em>${esc([m.agents,
+          `${fmtInt(m.items)} delivery note${m.items === 1 ? "" : "s"} · ${fmtInt(m.payments)} payment${m.payments === 1 ? "" : "s"}`]
+          .filter(Boolean).join(" · "))}</em></span>
+        ${payFigs(m)}
+      </button>
+      ${isOpen ? `<div class="pdns">${m.notes.map(n => payNote(n, m)).join("")}</div>` : ""}
+    </div>`;
+  };
+  const payMarkets = `<div class="smkts">${(pbd.markets || []).map(payMarket).join("")}</div>`;
+  const paysWindow = T.week ? weekLabel(T.week) : T.month ? monthLabel(T.month) : "";
+  const paysBlock = pbd.payments
+    ? block("pays", "Payments per delivery note", pbd.deliveries,
+        `R ${fmt(pbd.gross)} paid${paysWindow ? " in " + esc(paysWindow) : ""} · market took R ${fmt(pbd.took)} · R ${fmt(pbd.nett)} nett to Zaco · ${
+          fmtInt(pbd.deliveries)} delivery note${pbd.deliveries === 1 ? "" : "s"}`,
+        payMarkets,
+        `${payMarkets}
+         <p class="trk-note">By the day each payment was made. Market took is the deductions plus the VAT on them, as the Payment Details report prints them, so Paid less Market took is Nett to the cent.${
+           pbd.unplaced ? ` ${fmtInt(pbd.unplaced)} payment group${pbd.unplaced === 1 ? " has" : "s have"} no delivery note on the book yet.` : ""}</p>`)
+    : emptyBlock("pays", "Payments per delivery note", "nothing paid",
+        paysWindow ? `No payments made in ${esc(paysWindow)}.` : "No payments recorded yet.");
 
   main.innerHTML = `
     <section class="screen ins">
@@ -3057,7 +3179,7 @@ function renderTracking() {
       ${flagsBlock(T.data.flags)}
       ${marketBlock(T.data.market_check)}
       <div class="trk-grid">
-        ${owedBlock}${stockBlock}${salesBlock}
+        ${owedBlock}${stockBlock}${paysBlock}
       </div>
     </section>`;
 }
@@ -4780,6 +4902,7 @@ function setInsightMonth(m) {
   S.insights.week = null;   // weeks are scoped to the month, so reset
   S.insights.data = null;
   S.insights.confirmDelete = false;
+  resetDays();
   loadInsights();
 }
 function setInsightWeek(w) {
@@ -4788,7 +4911,14 @@ function setInsightWeek(w) {
   S.insights.week = val;
   S.insights.data = null;
   S.insights.confirmDelete = false;
+  resetDays();
   loadInsights();
+}
+
+/** A new period: the days reload for it, and the pickers inside the old one go. */
+function resetDays() {
+  const D = S.insights.days;
+  D.data = null; D.error = null; D.from = ""; D.to = ""; D.day = null;
 }
 
 function askDeleteHistory() { S.insights.confirmDelete = true; render(); }
@@ -4817,7 +4947,7 @@ async function confirmDeleteHistory() {
             + `${res.payments_remaining} payment${res.payments_remaining === 1 ? "" : "s"} for `
             + `${scopeLabel(I)} could not be removed, so Tracking will still show this period. `
             + `Run migration 0019 in Supabase, then delete again.`, true);
-      I.data = null;
+      I.data = null; resetDays();
       S.tracking.data = null; S.tracking.error = null;
       loadInsights();
     } else if (res.remaining) {
@@ -4825,7 +4955,7 @@ async function confirmDeleteHistory() {
       // appear to have gone and still be on Tracking a moment later.
       toast(`Deleted ${res.deleted}, but ${res.remaining} statement${res.remaining === 1 ? "" : "s"} `
             + `in ${scopeLabel(I)} could not be removed — they belong to another account.`, true);
-      I.data = null;
+      I.data = null; resetDays();
       S.tracking.data = null; S.tracking.error = null;
       loadInsights();
     } else {
@@ -4835,6 +4965,7 @@ async function confirmDeleteHistory() {
       toast(`Deleted ${res.deleted} statement${res.deleted === 1 ? "" : "s"} for ${scopeLabel(I)}`
             + (also.length ? `, and ${also.join(" and ")}` : ""));
       I.data = null;      // period is now empty; refetch
+      resetDays();
       // Tracking is computed from the same history and is now stale. Drop it so
       // reopening the page rebuilds it, rather than showing money owed against
       // sales that have just been removed.
@@ -4932,6 +5063,121 @@ function toggleAllTrend() {
   render();
 }
 
+/* --- sales per day, on Insights -------------------------------------------
+ *  Moved off Tracking: it is what sold, not what is owed. The chart and the
+ *  day list are the ones Tracking carried, settled on the same match. */
+const PAID_TIP = "What reached you for these sales, after the agent's deductions, whenever it was paid.";
+const OWED_TIP = "Sale value still waiting on a payment.";
+function dayMoney(x) {
+  return `<span class="sm-paid" title="${PAID_TIP}">paid R ${fmt(x.paid || 0)}</span>${
+    (x.owed || 0) > 0.005 ? ` · <span class="sm-owed" title="${OWED_TIP}">R ${fmt(x.owed)} owed</span>` : ""}`;
+}
+
+function salesDaysView(D) {
+  if (D.loading && !D.data) return `<div class="busy"><span class="spin"></span> Loading…</div>`;
+  if (!D.data) return `<p class="ins-empty">${esc(D.error || "Nothing loaded yet.")}</p>`;
+  const days = (D.data.sales_by_day || {}).days || [];
+  const span = D.data.span || {};
+  const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
+  const ranged = !!(D.from || D.to);
+
+  /* Each month's total, above its days: the days added up. */
+  const monthOf = {};
+  ((D.data.sales_by_day || {}).months || []).forEach(m => { monthOf[m.month] = m; });
+  const monthLine = key => {
+    const m = monthOf[key];
+    if (!m) return "";
+    return `<span class="sm-name">${esc(monthLabel(key))}</span>
+      <span class="sm-figs">R ${fmt(m.value)} sold · ${fmtInt(m.cartons)} ctn · ${dayMoney(m)} · ${
+        fmtInt(m.days)} trading day${m.days === 1 ? "" : "s"}</span>`;
+  };
+  const byMonth = (list, month, day) => list.map((d, i) =>
+    (i === 0 || list[i - 1].date.slice(0, 7) !== d.date.slice(0, 7) ? month(d.date.slice(0, 7)) : "")
+    + day(d)).join("");
+
+  /* Every day, with exactly what sold under it. */
+  const dayBlock = d => `<div class="sday">
+      <div class="sday-head">
+        <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
+        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)} · ${dayMoney(d)}</span>
+      </div>
+      ${(d.dated && d.dated.delivered) ? `<div class="sday-src"><span class="src warn"
+          title="${fmtInt(d.dated.delivered)} of ${fmtInt(d.dated.delivered + d.dated.sold)} rows carry no sale date, so they are placed on the day their load was sent. That is an inference, not a reading.">
+          ${icon("alert", 12)} ${fmtInt(d.dated.delivered)} row${d.dated.delivered === 1 ? "" : "s"} dated by delivery, not by sale</span></div>` : ""}
+      ${(d.sources || []).length ? `<div class="sday-src">Read from ${(d.sources || []).map(x =>
+          `<span class="src" title="${esc(x.file)} — ${fmtInt(x.rows)} row${x.rows === 1 ? "" : "s"}, ${fmtInt(x.cartons)} cartons">${esc(x.file)}<em>${fmtInt(x.rows)}</em></span>`
+        ).join("")}</div>` : ""}
+      <table class="sday-items">
+        <colgroup><col><col class="c-n"><col class="c-n"><col class="c-n"></colgroup>
+        <thead><tr><th>Product</th><th>Cartons</th>
+          <th title="The average the day fetched: the value divided by the cartons. Cartons on one day can go at different prices, so this will not always multiply back to the value exactly.">Avg / carton</th>
+          <th>Value</th></tr></thead>
+        <tbody>${d.products.map(x => {
+          const off = x.market_avg && x.price < x.market_avg * 0.7;
+          return `<tr>
+            <td class="sday-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}${x.returned ? `<span class="sday-back">${fmtInt(x.returned)} back</span>` : ""}</td>
+            <td class="num">${fmtInt(x.cartons)}</td>
+            <td class="num${off ? " under" : ""}">R ${fmt(x.price)}${x.market_avg ? `<span class="sday-mkt">mkt R ${fmt(x.market_avg)}</span>` : ""}</td>
+            <td class="num">R ${fmt(x.value)}</td></tr>`;
+        }).join("")}</tbody>
+      </table>
+    </div>`;
+
+  const totalCartons = days.reduce((a, d) => a + d.cartons, 0);
+  const totalValue = days.reduce((a, d) => a + d.value, 0);
+  return `<div class="days-tools">
+      <span class="trk-sum">${fmtInt(days.length)} trading day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons · R ${fmt(totalValue)}${ranged ? " · filtered" : ""}</span>
+      <span class="days-pick">
+        <label class="ctl inline"><span>From</span><input type="date" value="${esc(D.from)}" ${bounds}
+          onchange="setDaysRange('from', this.value)"></label>
+        <label class="ctl inline"><span>To</span><input type="date" value="${esc(D.to)}" ${bounds}
+          onchange="setDaysRange('to', this.value)"></label>
+        ${ranged ? `<button class="btn ghost sm" onclick="clearDaysRange()">Clear</button>` : ""}
+      </span>
+    </div>
+    ${days.length ? `${dayChart(days, D.chart, D.day)}
+      <div class="sday-list">${byMonth(days, k => `<div class="smonth">${monthLine(k)}</div>`, dayBlock)}</div>`
+      : `<p class="ins-empty">No sales in that range.</p>`}`;
+}
+
+/** A small bar per day for the overview tile: the shape of the period. */
+function miniDays(days) {
+  const chron = days.slice(0, 21).reverse();
+  if (!chron.length) return "";
+  const W = 300, H = 64, gap = 3;
+  const peak = Math.max(...chron.map(d => d.value), 0) || 1;
+  const bw = (W - gap * (chron.length - 1)) / chron.length;
+  return `<svg class="mini-days" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+      aria-label="Sales value of the last ${chron.length} trading days">${chron.map((d, i) => {
+      const h = Math.max(2, (Math.max(d.value, 0) / peak) * (H - 2));
+      return `<rect x="${i * (bw + gap)}" y="${H - h}" width="${bw}" height="${h}" rx="2"><title>${
+        esc(niceDate(d.date) || d.date)}: R ${fmt(d.value)}</title></rect>`;
+    }).join("")}</svg>`;
+}
+
+/** One overview tile: a title, a short preview, and the way into its page. */
+function insightTile(page, title, sub, body) {
+  return `<section class="card ins-tile" role="button" tabindex="0" onclick="openInsightPage(${q(page)})"
+      onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+    <header class="tile-head"><h2>${esc(title)}</h2>${sub ? `<span class="tile-sub">${sub}</span>` : ""}</header>
+    <div class="tile-body">${body}</div>
+    <footer class="tile-foot"><span>View all</span><span class="tile-arrow" aria-hidden="true">→</span></footer>
+  </section>`;
+}
+
+/** The top five of a grouped list, ranked on the measure on show. */
+function tileRanks(groups, metric) {
+  const ranked = [...(groups || [])].sort((a, b) => b[metric] - a[metric]).slice(0, 5);
+  if (!ranked.length) return `<p class="ins-empty">Nothing to show yet.</p>`;
+  const top = ranked[0][metric] || 1;
+  return `<ol class="tile-rank">${ranked.map((g, i) => `<li>
+      <span class="tr-n">${i + 1}</span>
+      <span class="tr-name" title="${esc(g.label)}">${esc(g.label)}</span>
+      <span class="tr-v num">${metric === "value" ? "R " + fmt(g.value) : fmtInt(g.cartons) + " ctn"}</span>
+      <span class="btrack"><span class="bfill" style="width:${Math.max(2, Math.round((g[metric] / top) * 100))}%"></span></span>
+      <span class="tr-s num">${((g.share || 0) * 100).toFixed(1)}%</span></li>`).join("")}</ol>`;
+}
+
 function renderInsights() {
   const I = S.insights;
   // Kick off the first load lazily once the module is opened.
@@ -4974,6 +5220,11 @@ function renderInsights() {
       </div>
     </section>`;
     return;
+  }
+
+  // The days tile and page read their own endpoint, loaded once per period.
+  if (S.live && I.days.data === null && !I.days.loading && I.days.error === null) {
+    setTimeout(loadSalesDays, 0);
   }
 
   const metric = I.metric;              // "value" | "cartons"
@@ -5023,8 +5274,9 @@ function renderInsights() {
         ${kpiCard("Agents", fmtInt(k.agent_count), "market agents", undefined, { icon: "users" })}
       </div>
 
-      <div class="ins-grid">
-        <div class="card ins-card wide">
+      ${I.page ? `<div class="ins-crumb"><button class="btn ghost sm" onclick="openInsightPage(null)"><span aria-hidden="true">←</span> Insights</button>
+          <span>${esc({ best: "Best sellers", markets: "By market", days: "Sales per day" }[I.page] || "")}</span></div>` : ""}
+      ${I.page === "best" ? `<div class="card ins-card">
           <div class="ins-card-head">
             <h2>Best sellers by fruit</h2>
             <div class="seg sm">
@@ -5033,18 +5285,39 @@ function renderInsights() {
             </div>
           </div>
           ${productGroupList(d.product_groups, metric, "fruit")}
-        </div>
-
-
-        <div class="card ins-card wide">
+        </div>`
+      : I.page === "markets" ? `<div class="card ins-card">
           <div class="ins-card-head"><h2>By market</h2>
             <span class="ins-card-tools"><span class="rep-c">open a market to see what sells there</span>
               <button class="pg-trend${I.allTrend ? " on" : ""}" onclick="toggleAllTrend()">${icon("chart", 12)}Trend, all markets</button></span></div>
           ${I.allTrend ? `<div class="pg-trendbox all">
             <div class="pg-trendhead">${esc(trendTitle)} trend, all markets</div>${trendChart(d.trend)}</div>` : ""}
           ${productGroupList(d.market_groups, metric, "market")}
-        </div>
-      </div>
+        </div>`
+      : I.page === "days" ? `<div class="card ins-card">
+          <div class="ins-card-head"><h2>Sales per day</h2></div>
+          ${salesDaysView(I.days)}
+        </div>`
+      : `<div class="ins-tiles">
+          ${insightTile("best", "Best sellers", esc(metric === "value" ? "top fruit by value" : "top fruit by cartons"),
+            tileRanks(d.product_groups, metric))}
+          ${insightTile("markets", "By market", esc(fmtInt((d.market_groups || []).length) + " market" + ((d.market_groups || []).length === 1 ? "" : "s")),
+            tileRanks(d.market_groups, metric))}
+          ${insightTile("days", "Sales per day", (() => {
+              const dd = ((I.days.data || {}).sales_by_day || {}).days || [];
+              return dd.length ? esc(fmtInt(dd.length) + " trading day" + (dd.length === 1 ? "" : "s")) : "";
+            })(), (() => {
+              const D = I.days;
+              if (!D.data) return D.loading || !D.error ? `<div class="busy"><span class="spin"></span> Loading…</div>`
+                : `<p class="ins-empty">${esc(D.error)}</p>`;
+              const dd = (D.data.sales_by_day || {}).days || [];
+              if (!dd.length) return `<p class="ins-empty">No sales in this period.</p>`;
+              return `${miniDays(dd)}<ul class="tile-days">${dd.slice(0, 4).map(x => `<li>
+                  <span>${esc(niceDate(x.date) || x.date)}</span>
+                  <span class="num">${fmtInt(x.cartons)} ctn</span>
+                  <span class="num"><b>R ${fmt(x.value)}</b></span></li>`).join("")}</ul>`;
+            })())}
+        </div>`}
 
       ${(I.month || I.week) && !scopedEmpty ? `<div class="ins-danger">
         ${I.confirmDelete ? `

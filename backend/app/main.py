@@ -1176,6 +1176,21 @@ async def get_tracking(
     return out
 
 
+@app.get("/api/sales-days")
+async def get_sales_days(
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+    month: str | None = Query(None),
+    week: str | None = Query(None),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Sales per day for Insights, with what each day has been paid and owes."""
+    sales = await _history_rows(user)
+    payments = await _saved_payments(user)
+    return tracking.daily(sales, payments, start=date_from, end=date_to,
+                          month=month, week=week)
+
+
 @app.post("/api/tracking/flags/decide")
 async def decide_payment_flag(
     accsale: str = Form(...),

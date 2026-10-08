@@ -5800,6 +5800,8 @@ function tfDayLine(d) {
   const bits = d.status === "failed" ? [`<span class="tf-bad">${esc(d.message || "failed")}</span>`]
     : d.report === "payments" ? [d.found ? `${fmtInt(d.found)} payment${d.found === 1 ? "" : "s"}` : "none that day"]
     : [d.found ? `${fmtInt(d.saved)} saved` : "no sales that day",
+       // Found but neither saved, held nor waiting: someone uploaded the day first.
+       d.found - d.saved - d.held - d.unpaid > 0 ? `${fmtInt(d.found - d.saved - d.held - d.unpaid)} already on the book` : "",
        d.held ? `<a href="#" onclick="event.preventDefault(); reviewTechnofresh('${esc(d.day)}')">${fmtInt(d.held)} to review</a>` : "",
        d.unpaid ? `<span class="tf-wait">${fmtInt(d.unpaid)} not paid yet</span>` : ""].filter(Boolean);
   return `<li><span>${esc(tfDay(d.day))}</span><span class="tf-what">${bits.join(" · ")}</span></li>`;

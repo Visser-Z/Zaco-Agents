@@ -6,10 +6,14 @@ round of statements, and append those rows back into the workbook.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import hmac
+import os
+import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Query, Request,
+                     UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -33,10 +37,11 @@ from . import (
     reconcile,
     reports,
     stock,
+    technofresh,
     tracking,
 )
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
-                            db_post, require_user)
+                            db_post, require_admin, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
 from . import dispatch_sheet, market_summary, overlap, supply
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
@@ -457,15 +462,22 @@ async def extract(
     joining them recovers the DN for deliveries the workbook already covers
     instead of asking for them again. See ``delivery.seed_from_history``.
     """
+    uploads = [(f.filename or "statement.pdf", await f.read()) for f in files]
+    return await read_sales_files(user, uploads, known_dns)
+
+
+async def read_sales_files(user: User | None, files: list[tuple[str, bytes]],
+                           known_dns: str | None = None) -> ExtractResponse:
+    """Everything /api/extract does, for files already in memory. The 8am
+    TechnoFresh pull reads its CSVs through here too, so a pulled day is
+    placed exactly as an uploaded one."""
     known = await codes_map(user)
     rows: list[StatementRow] = []
     nett_map: dict[int, dict] = {}
     nett_reports = 0
     warnings: list[str] = []
 
-    for f in files:
-        name = f.filename or "statement.pdf"
-        data = await f.read()
+    for name, data in files:
 
         # CSV exports of the same reports. Preferred where available: the values
         # are read directly instead of being recovered from a PDF's layout, and
@@ -2175,6 +2187,235 @@ async def reconcile_payments(
         "unattributed": reconcile.unattributed(records),
         "market_summary": summary_note,
     }
+
+
+# --- TechnoFresh auto-pull ------------------------------------------------
+# Every morning the app signs in to the TechnoFresh portal, pulls yesterday's
+# Payment Details and Daily Sales one day at a time, and puts them through the
+# same reading, placing and saving as an upload. See ``technofresh``.
+
+_TF_MIGRATION = "0026_technofresh_autopull.sql"
+# South Africa keeps one offset all year, so no time zone database is needed.
+_SAST = timezone(timedelta(hours=2))
+
+
+def _sa_today() -> date:
+    return datetime.now(_SAST).date()
+
+
+async def _tf_settings(user: User) -> dict | None:
+    rows = await db_get(user, "technofresh_settings", {
+        "select": "username,password_enc,schedule,enabled,updated_at", "id": "eq.1"})
+    return rows[0] if rows else None
+
+
+async def _tf_record(user: User, report: str, day: date, **fields) -> None:
+    await db_post(user, "technofresh_days", [{
+        "report": report, "day": day.isoformat(), "pulled_by": user.id,
+        "pulled_at": datetime.now(timezone.utc).isoformat(), "csv": None,
+        "found": 0, "saved": 0, "held": 0, "unpaid": 0, "message": None, **fields,
+    }], upsert=True, on_conflict="report,day", resolution="merge-duplicates")
+
+
+async def _tf_payments_day(user: User, day: date, text: str) -> dict:
+    name = f"technofresh_payments_{day}.csv"
+    records = payment_details.dedupe(csv_reports.parse_payment_details_csv(text, name))
+    warning = await persist_payments(user, records) if records else None
+    return {"status": "failed" if warning else "done", "found": len(records),
+            "saved": 0 if warning else len(records),
+            "message": warning or (None if records else "No payments that day.")}
+
+
+_OVERLAP_CODES = {overlap.ALREADY, overlap.DIFFERS, overlap.REPEAT}
+
+
+async def _tf_sales_day(user: User, day: date, text: str) -> dict:
+    """Read a day like an upload, then save what needs nobody to look at it.
+
+    A row already on the book is left as it was, as the review screen does.
+    A row with no account sale number yet cannot be recorded at all, so the day
+    stays "waiting" and is pulled again tomorrow. A row that needs a person (no
+    short code, say) is held, and the day's file is kept for the review screen.
+    """
+    name = f"technofresh_sales_{day}.csv"
+    result = await read_sales_files(user, [(name, text.encode("utf-8"))])
+    rows = result.rows
+    on_book = [r for r in rows if any(f.code in _OVERLAP_CODES for f in r.flags)]
+    fresh = [r for r in rows if not any(f.code in _OVERLAP_CODES for f in r.flags)]
+    unpaid = [r for r in fresh if r.stm_no is None]
+    held = [r for r in fresh if r.stm_no is not None and (r.blocking or not r.market_agent)]
+    ready = [r for r in fresh if r.stm_no is not None and not r.blocking and r.market_agent]
+    warning = await persist_statements(user, ready) if ready else None
+    if not warning and ready:
+        await remember_delivery_notes(user, ready)
+    notes = [warning] if warning else []
+    if on_book:
+        notes.append(f"{len(on_book)} already on the book.")
+    if unpaid:
+        notes.append(f"{len(unpaid)} not paid yet, so they have no account sale number; "
+                     f"this day is pulled again until they do.")
+    if held:
+        notes.append(f"{len(held)} need a short code or a check before they can be saved.")
+    notes += result.warnings
+    status = ("failed" if warning else "waiting" if unpaid
+              else "review" if held else "done")
+    return {"status": status, "found": len(rows), "saved": 0 if warning else len(ready),
+            "held": len(held), "unpaid": len(unpaid),
+            "message": " ".join(notes) or (None if rows else "No sales that day.")}
+
+
+async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
+    """Pull every day that is due, oldest first, within the time the server allows."""
+    try:
+        settings = await _tf_settings(user)
+    except Exception as exc:  # noqa: BLE001
+        if _pending_migration(exc) or "technofresh" in str(getattr(exc, "detail", exc)):
+            return {"ran": False, "message": f"Run the {_TF_MIGRATION} migration first."}
+        raise
+    if not settings or not settings.get("username") or not settings.get("password_enc"):
+        return {"ran": False, "message": "Enter the TechnoFresh login in Settings first."}
+    today = _sa_today()
+    if scheduled and not settings.get("enabled", True):
+        return {"ran": False, "message": "Automatic pulls are switched off."}
+    if scheduled and not technofresh.due_today(settings.get("schedule", "daily"), today):
+        return {"ran": False, "message": "Weekly pulls run on Mondays."}
+
+    since = (today - timedelta(days=technofresh.CATCH_UP_LIMIT + 14)).isoformat()
+    held = await db_get(user, "technofresh_days", {
+        "select": "report,day,status", "day": f"gte.{since}", "limit": "1000"})
+    order = {"payments": 0, "sales": 1}
+    plan = sorted(
+        [(technofresh.PAYMENTS, d) for d in technofresh.days_to_pull("payments", held, today)]
+        + [(technofresh.SALES, d) for d in technofresh.days_to_pull("sales", held, today)],
+        key=lambda p: (p[1], order[p[0].key]))
+    if not plan:
+        return {"ran": True, "pulled": [], "left": 0, "message": "Everything is up to date."}
+
+    started = time.monotonic()
+    pulled: list[dict] = []
+    try:
+        password = technofresh.decrypt(settings["password_enc"])
+        portal = await run_in_threadpool(technofresh.Portal, settings["username"], password)
+    except technofresh.PortalError as exc:
+        # Recorded against the days it was meant to pull, so they are tried
+        # again next time and the screen says why they are missing.
+        for report, day in plan:
+            await _tf_record(user, report.key, day, status="failed", message=str(exc))
+        return {"ran": True, "pulled": [], "left": len(plan), "message": str(exc)}
+
+    left = 0
+    with portal:
+        for report, day in plan:
+            if time.monotonic() - started > technofresh.TIME_BUDGET:
+                left += 1
+                continue
+            try:
+                text = await run_in_threadpool(portal.fetch, report, day)
+                handle = _tf_payments_day if report is technofresh.PAYMENTS else _tf_sales_day
+                outcome = await handle(user, day, text)
+                outcome["csv"] = text
+            except technofresh.PortalError as exc:
+                outcome = {"status": "failed", "message": str(exc)}
+            except Exception as exc:  # noqa: BLE001 -- one bad day must not stop the rest
+                outcome = {"status": "failed",
+                           "message": f"Could not place this day: {getattr(exc, 'detail', exc)}"}
+            await _tf_record(user, report.key, day, **outcome)
+            pulled.append({"report": report.key, "day": day.isoformat(),
+                           **{k: v for k, v in outcome.items() if k != "csv"}})
+    message = (f"{left} more day(s) still to pull; press Pull now to carry on."
+               if left else None)
+    return {"ran": True, "pulled": pulled, "left": left, "message": message}
+
+
+@app.get("/api/technofresh/status")
+async def technofresh_status(user: User | None = Depends(require_user)) -> dict:
+    """The login (never the password), the schedule, and recent days."""
+    ready = {
+        "key": bool(os.getenv("TECHNOFRESH_KEY")),
+        "robot": bool(os.getenv("ZACON_ROBOT_EMAIL") and os.getenv("ZACON_ROBOT_PASSWORD")),
+        "cron": bool(os.getenv("CRON_SECRET")),
+    }
+    if user is None:
+        return {"server": ready, "settings": None, "days": []}
+    try:
+        settings = await _tf_settings(user)
+        since = (_sa_today() - timedelta(days=21)).isoformat()
+        days = await db_get(user, "technofresh_days", {
+            "select": "report,day,status,found,saved,held,unpaid,message,pulled_at",
+            "day": f"gte.{since}", "order": "day.desc,report.asc", "limit": "200"})
+    except Exception:  # noqa: BLE001 -- before the migration
+        return {"server": ready, "settings": None, "days": [], "migration": _TF_MIGRATION}
+    shown = None
+    if settings:
+        shown = {"username": settings.get("username"),
+                 "has_password": bool(settings.get("password_enc")),
+                 "schedule": settings.get("schedule"), "enabled": settings.get("enabled"),
+                 "updated_at": settings.get("updated_at")}
+    return {"server": ready, "settings": shown, "days": days}
+
+
+@app.post("/api/technofresh/settings")
+async def save_technofresh_settings(
+    username: str = Form(...),
+    password: str = Form(""),
+    schedule: str = Form("daily"),
+    enabled: bool = Form(True),
+    profile: dict = Depends(require_admin),
+) -> dict:
+    """Admins only. A new password is tried on the portal before it is kept."""
+    user = User(id=profile["id"], email=profile.get("email"), token=profile["token"])
+    if schedule not in ("daily", "weekly"):
+        raise HTTPException(400, "Schedule must be daily or weekly.")
+    record = {"id": 1, "username": username.strip(), "schedule": schedule,
+              "enabled": enabled, "updated_by": user.id,
+              "updated_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        if password:
+            with await run_in_threadpool(technofresh.Portal, record["username"], password):
+                pass
+            record["password_enc"] = technofresh.encrypt(password)
+        elif not ((await _tf_settings(user)) or {}).get("password_enc"):
+            raise HTTPException(400, "Enter the TechnoFresh password.")
+    except technofresh.PortalError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await db_post(user, "technofresh_settings", [record], upsert=True,
+                  on_conflict="id", resolution="merge-duplicates")
+    return {"saved": True, "checked": bool(password)}
+
+
+@app.post("/api/technofresh/pull")
+async def pull_technofresh_now(user: User | None = Depends(require_user)) -> dict:
+    """Pull now, as whoever pressed the button, whatever the schedule says."""
+    if user is None:
+        raise HTTPException(400, "Pulling from TechnoFresh needs a signed-in account.")
+    return await run_technofresh_pull(user, scheduled=False)
+
+
+@app.get("/api/technofresh/cron")
+async def technofresh_cron(authorization: str = Header(default="")) -> dict:
+    """Vercel Cron calls this at 08:00 SAST with the CRON_SECRET it was given."""
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret or not hmac.compare_digest(authorization, f"Bearer {secret}"):
+        raise HTTPException(401, "Not the scheduler.")
+    try:
+        robot = await technofresh.robot_user()
+    except technofresh.PortalError as exc:
+        return {"ran": False, "message": str(exc)}
+    return await run_technofresh_pull(robot, scheduled=True)
+
+
+@app.get("/api/technofresh/file")
+async def technofresh_file(report: str = Query(...), day: date = Query(...),
+                           user: User | None = Depends(require_user)) -> Response:
+    """A pulled day's CSV, so its held rows can be opened in the review screen."""
+    if user is None:
+        raise HTTPException(400, "Needs a signed-in account.")
+    rows = await db_get(user, "technofresh_days", {
+        "select": "csv", "report": f"eq.{report}", "day": f"eq.{day.isoformat()}"})
+    if not rows or not rows[0].get("csv"):
+        raise HTTPException(404, "That day has not been pulled.")
+    return Response(rows[0]["csv"], media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="technofresh_{report}_{day}.csv"'})
 
 
 # --- frontend -------------------------------------------------------------

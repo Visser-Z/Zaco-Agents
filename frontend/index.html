@@ -91,6 +91,31 @@
   .topbar .user-chip button { color: rgba(255, 255, 255, .75); }
   .topbar .user-chip button:hover { background: rgba(255, 255, 255, .12); color: #fff; }
   .topbar .user-chip .role { background: var(--gold); color: var(--brand); }
+  .gear-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 50%;
+              border: 1px solid rgba(255, 255, 255, .28); background: transparent; color: #fff; cursor: pointer;
+              transition: color .15s, border-color .15s, background .15s, transform .3s; }
+  .gear-btn:hover { color: var(--gold); border-color: var(--gold); transform: rotate(30deg); }
+  .gear-btn.on { background: var(--gold); border-color: var(--gold); color: var(--brand); }
+  .gear-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  /* Settings: the TechnoFresh account, then Pull / Sales / Payments tiles. */
+  .tf-account { margin-bottom: 16px; }
+  .tf-account .tile-head { align-items: center; }
+  .tf-form { display: grid; gap: 12px; max-width: 420px; }
+  .tf-form .field { max-width: none; }
+  .tf-check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-soft); }
+  .tf-actions { display: flex; gap: 8px; }
+  .tf-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0; }
+  .tf-facts dt { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 650; }
+  .tf-facts dd { margin: 4px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+  .tf-tile { cursor: default; }
+  .tf-tile .tile-foot { color: var(--ink-soft); font-weight: 600; gap: 10px; }
+  .tf-tile:hover .tile-foot { background: none; }
+  .tf-big { font-size: 20px; font-weight: 700; letter-spacing: -.015em; margin-top: 4px; }
+  .tf-days li { grid-template-columns: 6.5em minmax(0, 1fr); }
+  .tf-days .tf-what { color: var(--ink-soft); }
+  .tf-bad { color: var(--crit); }
+  .tf-wait { color: var(--warn); }
+  @media (max-width: 640px) { .tf-facts { grid-template-columns: 1fr 1fr; } }
   .brand .sub { color: var(--ink-faint); font-weight: 500; font-size: 12px; letter-spacing: .02em; }
   .topbar .spacer { flex: 1; }
   .wb-pill { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
@@ -1571,6 +1596,10 @@
 <div class="app">
   <header class="topbar">
     <div class="brand"><span class="glyph" role="img" aria-label="Zaco Agents"></span><span>Zaco Agents</span></div>
+    <button type="button" class="gear-btn" id="gearBtn" onclick="setModule('settings')"
+      title="Settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     <span class="spacer"></span>
     <button type="button" class="ask-open" id="askOpen" onclick="toggleDock()"
       title="Ask about the book">◧ Ask</button>
@@ -2104,6 +2133,7 @@ function setModule(m) {
   const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking
              : m === "reports" ? S.reports : m === "procure" ? S.procure : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
+  if (m === "settings") { TF.status = null; TF.editing = false; }
   // Insights opens on its overview, with the days read fresh like the rest.
   if (m === "insights") {
     S.insights.page = null;
@@ -2120,6 +2150,8 @@ function render() {
   const kept = document.querySelector('.chart-wrap[data-keep="day"]');
   if (kept) S.chartScroll = kept.scrollLeft;
   setTimeout(settleCharts);
+  document.getElementById("gearBtn")?.classList.toggle("on", S.module === "settings");
+  if (S.module === "settings") return renderSettings();
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
   if (S.module === "reports") return renderReports();
@@ -5657,6 +5689,7 @@ function renderHub() {
           Detail lives under <a href="#" onclick="event.preventDefault(); setModule('reports')">Reports</a>.</p>
       </div></div>
 
+      ${technofreshPanel()}
       ${docCheckPanel()}
       ${overlapPanel()}
 
@@ -5702,6 +5735,183 @@ function renderHub() {
         ${reconcilePanel()}
       </div>
     </section>`;
+}
+
+// --------------------------------------------------- TechnoFresh auto-pull
+/** Every morning the server pulls yesterday's sales and payments from the
+ *  TechnoFresh portal and saves what reads cleanly. This panel shows how the
+ *  last days went, holds the login (admins only), and opens any day with rows
+ *  that need a person in the normal review screen. See /api/technofresh/*. */
+const TF = { status: null, loading: false, editing: false };
+
+async function loadTechnofresh(force) {
+  if (!S.live || TF.loading || (TF.status && !force)) return;
+  TF.loading = true;
+  try { TF.status = await (await api("/api/technofresh/status")).json(); }
+  catch { TF.status = null; }
+  TF.loading = false;
+  if (!S.busy && (S.module === "settings" || (S.module === "sales" && S.screen === "hub"))) render();
+}
+
+const tfAdmin = () => !S.authRequired || Auth.profile?.role === "admin";
+const tfDay = d => new Date(d + "T00:00:00").toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" });
+const tfWhen = t => new Date(t).toLocaleString("en-ZA", { dateStyle: "medium", timeStyle: "short" });
+
+/** On Sales & Payments: a line only when a pulled day needs someone. The
+ *  account, the schedule and the day by day detail live under Settings. */
+function technofreshPanel() {
+  if (!S.live) return "";
+  if (!TF.status) { loadTechnofresh(); return ""; }
+  const days = TF.status.days || [];
+  const held = days.filter(d => d.report === "sales" && d.held > 0);
+  const failed = days.filter(d => d.status === "failed");
+  if (!held.length && !failed.length) return "";
+  const parts = [
+    held.length && `${fmtInt(held.reduce((t, d) => t + d.held, 0))} pulled sales rows need a short code or a check`,
+    failed.length && `${fmtInt(failed.length)} report day${failed.length === 1 ? "" : "s"} could not be pulled`,
+  ].filter(Boolean);
+  return `<div class="banner ${failed.length ? "bad" : "warn"}"><span class="bi">${icon("alert", 14)}</span>
+    <span><b>TechnoFresh:</b> ${esc(parts.join(", and "))}.
+    <a href="#" onclick="event.preventDefault(); setModule('settings')">Open Settings</a></span></div>`;
+}
+
+function tfForm(set) {
+  return `<form onsubmit="event.preventDefault(); saveTechnofresh(this)" class="tf-form">
+    <div class="field"><label>TechnoFresh username</label>
+      <input class="input" name="username" autocomplete="off" required value="${esc(set?.username || "")}"></div>
+    <div class="field"><label>TechnoFresh password</label>
+      <input class="input" name="password" type="password" autocomplete="new-password"
+        placeholder="${set?.has_password ? "Leave empty to keep the saved one" : ""}" ${set?.has_password ? "" : "required"}></div>
+    <div class="field"><label>Pull</label>
+      <select name="schedule">
+        <option value="daily" ${set?.schedule !== "weekly" ? "selected" : ""}>Every day at 08:00, yesterday's reports</option>
+        <option value="weekly" ${set?.schedule === "weekly" ? "selected" : ""}>Mondays at 08:00, the past week day by day</option>
+      </select></div>
+    <label class="tf-check"><input type="checkbox" name="enabled" ${set?.enabled === false ? "" : "checked"}> Pull automatically</label>
+    <div class="tf-actions">
+      ${set ? `<button class="btn ghost" type="button" onclick="TF.editing=false; render()">Cancel</button>` : ""}
+      <button class="btn primary" type="submit">Check and save</button></div>
+    <p class="hint">The password is tried on TechnoFresh first, then stored encrypted. It is never shown again.</p>
+  </form>`;
+}
+
+/** One pulled day as a line: what it found, saved, holds and still waits for. */
+function tfDayLine(d) {
+  const bits = d.status === "failed" ? [`<span class="tf-bad">${esc(d.message || "failed")}</span>`]
+    : d.report === "payments" ? [d.found ? `${fmtInt(d.found)} payment${d.found === 1 ? "" : "s"}` : "none that day"]
+    : [d.found ? `${fmtInt(d.saved)} saved` : "no sales that day",
+       d.held ? `<a href="#" onclick="event.preventDefault(); reviewTechnofresh('${esc(d.day)}')">${fmtInt(d.held)} to review</a>` : "",
+       d.unpaid ? `<span class="tf-wait">${fmtInt(d.unpaid)} not paid yet</span>` : ""].filter(Boolean);
+  return `<li><span>${esc(tfDay(d.day))}</span><span class="tf-what">${bits.join(" · ")}</span></li>`;
+}
+
+function renderSettings() {
+  const me = Auth.profile;
+  const head = `<div class="head"><div><h1>Settings</h1>
+    <p class="head-sub">Signed in to ZacoAgents as <b>${esc(me?.email || "this device")}</b>${me?.role ? ` (${esc(me.role)})` : ""}.</p></div></div>`;
+  if (!S.live) {
+    main.innerHTML = `<section class="screen">${head}<div class="card placeholder"><h2>Needs the live app</h2>
+      <p>Sign in to the live app to connect TechnoFresh.</p></div></section>`;
+    return;
+  }
+  if (!TF.status) {
+    loadTechnofresh();
+    main.innerHTML = `<section class="screen">${head}<div class="card"><div class="busy"><span class="spin"></span> Loading…</div></div></section>`;
+    return;
+  }
+  const st = TF.status, set = st.settings, admin = tfAdmin();
+  if (st.migration) {
+    main.innerHTML = `<section class="screen">${head}<div class="banner warn"><span class="bi">${icon("alert", 14)}</span>
+      <span><b>TechnoFresh auto-pull is not set up yet.</b> Run the ${esc(st.migration)} migration in the Supabase SQL editor.</span></div></section>`;
+    return;
+  }
+  const missing = [!st.server.key && "TECHNOFRESH_KEY", !st.server.robot && "ZACON_ROBOT_EMAIL, ZACON_ROBOT_PASSWORD",
+                   !st.server.cron && "CRON_SECRET"].filter(Boolean);
+  const days = st.days || [];
+  const sales = days.filter(d => d.report === "sales");
+  const pays = days.filter(d => d.report === "payments");
+  const latest = days.reduce((a, d) => (!a || d.pulled_at > a ? d.pulled_at : a), null);
+  const failed = days.filter(d => d.status === "failed");
+  const when = !set ? "Not connected yet"
+    : set.enabled === false ? "Automatic pulls are off"
+    : set.schedule === "weekly" ? "Mondays at 08:00" : "Every day at 08:00";
+
+  const account = `<div class="card tf-account">
+    <div class="tile-head"><h2>TechnoFresh account</h2>
+      ${set && admin && !TF.editing ? `<button class="btn ghost sm" onclick="TF.editing=true; render()">Change</button>` : ""}</div>
+    <div class="tile-body">
+      ${TF.editing || !set
+        ? (admin ? tfForm(set) : `<p class="ins-empty">Not connected. Ask an admin to enter the TechnoFresh login here.</p>`)
+        : `<dl class="tf-facts">
+            <div><dt>Logs in as</dt><dd>${esc(set.username)}</dd></div>
+            <div><dt>Password</dt><dd>${set.has_password ? "Saved, encrypted" : "Missing"}</dd></div>
+            <div><dt>Pulls</dt><dd>${esc(when)}</dd></div>
+            <div><dt>Last changed</dt><dd>${set.updated_at ? esc(tfWhen(set.updated_at)) : ""}</dd></div>
+          </dl>`}
+      ${admin && missing.length ? `<p class="hint tf-bad">Not set on the server yet: ${missing.map(esc).join(", ")}.
+        Pull now still works; the 08:00 pull needs these.</p>` : ""}
+    </div></div>`;
+
+  const tile = (title, sub, body, foot) => `<section class="card ins-tile tf-tile">
+    <header class="tile-head"><h2>${esc(title)}</h2>${sub ? `<span class="tile-sub">${sub}</span>` : ""}</header>
+    <div class="tile-body">${body}</div>${foot ? `<footer class="tile-foot">${foot}</footer>` : ""}</section>`;
+  const list = items => items.length ? `<ul class="tile-days tf-days">${items.slice(0, 7).map(tfDayLine).join("")}</ul>`
+    : `<p class="ins-empty">Nothing pulled yet.</p>`;
+
+  main.innerHTML = `<section class="screen">${head}${account}
+    <div class="ins-tiles">
+      ${tile("Pull", esc(when), `
+        <div class="tf-big">${latest ? esc(tfWhen(latest)) : "Never"}</div><p class="hint">Last pull</p>
+        ${failed.length ? `<p class="tf-bad">${fmtInt(failed.length)} day${failed.length === 1 ? "" : "s"} failed; tried again on the next pull.</p>`
+          : latest ? `<p class="hint">Up to date.</p>` : ""}`,
+        set ? `<span>Fetch what is due now</span><button class="btn primary sm" onclick="pullTechnofresh()">Pull now</button>` : "")}
+      ${tile("Sales", "Daily sales details", list(sales),
+        `<span>${fmtInt(sales.reduce((t, d) => t + d.saved, 0))} rows saved, last 3 weeks</span>`)}
+      ${tile("Payments", "Payment Details", list(pays),
+        `<span>${fmtInt(pays.reduce((t, d) => t + d.found, 0))} payments, last 3 weeks</span>`)}
+    </div></section>`;
+}
+
+async function saveTechnofresh(form) {
+  const fd = new FormData(form);
+  fd.set("enabled", form.enabled.checked ? "true" : "false");
+  try {
+    await withBusy("Checking the login on TechnoFresh…", async () => {
+      await api("/api/technofresh/settings", { method: "POST", body: fd });
+      TF.editing = false;
+      toast("TechnoFresh login saved");
+    });
+  } catch { return; }  // withBusy has already said why
+  await loadTechnofresh(true);
+}
+
+async function pullTechnofresh() {
+  let out = null;
+  try {
+    await withBusy("Pulling from TechnoFresh…", async () => {
+      out = await (await api("/api/technofresh/pull", { method: "POST" })).json();
+    });
+  } catch { /* withBusy has already said why */ }
+  if (out) {
+    const saved = (out.pulled || []).reduce((t, d) => t + (d.saved || 0), 0);
+    toast(out.message || (out.pulled?.length
+      ? `Pulled ${out.pulled.length} report day${out.pulled.length === 1 ? "" : "s"}, ${fmtInt(saved)} row${saved === 1 ? "" : "s"} saved`
+      : "Everything is up to date"), out.ran === false);
+  }
+  await loadTechnofresh(true);
+}
+
+/** Open a pulled day in the normal review screen. Rows already saved are
+ *  recognised as on the book and left out, so only the held ones need work. */
+async function reviewTechnofresh(day) {
+  let text = null;
+  try {
+    await withBusy("Opening the pulled day…", async () => {
+      text = await (await api(`/api/technofresh/file?report=sales&day=${encodeURIComponent(day)}`)).text();
+    });
+  } catch { return; }
+  await onPdfFiles([new File([text], `technofresh_sales_${day}.csv`, { type: "text/csv" })]);
+  TF.status = null;
 }
 
 // ------------------------------------------------------- add and review

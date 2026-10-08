@@ -156,6 +156,26 @@ def api(path: str, params: dict) -> dict:
         return reports.build(SALES, PAYMENTS, params.get("from"), params.get("to"))
     if path == "/api/forecast":
         return forecast.build(SALES, PAYMENTS)
+    if path == "/api/technofresh/status":
+        y = date.today() - timedelta(days=1)
+        day = lambda n: (y - timedelta(days=n)).isoformat()  # noqa: E731
+        at = f"{date.today().isoformat()}T06:00:12+00:00"
+        return {
+            "server": {"key": True, "robot": True, "cron": True},
+            "settings": {"username": "zaco", "has_password": True, "schedule": "daily",
+                         "enabled": True, "updated_at": at},
+            "days": [
+                {"report": "payments", "day": day(0), "status": "done", "found": 6,
+                 "saved": 6, "held": 0, "unpaid": 0, "message": None, "pulled_at": at},
+                {"report": "sales", "day": day(0), "status": "waiting", "found": 17,
+                 "saved": 0, "held": 0, "unpaid": 17, "message": None, "pulled_at": at},
+                {"report": "sales", "day": day(1), "status": "waiting", "found": 49,
+                 "saved": 9, "held": 2, "unpaid": 38, "message": None, "pulled_at": at},
+                {"report": "payments", "day": day(2), "status": "failed", "found": 0,
+                 "saved": 0, "held": 0, "unpaid": 0, "pulled_at": at,
+                 "message": "TechnoFresh did not accept the username or password."},
+            ],
+        }
     if path == "/api/assistant":
         return {"configured": True, "suggestions": [
             "Which product earned the most last month?",

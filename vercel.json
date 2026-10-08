@@ -6,6 +6,9 @@
       "includeFiles": "{backend,frontend}/**"
     }
   },
+  "crons": [
+    { "path": "/api/technofresh/cron", "schedule": "0 6 * * *" }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index/$1" }
   ]

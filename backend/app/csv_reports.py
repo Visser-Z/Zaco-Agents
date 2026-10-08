@@ -490,6 +490,9 @@ def parse_payment_details_csv(text: str, filename: str) -> list[dict]:
             cur = {
                 "market_agent": agent,
                 "market": market,
+                # The FMS ID ties a payment to its delivery, as the PDF's does.
+                # See ``reconcile.bind_deliveries``.
+                "fms_id": _cell(row, 0) if _cell(row, 0).isdigit() else None,
                 "supplier_ref": _cell(row, 1),
                 "dn": ref_to_dn(_cell(row, 1)),
                 "accsale": _cell(row, 2),

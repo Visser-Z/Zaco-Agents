@@ -3,10 +3,13 @@
 The portal (crm.technofresh.co.za) has no API. Its CSV buttons are plain form
 posts, found by recording them in a browser:
 
-    Payment Details      POST /reports/view/24/csv   fromDate, toDate
-    Daily sales details  POST /reports/view/8/csv    from_date, to_date
+    Payment Details      POST /reports/view/24/<pdf|csv>   fromDate, toDate
+    Daily sales details  POST /reports/view/8/<pdf|csv>    from_date, to_date
 
-with market, agent and product left empty for "all". The session is one
+with market, agent and product left empty for "all". The PDF is what is
+pulled: the app has read those reliably for months, and a PDF sales row is
+filed under its Consignment ID, so it goes on the book the day it sold. A CSV
+row waits for its account sale number, which the market assigns days later. The session is one
 PHPSESSID cookie, got by posting the login form, and it dies after under two
 hours idle, so every pull signs in afresh rather than keeping a session.
 
@@ -28,7 +31,8 @@ from datetime import date, timedelta
 
 import httpx
 
-from . import config, csv_reports
+from . import config, daily_sales, payment_details
+from .extraction import pdf_to_page_texts
 from .supabase_auth import User
 
 PORTAL = "https://crm.technofresh.co.za"
@@ -128,11 +132,11 @@ class Portal:
         if check.status_code != 200:
             raise PortalError("TechnoFresh did not accept the username or password.")
 
-    def fetch(self, report: Report, day: date) -> str:
-        """One day of one report, as CSV text, or a PortalError saying why not."""
+    def fetch(self, report: Report, day: date) -> bytes:
+        """One day of one report as a PDF, or a PortalError saying why not."""
         self._pace()
         try:
-            r = self._client.post(f"{PORTAL}/reports/view/{report.report_id}/csv",
+            r = self._client.post(f"{PORTAL}/reports/view/{report.report_id}/pdf",
                                   data=report.form(day))
         except httpx.HTTPError as exc:
             raise PortalError(f"{report.title} {day}: could not reach TechnoFresh ({exc}).") from exc
@@ -140,16 +144,18 @@ class Portal:
             raise PortalError(f"{report.title} {day}: TechnoFresh ended the session.")
         if r.status_code != 200:
             raise PortalError(f"{report.title} {day}: TechnoFresh answered HTTP {r.status_code}.")
-        text = csv_reports.decode(r.content)
-        head = text.lstrip()[:400].lower()
-        if head.startswith("<") or "<html" in head:
-            raise PortalError(f"{report.title} {day}: TechnoFresh sent a web page, not a CSV.")
-        ok = (csv_reports.is_payment_details_csv(text) if report is PAYMENTS
-              else csv_reports.is_daily_sales_csv(text))
-        if not ok:
-            raise PortalError(f"{report.title} {day}: the file is not that report "
-                              f"(it starts {text[:80]!r}).")
-        return text
+        if not r.content.startswith(b"%PDF"):
+            head = r.content[:400].decode("utf-8", errors="replace").lower()
+            what = "a web page" if "<html" in head or head.lstrip().startswith("<") else "something else"
+            raise PortalError(f"{report.title} {day}: TechnoFresh sent {what}, not a PDF.")
+        return r.content
+
+
+def is_report(report: Report, pages: list[str]) -> bool:
+    """Whether a pulled PDF is the report asked for, read the way an upload is."""
+    text = "\n".join(pages)
+    return (payment_details.is_payment_details(text) if report is PAYMENTS
+            else daily_sales.is_daily_sales(text))
 
 
 # --- the robot account -----------------------------------------------------

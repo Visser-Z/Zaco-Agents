@@ -5904,13 +5904,13 @@ async function pullTechnofresh() {
 /** Open a pulled day in the normal review screen. Rows already saved are
  *  recognised as on the book and left out, so only the held ones need work. */
 async function reviewTechnofresh(day) {
-  let text = null;
+  let pdf = null;
   try {
     await withBusy("Opening the pulled day…", async () => {
-      text = await (await api(`/api/technofresh/file?report=sales&day=${encodeURIComponent(day)}`)).text();
+      pdf = await (await api(`/api/technofresh/file?report=sales&day=${encodeURIComponent(day)}`)).blob();
     });
   } catch { return; }
-  await onPdfFiles([new File([text], `technofresh_sales_${day}.csv`, { type: "text/csv" })]);
+  await onPdfFiles([new File([pdf], `technofresh_sales_${day}.pdf`, { type: "application/pdf" })]);
   TF.status = null;
 }
 

@@ -6,6 +6,7 @@ round of statements, and append those rows back into the workbook.
 
 from __future__ import annotations
 
+import base64
 import hmac
 import os
 import time
@@ -469,7 +470,7 @@ async def extract(
 async def read_sales_files(user: User | None, files: list[tuple[str, bytes]],
                            known_dns: str | None = None) -> ExtractResponse:
     """Everything /api/extract does, for files already in memory. The 8am
-    TechnoFresh pull reads its CSVs through here too, so a pulled day is
+    TechnoFresh pull reads its PDFs through here too, so a pulled day is
     placed exactly as an uploaded one."""
     known = await codes_map(user)
     rows: list[StatementRow] = []
@@ -2214,14 +2215,24 @@ async def _tf_settings(user: User) -> dict | None:
 async def _tf_record(user: User, report: str, day: date, **fields) -> None:
     await db_post(user, "technofresh_days", [{
         "report": report, "day": day.isoformat(), "pulled_by": user.id,
-        "pulled_at": datetime.now(timezone.utc).isoformat(), "csv": None,
+        "pulled_at": datetime.now(timezone.utc).isoformat(), "pdf": None,
         "found": 0, "saved": 0, "held": 0, "unpaid": 0, "message": None, **fields,
     }], upsert=True, on_conflict="report,day", resolution="merge-duplicates")
 
 
-async def _tf_payments_day(user: User, day: date, text: str) -> dict:
-    name = f"technofresh_payments_{day}.csv"
-    records = payment_details.dedupe(csv_reports.parse_payment_details_csv(text, name))
+async def _tf_pages(report, data: bytes) -> list[str]:
+    """The PDF's text, or a PortalError if it is not the report asked for."""
+    pages = await run_in_threadpool(pdf_to_page_texts, data)
+    if not technofresh.is_report(report, pages):
+        raise technofresh.PortalError(f"{report.title}: the PDF TechnoFresh sent is not that report.")
+    return pages
+
+
+async def _tf_payments_day(user: User, day: date, data: bytes) -> dict:
+    """Read a day's Payment Details PDF as /api/reconcile does, and record it."""
+    name = f"technofresh_payments_{day}.pdf"
+    pages = await _tf_pages(technofresh.PAYMENTS, data)
+    records = payment_details.dedupe(payment_details.parse_payment_details(pages, name))
     warning = await persist_payments(user, records) if records else None
     return {"status": "failed" if warning else "done", "found": len(records),
             "saved": 0 if warning else len(records),
@@ -2231,7 +2242,7 @@ async def _tf_payments_day(user: User, day: date, text: str) -> dict:
 _OVERLAP_CODES = {overlap.ALREADY, overlap.DIFFERS, overlap.REPEAT}
 
 
-async def _tf_sales_day(user: User, day: date, text: str) -> dict:
+async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
     """Read a day like an upload, then save what needs nobody to look at it.
 
     A row already on the book is left as it was, as the review screen does.
@@ -2239,8 +2250,9 @@ async def _tf_sales_day(user: User, day: date, text: str) -> dict:
     stays "waiting" and is pulled again tomorrow. A row that needs a person (no
     short code, say) is held, and the day's file is kept for the review screen.
     """
-    name = f"technofresh_sales_{day}.csv"
-    result = await read_sales_files(user, [(name, text.encode("utf-8"))])
+    name = f"technofresh_sales_{day}.pdf"
+    await _tf_pages(technofresh.SALES, data)
+    result = await read_sales_files(user, [(name, data)])
     rows = result.rows
     on_book = [r for r in rows if any(f.code in _OVERLAP_CODES for f in r.flags)]
     fresh = [r for r in rows if not any(f.code in _OVERLAP_CODES for f in r.flags)]
@@ -2312,10 +2324,11 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
                 left += 1
                 continue
             try:
-                text = await run_in_threadpool(portal.fetch, report, day)
+                data = await run_in_threadpool(portal.fetch, report, day)
                 handle = _tf_payments_day if report is technofresh.PAYMENTS else _tf_sales_day
-                outcome = await handle(user, day, text)
-                outcome["csv"] = text
+                outcome = await handle(user, day, data)
+                # Kept so a day with held rows opens in the review screen.
+                outcome["pdf"] = base64.b64encode(data).decode("ascii")
             except technofresh.PortalError as exc:
                 outcome = {"status": "failed", "message": str(exc)}
             except Exception as exc:  # noqa: BLE001 -- one bad day must not stop the rest
@@ -2323,7 +2336,7 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
                            "message": f"Could not place this day: {getattr(exc, 'detail', exc)}"}
             await _tf_record(user, report.key, day, **outcome)
             pulled.append({"report": report.key, "day": day.isoformat(),
-                           **{k: v for k, v in outcome.items() if k != "csv"}})
+                           **{k: v for k, v in outcome.items() if k != "pdf"}})
     message = (f"{left} more day(s) still to pull; press Pull now to carry on."
                if left else None)
     return {"ran": True, "pulled": pulled, "left": left, "message": message}
@@ -2409,15 +2422,15 @@ async def technofresh_cron(authorization: str = Header(default="")) -> dict:
 @app.get("/api/technofresh/file")
 async def technofresh_file(report: str = Query(...), day: date = Query(...),
                            user: User | None = Depends(require_user)) -> Response:
-    """A pulled day's CSV, so its held rows can be opened in the review screen."""
+    """A pulled day's PDF, so its held rows can be opened in the review screen."""
     if user is None:
         raise HTTPException(400, "Needs a signed-in account.")
     rows = await db_get(user, "technofresh_days", {
-        "select": "csv", "report": f"eq.{report}", "day": f"eq.{day.isoformat()}"})
-    if not rows or not rows[0].get("csv"):
+        "select": "pdf", "report": f"eq.{report}", "day": f"eq.{day.isoformat()}"})
+    if not rows or not rows[0].get("pdf"):
         raise HTTPException(404, "That day has not been pulled.")
-    return Response(rows[0]["csv"], media_type="text/csv", headers={
-        "Content-Disposition": f'attachment; filename="technofresh_{report}_{day}.csv"'})
+    return Response(base64.b64decode(rows[0]["pdf"]), media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="technofresh_{report}_{day}.pdf"'})
 
 
 # --- frontend -------------------------------------------------------------

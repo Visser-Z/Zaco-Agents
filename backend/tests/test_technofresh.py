@@ -95,8 +95,7 @@ def test_a_password_from_another_key_says_so(monkeypatch):
 
 # --- the portal -------------------------------------------------------------------
 
-SALES_CSV = ('"Delivery Date","Date Sold","Date Paid","Docket Number","Payment Reference",'
-             '"Qty Sold","Market Avg",Price,"Sales Value"\n')
+PDF = b"%PDF-1.4\n% a pulled report\n"
 
 
 def _portal(monkeypatch, handler):
@@ -121,22 +120,22 @@ def test_login_posts_the_form_and_fetches_one_day(monkeypatch):
 
     def handler(req):
         seen.append((req.method, req.url.path, req.content.decode()))
-        if req.url.path == "/reports/view/8/csv":
-            return httpx.Response(200, headers={"content-type": "application/csv"}, text=SALES_CSV)
+        if req.url.path == "/reports/view/8/pdf":
+            return httpx.Response(200, headers={"content-type": "application/pdf"}, content=PDF)
         return httpx.Response(200, text="<html>ok</html>")
     _portal(monkeypatch, handler)
     with technofresh.Portal("me", "pw") as portal:
-        text = portal.fetch(technofresh.SALES, date(2026, 10, 7))
-    assert text.startswith('"Delivery Date"')
+        data = portal.fetch(technofresh.SALES, date(2026, 10, 7))
+    assert data == PDF
     login = next(s for s in seen if s[0] == "POST" and s[1] == "/user/login")
     assert "username=me" in login[2] and "password=pw" in login[2]
-    report = next(s for s in seen if s[1] == "/reports/view/8/csv")
+    report = next(s for s in seen if s[1] == "/reports/view/8/pdf")
     assert "from_date=2026-10-07" in report[2] and "to_date=2026-10-07" in report[2]
 
 
 def test_an_html_page_is_never_taken_for_a_report(monkeypatch):
     def handler(req):
-        if req.url.path == "/reports/view/24/csv":
+        if req.url.path == "/reports/view/24/pdf":
             return httpx.Response(200, text="<!DOCTYPE html><html>error</html>")
         return httpx.Response(200, text="<html>ok</html>")
     _portal(monkeypatch, handler)
@@ -173,13 +172,23 @@ def test_sales_day_saves_clean_rows_holds_the_rest(monkeypatch):
     async def fake_notes(user, payload):
         pass
 
+    async def fake_pages(report, data):
+        return []
+
+    monkeypatch.setattr(main, "_tf_pages", fake_pages)
     monkeypatch.setattr(main, "read_sales_files", fake_read)
     monkeypatch.setattr(main, "persist_statements", fake_persist)
     monkeypatch.setattr(main, "remember_delivery_notes", fake_notes)
-    out = asyncio.run(main._tf_sales_day(USER, date(2026, 10, 7), SALES_CSV))
+    out = asyncio.run(main._tf_sales_day(USER, date(2026, 10, 7), PDF))
     assert [r.stm_no for r in saved] == [1]
     assert out["status"] == "waiting"           # pulled again for the unpaid one
     assert (out["found"], out["saved"], out["held"], out["unpaid"]) == (4, 1, 1, 1)
+
+
+def test_a_pdf_of_the_wrong_report_is_refused(monkeypatch):
+    monkeypatch.setattr(main, "pdf_to_page_texts", lambda data: ["Some other report entirely"])
+    with pytest.raises(technofresh.PortalError, match="not that report"):
+        asyncio.run(main._tf_pages(technofresh.SALES, PDF))
 
 
 def test_cron_refuses_without_the_secret(monkeypatch):

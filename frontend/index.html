@@ -624,6 +624,9 @@
   .tile-days li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding: 6px 0;
                   border-top: 1px solid var(--line); font-size: 12.5px; }
   .tile-days li span:nth-child(2) { color: var(--ink-faint); }
+  .smonth-pick { width: 100%; appearance: none; font-family: var(--sans); text-align: left; cursor: pointer; color: var(--ink); }
+  .smonth-pick:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .smonth-pick .sm-open { font-size: 12px; font-weight: 650; color: var(--accent); white-space: nowrap; }
   .ins-crumb { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 13px; color: var(--ink-soft); font-weight: 600; }
   .days-tools { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 6px 0 10px; }
   .days-pick { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
@@ -2696,7 +2699,7 @@ function chartSeries(days, metric) {
  *  No legend: thirty long product names under the bars had to be matched to
  *  the colours by eye. Clicking a day lists exactly what sold on it instead,
  *  each product beside its colour, and fades the other days. */
-function dayChart(days, metric, selected) {
+function dayChart(days, metric, selected, byMonth) {
   const chron = days.slice().reverse();            // days arrive newest first
   if (!chron.length) return `<p class="ins-empty">Nothing to chart.</p>`;
   const { names, rows, colour } = chartSeries(chron, metric);
@@ -2738,10 +2741,11 @@ function dayChart(days, metric, selected) {
     const state = selected ? (selected === r.date ? " on" : " off") : "";
     // The whole column is the target, not just the bar, so a thin day is as
     // easy to click as a big one.
-    return `<g class="cday${state}" onclick="event.stopPropagation(); setDaysDay(${q(r.date)})">
-      <title>${esc(niceDate(r.date) || r.date)}: ${tick(r.total)}</title>
+    const pick = byMonth ? `setInsightMonth(${q(r.date)})` : `setDaysDay(${q(r.date)})`;
+    return `<g class="cday${state}" onclick="event.stopPropagation(); ${pick}">
+      <title>${esc(byMonth ? monthLabel(r.date) : (niceDate(r.date) || r.date))}: ${tick(r.total)}${byMonth ? " · open this month" : ""}</title>
       <rect class="chit" x="${L + colW * i}" y="${T}" width="${colW}" height="${H - T}"/>
-      ${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(shortDay(r.date))}</text>
+      ${seg}<text class="cx" x="${cx}" y="${H - B + 17}" text-anchor="middle">${esc(byMonth ? shortMonth(r.date) : shortDay(r.date))}</text>
       <text class="cv" x="${cx}" y="${y(r.total) - 5}" text-anchor="middle">${tick(r.total)}</text></g>`;
   }).join("");
 
@@ -2788,6 +2792,31 @@ function dayBreakdown(day, colours, metric) {
     </div>
     <ul class="dbreak-list">${rows}</ul>
   </div>`;
+}
+
+/** "Aug 26" for a month bar: months can span a year end, so the year stays. */
+function shortMonth(key) {
+  const [y, m] = String(key).split("-").map(Number);
+  return MONTHS[(m || 1) - 1] + " " + String(y).slice(2);
+}
+
+/** Days rolled up into months, newest first, shaped like days so the same
+ *  chart draws them: one bar per month, one band per product. */
+function rollMonths(days) {
+  const by = new Map();
+  days.forEach(d => {
+    const key = d.date.slice(0, 7);
+    const m = by.get(key) || { date: key, value: 0, cartons: 0, products: new Map() };
+    m.value += d.value || 0; m.cartons += d.cartons || 0;
+    (d.products || []).forEach(x => {
+      const p = m.products.get(x.product) || { product: x.product, value: 0, cartons: 0 };
+      p.value += x.value || 0; p.cartons += x.cartons || 0;
+      m.products.set(x.product, p);
+    });
+    by.set(key, m);
+  });
+  return [...by.values()].sort((a, b) => b.date.localeCompare(a.date))
+    .map(m => ({ ...m, products: [...m.products.values()] }));
 }
 
 /** "1 Aug" -- the axis has no room for the year, and every bar shares it. */
@@ -5157,8 +5186,19 @@ function salesDaysView(D) {
 
   const totalCartons = days.reduce((a, d) => a + d.cartons, 0);
   const totalValue = days.reduce((a, d) => a + d.value, 0);
+  // A whole year of days is too many bars to read. All time shows months;
+  // opening one, or picking a month or dates above, shows its days.
+  const I = S.insights;
+  const monthly = !I.month && !I.week && !ranged;
+  const body = !days.length ? `<p class="ins-empty">No sales in that range.</p>`
+    : monthly ? `${dayChart(rollMonths(days), D.chart, null, true)}
+        <p class="trk-note">One bar per month. Click a month to see its days.</p>
+        <div class="sday-list">${Object.keys(monthOf).sort().reverse().map(k =>
+          `<button class="smonth smonth-pick" onclick="setInsightMonth(${q(k)})">${monthLine(k)}<span class="sm-open">Days →</span></button>`).join("")}</div>`
+    : `${dayChart(days, D.chart, D.day)}
+      <div class="sday-list">${byMonth(days, k => `<div class="smonth">${monthLine(k)}</div>`, dayBlock)}</div>`;
   return `<div class="days-tools">
-      <span class="trk-sum">${fmtInt(days.length)} trading day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons · R ${fmt(totalValue)}${ranged ? " · filtered" : ""}</span>
+      <span class="trk-sum">${monthly ? `${fmtInt(Object.keys(monthOf).length)} month${Object.keys(monthOf).length === 1 ? "" : "s"} · ` : ""}${fmtInt(days.length)} trading day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons · R ${fmt(totalValue)}${ranged ? " · filtered" : ""}</span>
       <span class="days-pick">
         <label class="ctl inline"><span>From</span><input type="date" value="${esc(D.from)}" ${bounds}
           onchange="setDaysRange('from', this.value)"></label>
@@ -5167,9 +5207,7 @@ function salesDaysView(D) {
         ${ranged ? `<button class="btn ghost sm" onclick="clearDaysRange()">Clear</button>` : ""}
       </span>
     </div>
-    ${days.length ? `${dayChart(days, D.chart, D.day)}
-      <div class="sday-list">${byMonth(days, k => `<div class="smonth">${monthLine(k)}</div>`, dayBlock)}</div>`
-      : `<p class="ins-empty">No sales in that range.</p>`}`;
+    ${body}`;
 }
 
 /** A small bar per day for the overview tile: the shape of the period. */

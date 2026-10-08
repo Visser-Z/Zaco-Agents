@@ -40,8 +40,15 @@ trigger has no way to know who the owner is. Promote yourself once, from the
 SQL editor:
 
 ```sql
+begin;
+alter table public.profiles disable trigger profiles_block_self_promotion;
 update public.profiles set role = 'admin' where email = 'you@example.com';
+alter table public.profiles enable trigger profiles_block_self_promotion;
+commit;
 ```
+
+The trigger has to be switched off for this one update: with no admin yet,
+`prevent_role_escalation` refuses every role change, the SQL editor's included.
 
 After that, admins can manage roles through the app.
 

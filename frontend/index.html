@@ -799,6 +799,63 @@
   .pl-send { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; }
   .dsp-card { margin-bottom: 16px; }
   .sup-card { margin-bottom: 16px; }
+  .stk-form { margin-bottom: 16px; scroll-margin-top: 120px; }
+  .stk-head { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 6px 0 12px; }
+  .stk-head label, .stk-remarks { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
+             font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
+  .stk-head label em, .stk-remarks em { text-transform: none; font-style: normal; font-weight: 400; }
+  .stk-remarks { margin: 10px 0; }
+  .stk-in { font: inherit; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--ink);
+            padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px;
+            background: var(--surface); width: 100%; box-sizing: border-box; }
+  .stk-lines { width: 100%; min-width: 0; border-collapse: collapse; margin-bottom: 6px; }
+  .stk-lines th { text-align: left; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+                  color: var(--ink-faint); padding: 4px 6px; }
+  .stk-lines th.num { text-align: right; }
+  .stk-lines td { padding: 3px 6px; white-space: normal; }
+  .stk-unit { max-width: 110px; } .stk-n { max-width: 110px; text-align: right; }
+  .stk-markets { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stk-market { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .stk-mhead { display: flex; justify-content: space-between; width: 100%; gap: 8px; }
+  .stk-mhead span { font-size: 12px; color: var(--ink-faint); }
+  .stk-mfig { font-size: 13px; } .stk-mfig b { font-size: 20px; }
+  .stk-msub { font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
+  .stk-notes { list-style: none; margin: 8px 0 0; padding: 0; }
+  .stk-note { border-top: 1px solid var(--line); }
+  .stk-note-head { width: 100%; appearance: none; border: 0; background: none; cursor: pointer; text-align: left;
+                   display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center;
+                   gap: 12px; padding: 11px 4px; font: inherit; color: var(--ink); }
+  .stk-note-head:hover { background: var(--accent-soft); }
+  .stk-note.open > .stk-note-head { background: var(--surface-2); }
+  .stk-dn { display: flex; flex-direction: column; min-width: 0; }
+  .stk-dn em { font-style: normal; font-size: 12px; color: var(--ink-faint); }
+  .stk-fig { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+  .stk-chip { display: inline-block; font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 999px;
+              background: var(--surface-2); color: var(--ink-soft); white-space: nowrap; }
+  .stk-chip.t-ok { background: var(--ok-tint); color: var(--ok); }
+  .stk-chip.t-warn { background: var(--warn-tint); color: var(--warn); }
+  .stk-chip.t-accent { background: var(--accent-tint); color: var(--accent-strong); }
+  .stk-body { padding: 4px 4px 14px 26px; }
+  .stk-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }
+  .stk-table th { text-align: left; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+                  color: var(--ink-faint); padding: 6px; border-bottom: 1px solid var(--line-strong); }
+  .stk-table th.num, .stk-table td.num { text-align: right; }
+  .stk-table td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: normal; }
+  .stk-table .pl-sub { display: block; }
+  .stk-flag { display: block; font-size: 11.5px; color: var(--crit); margin-top: 2px; }
+  .stk-tie { display: block; margin-top: 4px; font: inherit; font-size: 12px; padding: 3px 6px;
+             border: 1px solid var(--warn); border-radius: 6px; background: var(--surface); max-width: 100%; }
+  @media (max-width: 760px) {
+    .stk-head { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stk-note-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .stk-fig { grid-column: 2 / -1; grid-row: 2; white-space: normal; }
+    .stk-body { padding-left: 4px; }
+    .stk-lines td { padding: 3px 2px; }
+    .stk-lines .stk-in { padding: 7px 6px; }
+    .stk-lines td:nth-child(2) { width: 62px; }
+    .stk-lines td:nth-child(3) { width: 76px; }
+    .stk-lines td:nth-child(4) { width: 22px; }
+  }
   .sup-box { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 9px 11px;
              border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
              color: var(--ink); resize: vertical; }
@@ -1618,7 +1675,7 @@
     <button class="tab" data-module="sales" onclick="setModule('sales')">Sales &amp; Payments</button>
     <button class="tab" data-module="tracking" onclick="setModule('tracking')">Tracking</button>
     <button class="tab" data-module="insights" onclick="setModule('insights')">Insights</button>
-    <button class="tab" data-module="reports" onclick="setModule('reports')">Reports</button>
+    <button class="tab" data-module="stock" onclick="setModule('stock')">Stock</button>
     <button class="tab" data-module="procure" onclick="setModule('procure')">Procurement</button>
   </nav>
 
@@ -1704,6 +1761,9 @@ const S = {
   // The computed outlook. Separate from the conversation because it does not
   // need an assistant key and must still be there when there is none.
   // The buy plan: what to take on, how much, and where to send it.
+  // Zaco's own delivery notes: what went to which market, and where it is now.
+  stock: { data: null, loading: false, error: null, form: null, replaces: null, open: {},
+           saving: false, formError: null },
   procure: { data: null, loading: false, error: null, months: 3, open: {},
              // This week's stock from the supplier: the list as pasted, what
              // each line was matched to, and where it all goes.
@@ -2134,7 +2194,8 @@ function setModule(m) {
   // Tracking, which had not failed, kept working -- and the history looked
   // missing from one page and present on the other.
   const view = m === "insights" ? S.insights : m === "tracking" ? S.tracking
-             : m === "reports" ? S.reports : m === "procure" ? S.procure : null;
+             : m === "reports" ? S.reports : m === "procure" ? S.procure
+             : m === "stock" ? S.stock : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
   if (m === "settings") { TF.status = null; TF.editing = false; }
   // Insights opens on its overview, with the days read fresh like the rest.
@@ -2157,11 +2218,264 @@ function render() {
   if (S.module === "settings") return renderSettings();
   if (S.module === "tracking") return renderTracking();
   if (S.module === "insights") return renderInsights();
-  if (S.module === "reports") return renderReports();
+  if (S.module === "stock") return renderStock();
   if (S.module === "procure") return renderProcure();
   if (S.busy) return renderBusy();
   if (S.screen === "hub") return renderHub();
   if (S.screen === "review") return renderReview();
+}
+
+/* ------------------------------------------------------------- stock
+   The market's reports only show a consignment once something on it has sold,
+   so stock that has not sold is invisible to them. Zaco's delivery note says
+   what went on the truck; each line is entered as written and held against
+   what the market booked, sold and paid on the same DN (backend stock_book).
+   The form keeps what is typed in S.stock.form and is only redrawn when a line
+   is added or removed, so typing is never lost to a redraw. */
+async function loadStock() {
+  const K = S.stock;
+  K.loading = true; K.error = null; render();
+  try {
+    const r = await api("/api/stock");
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.detail || `HTTP ${r.status}`);
+    K.data = out;
+  } catch (e) { K.error = e.message || String(e); }
+  finally { K.loading = false; render(); }
+}
+
+const STOCK_STATUS = {
+  not_reported: { label: "Not on the market's reports yet", tone: "warn" },
+  on_floor: { label: "On the floor", tone: "accent" },
+  owed: { label: "Sold, waiting for payment", tone: "warn" },
+  paid: { label: "Sold and paid", tone: "ok" },
+};
+
+function blankLine() { return { description: "", unit: "", written: "" }; }
+function newStockNote() {
+  const K = S.stock;
+  K.form = { dn: "", sent_on: new Date().toISOString().slice(0, 10), market: "", agent: "",
+             remarks: "", lines: [blankLine(), blankLine(), blankLine()] };
+  K.replaces = null; K.formError = null; render(); showStockForm();
+}
+function showStockForm() { const f = document.querySelector(".stk-form"); if (f) f.scrollIntoView({ block: "start" }); }
+function editStockNote(dn) {
+  const K = S.stock;
+  const n = (K.data.notes || []).find(x => x.dn === dn);
+  if (!n) return;
+  K.form = { dn: String(n.dn), sent_on: n.sent_on || "", market: n.market || "", agent: n.agent || "",
+             remarks: n.remarks || "",
+             lines: n.lines.map(l => ({ description: l.description || "", unit: l.unit || "",
+                                        written: l.written || String(l.cartons),
+                                        consignment_id: l.linked_by_hand && l.consignments[0]
+                                          ? l.consignments[0].consignment_id : null })) };
+  K.replaces = n.dn; K.formError = null; render(); showStockForm();
+}
+function stockField(key, value) { S.stock.form[key] = value; }
+function stockLineField(i, key, value) { S.stock.form.lines[i][key] = value; }
+function addStockLine() { S.stock.form.lines.push(blankLine()); render(); }
+function dropStockLine(i) { S.stock.form.lines.splice(i, 1); if (!S.stock.form.lines.length) S.stock.form.lines.push(blankLine()); render(); }
+function cancelStockNote() { S.stock.form = null; S.stock.formError = null; render(); }
+
+async function saveStockNote(form) {
+  const K = S.stock;
+  const f = form || K.form;
+  K.saving = true; K.formError = null; render();
+  try {
+    const body = new FormData();
+    body.append("note", JSON.stringify({ ...f, lines: f.lines.filter(l => (l.description || "").trim() || (l.written || "").trim()) }));
+    if (!form && K.replaces != null) body.append("replaces", String(K.replaces));
+    const r = await api("/api/stock/notes", { method: "POST", body });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.detail || `HTTP ${r.status}`);
+    if (!form) { K.form = null; K.replaces = null; }
+    K.open[out.dn] = true;
+    toast(`Delivery note ${out.dn} saved`);
+    await loadStock();
+  } catch (e) {
+    if (form) toast(e.message || String(e), true); else K.formError = e.message || String(e);
+  } finally { K.saving = false; render(); }
+}
+
+async function deleteStockNote(dn) {
+  if (!confirm(`Remove delivery note ${dn}? Only the note goes; the market's reports are untouched.`)) return;
+  try {
+    const r = await api(`/api/stock/notes/${dn}/delete`, { method: "POST" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    toast(`Delivery note ${dn} removed`);
+    await loadStock();
+  } catch (e) { toast(e.message || String(e), true); }
+}
+
+/** Tie one line of a note to a market line by hand, where the count and the
+ *  fruit did not settle it. The note is saved again with the tie on it. */
+function tieStockLine(dn, lineNo, cid) {
+  const n = (S.stock.data.notes || []).find(x => x.dn === dn);
+  if (!n) return;
+  const lines = n.lines.map(l => ({
+    description: l.description, unit: l.unit, written: l.written || String(l.cartons),
+    consignment_id: l.line_no === lineNo ? (cid ? Number(cid) : null)
+      : (l.linked_by_hand && l.consignments[0] ? l.consignments[0].consignment_id : null) }));
+  saveStockNote({ dn: String(n.dn), sent_on: n.sent_on, market: n.market, agent: n.agent || "",
+                  remarks: n.remarks || "", lines });
+}
+
+function toggleStockNote(dn) { S.stock.open[dn] = !S.stock.open[dn]; render(); }
+
+function stockForm(K) {
+  const f = K.form;
+  const known = (K.data && K.data.known_markets) || [];
+  const markets = known.includes(f.market) || !f.market ? known : [f.market, ...known];
+  return `<div class="card ins-card stk-form">
+      <div class="ins-card-head"><h2>${K.replaces != null ? `Correct delivery note ${esc(K.replaces)}` : "Add a delivery note"}</h2></div>
+      <p class="ins-sub">As it is written on the note. Cartons can be written the way the driver wrote them:
+        "54+13" is two lots, "65-2" is two short.</p>
+      <div class="stk-head">
+        <label>DN number<input class="stk-in" inputmode="numeric" value="${esc(f.dn)}" oninput="stockField('dn', this.value)"></label>
+        <label>Date<input class="stk-in" type="date" value="${esc(f.sent_on)}" oninput="stockField('sent_on', this.value)"></label>
+        <label>Market<select class="stk-in" onchange="stockField('market', this.value)">
+          <option value="">Pick the market</option>
+          ${markets.map(m => `<option value="${esc(m)}"${f.market === m ? " selected" : ""}>${esc(m)}</option>`).join("")}
+        </select></label>
+        <label><span>Agent <em>(optional)</em></span><input class="stk-in" value="${esc(f.agent)}" oninput="stockField('agent', this.value)"></label>
+      </div>
+      <table class="stk-lines">
+        <thead><tr><th>Product, as written</th><th>Units per box</th><th class="num">Cartons</th><th></th></tr></thead>
+        <tbody>${f.lines.map((l, i) => `<tr>
+          <td><input class="stk-in" placeholder="Imp Pink grapes" value="${esc(l.description)}" oninput="stockLineField(${i}, 'description', this.value)"></td>
+          <td><input class="stk-in stk-unit" placeholder="5kg" value="${esc(l.unit)}" oninput="stockLineField(${i}, 'unit', this.value)"></td>
+          <td class="num"><input class="stk-in stk-n" placeholder="54+13" value="${esc(l.written)}" oninput="stockLineField(${i}, 'written', this.value)"></td>
+          <td><button class="xbtn" title="Remove this line" onclick="dropStockLine(${i})">×</button></td></tr>`).join("")}</tbody>
+      </table>
+      <button class="linklike" onclick="addStockLine()">Add a line</button>
+      <label class="stk-remarks"><span>Remarks <em>(optional)</em></span><input class="stk-in" value="${esc(f.remarks)}" placeholder="2 boxes short" oninput="stockField('remarks', this.value)"></label>
+      ${K.formError ? `<div class="banner bad"><span class="bi">!</span><span>${esc(K.formError)}</span></div>` : ""}
+      <div class="sup-actions">
+        <button class="btn primary sm" onclick="saveStockNote()" ${K.saving ? "disabled" : ""}>${K.saving ? `<span class="spin"></span>Saving` : "Save the note"}</button>
+        <button class="btn ghost sm" onclick="cancelStockNote()">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function stockNote(n, K) {
+  const open = !!K.open[n.dn];
+  const unplaced = n.not_on_note || [];
+  const lines = n.lines.map(l => {
+    const st = STOCK_STATUS[l.status] || { label: l.status, tone: "" };
+    const tie = l.status === "not_reported" && unplaced.length
+      ? `<select class="stk-tie" onchange="tieStockLine(${n.dn}, ${l.line_no}, this.value)">
+          <option value="">Tie to a market line…</option>
+          ${unplaced.map(c => `<option value="${c.consignment_id}">${esc(shortProduct(c.product))} · ${fmtInt(c.sent)} ctn</option>`).join("")}
+        </select>` : "";
+    return `<tr>
+      <td><b>${esc(l.description)}</b>${l.unit ? ` <span class="pl-sub">${esc(l.unit)}</span>` : ""}
+        ${l.consignments.length ? `<span class="pl-sub">market: ${esc(l.consignments.map(c => shortProduct(c.product)).join(" + "))}${l.linked_by_hand ? " (tied by hand)" : ""}</span>` : ""}
+        ${l.flags.map(f => `<span class="stk-flag">${esc(f)}</span>`).join("")}${tie}</td>
+      <td class="num">${fmtInt(l.cartons)}${l.written && l.written !== String(l.cartons) ? `<span class="pl-sub">${esc(l.written)}</span>` : ""}</td>
+      <td class="num">${l.consignments.length ? fmtInt(l.booked) : "—"}</td>
+      <td class="num">${l.consignments.length ? fmtInt(l.sold) : "—"}</td>
+      <td class="num"><b>${fmtInt(l.on_floor)}</b>${l.market_avail != null && l.market_avail !== l.on_floor
+        ? `<span class="pl-sub">market says ${fmtInt(l.market_avail)}</span>` : ""}</td>
+      <td><span class="stk-chip t-${st.tone}">${esc(st.label)}</span>${l.owed > 0.005 ? `<span class="pl-sub">R ${fmt(l.owed)} owed</span>` : ""}</td>
+    </tr>`;
+  }).join("");
+  return `<li class="stk-note${open ? " open" : ""}">
+      <button class="stk-note-head" onclick="toggleStockNote(${n.dn})">
+        <span class="chev">${icon(open ? "up" : "down", 12)}</span>
+        <span class="stk-dn"><b>DN ${esc(n.dn)}</b><em>${esc(niceDate(n.sent_on) || n.sent_on || "")} · ${esc(n.market || "")}</em></span>
+        <span class="stk-fig">${fmtInt(n.cartons)} sent · <b>${fmtInt(n.on_floor)} on the floor</b></span>
+        ${n.flags ? `<span class="stk-chip t-warn">${fmtInt(n.flags)} to look at</span>`
+          : n.lines.some(l => l.status === "not_reported") ? `<span class="stk-chip">waiting on the market</span>`
+          : `<span class="stk-chip t-ok">matches</span>`}
+      </button>
+      ${open ? `<div class="stk-body">
+        <div class="rep-scroll"><table class="stk-table">
+          <thead><tr><th>Line</th><th class="num">Sent</th><th class="num">Booked</th><th class="num">Sold</th><th class="num">On the floor</th><th>Where it is</th></tr></thead>
+          <tbody>${lines}</tbody></table></div>
+        ${unplaced.length ? `<p class="trk-note warn">On the market's reports for DN ${esc(n.dn)} but not on this note:
+          ${unplaced.map(c => `${esc(shortProduct(c.product))} (${fmtInt(c.sent)} ctn at ${esc(c.market)})`).join(", ")}.</p>` : ""}
+        ${n.remarks ? `<p class="trk-note">Remarks: ${esc(n.remarks)}</p>` : ""}
+        <div class="sup-actions">
+          <button class="btn ghost sm" onclick="editStockNote(${n.dn})">Correct it</button>
+          <button class="linklike" onclick="deleteStockNote(${n.dn})">Remove</button>
+        </div>
+      </div>` : ""}
+    </li>`;
+}
+
+/** A stocktake sheet for one market: every line still on its floor, oldest
+ *  first, with a column to write the count in. Opened as its own page so it
+ *  prints clean on a phone or a desktop. */
+function printStocktake(market) {
+  const m = ((S.stock.data || {}).markets || []).find(x => x.market === market);
+  if (!m) return;
+  const rows = m.stocktake.map(r => `<tr><td>DN ${esc(r.dn)}</td><td>${esc(r.sent_on || "")}</td>
+      <td>${esc(r.description)}${r.unit ? " · " + esc(r.unit) : ""}${r.products.length ? `<br><small>${esc(r.products.join(" + "))}</small>` : ""}</td>
+      <td style="text-align:right">${r.on_floor}</td><td style="text-align:right">${r.market_avail == null ? "" : r.market_avail}</td>
+      <td style="border-bottom:1px solid #999;width:70px"></td></tr>`).join("");
+  const w = window.open("", "_blank");
+  if (!w) { toast("Allow pop-ups to print the stocktake sheet", true); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Stocktake ${esc(market)}</title>
+    <style>body{font:13px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0 0 4px}
+    table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:6px 5px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:.05em}small{color:#555}</style></head><body>
+    <h1>Stocktake: ${esc(market)}</h1>
+    <div>Zaco Agents · ${esc(new Date().toISOString().slice(0, 10))} · ${m.on_floor} cartons on the floor by the delivery notes</div>
+    <table><thead><tr><th>DN</th><th>Sent</th><th>Product</th><th style="text-align:right">By the notes</th><th style="text-align:right">Market says</th><th>Counted</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6">Nothing on the floor by the delivery notes.</td></tr>`}</tbody></table>
+    <p style="margin-top:30px">Counted by: ____________________ &nbsp; Date: ____________</p></body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
+}
+
+function renderStock() {
+  const K = S.stock;
+  if (S.live && K.data === null && !K.loading && !K.error) { loadStock(); }
+  const head = `<div class="head"><div>
+      <h1>Stock</h1>
+      <p class="head-sub">What went to each market, from Zaco's own delivery notes, and where it is now:
+        on the floor, sold and waiting for payment, or paid. The market's reports only show a line once
+        something on it has sold, so the note is what shows the rest.</p></div>
+      <div class="ins-actions">
+        ${K.form ? "" : `<button class="btn primary sm" onclick="newStockNote()">${icon("plus")}Add a delivery note</button>`}
+        <button class="btn ghost sm refresh" onclick="loadStock()">${icon("refresh")}Refresh</button>
+      </div></div>`;
+  if (!S.live) {
+    main.innerHTML = `<section class="screen">${head}<div class="card placeholder"><h2>Needs the live app</h2>
+      <p>Delivery notes are kept with your saved history, so this only works signed in.</p></div></section>`;
+    return;
+  }
+  const D = K.data;
+  if (K.error) {
+    main.innerHTML = `<section class="screen">${head}<div class="banner bad"><span class="bi">!</span>
+      <span>${esc(K.error)}</span></div></section>`;
+    return;
+  }
+  if (!D) {
+    main.innerHTML = `<section class="screen">${head}${K.form ? stockForm(K) : ""}<div class="card"><div class="busy"><span class="spin"></span> Loading the stock</div></div></section>`;
+    return;
+  }
+  const t = D.totals;
+  const kpis = `<div class="kpis kpis-4">
+      ${kpiCard("On the floor", fmtInt(t.on_floor) + " ctn", `${fmtInt(t.not_reported)} of it not on the market's reports yet`, undefined, { tone: "accent", icon: "box" })}
+      ${kpiCard("Sold, not paid", "R " + fmt(t.owed), "on the notes entered", undefined, { tone: "warn", icon: "clock" })}
+      ${kpiCard("Sold and paid", "R " + fmt(t.paid), "before the agents' cut", undefined, { tone: "ok", icon: "check" })}
+      ${kpiCard("To look at", fmtInt(t.flags), `across ${fmtInt(t.notes)} delivery note${t.notes === 1 ? "" : "s"}`, undefined, { tone: "warn", icon: "alert" })}
+    </div>`;
+  const markets = (D.markets || []).length ? `<div class="stk-markets">${D.markets.map(m => `<div class="card stk-market">
+      <div class="stk-mhead"><b>${esc(m.market)}</b><span>${fmtInt(m.notes)} note${m.notes === 1 ? "" : "s"}</span></div>
+      <div class="stk-mfig"><b>${fmtInt(m.on_floor)}</b> ctn on the floor${m.not_reported ? ` · ${fmtInt(m.not_reported)} not reported yet` : ""}</div>
+      <div class="stk-msub">R ${fmt(m.owed)} sold, not paid · R ${fmt(m.paid)} paid</div>
+      <button class="btn ghost sm" onclick="printStocktake(${q(m.market)})">${icon("print")}Stocktake sheet</button>
+    </div>`).join("")}</div>` : "";
+  const notes = (D.notes || []).length
+    ? `<div class="card ins-card"><div class="ins-card-head"><h2>Delivery notes</h2></div>
+        <ul class="stk-notes">${D.notes.map(n => stockNote(n, K)).join("")}</ul></div>`
+    : `<div class="card placeholder"><div class="pi">${icon("box", 22)}</div><h2>No delivery notes yet</h2>
+        <p>Add Zaco's delivery notes as they go out, and each one is held against what the market books,
+          sells and pays on the same DN.</p></div>`;
+  main.innerHTML = `<section class="screen ins">${head}${K.form ? stockForm(K) : ""}${kpis}${markets}${notes}</section>`;
 }
 
 /* The start of a month: last month's unsold stock is still on the floor, and
@@ -5724,7 +6038,7 @@ function renderHub() {
       <div class="head"><div>
         <h1>Sales &amp; Payments</h1>
         <p class="head-sub">Sales on the left, payments on the right.
-          Detail lives under <a href="#" onclick="event.preventDefault(); setModule('reports')">Reports</a>.</p>
+          What went to each market lives under <a href="#" onclick="event.preventDefault(); setModule('stock')">Stock</a>.</p>
       </div></div>
 
       ${technofreshPanel()}

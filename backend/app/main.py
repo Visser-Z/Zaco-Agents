@@ -44,7 +44,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_admin, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from . import dispatch_sheet, market_summary, overlap, supply
+from . import dispatch_sheet, market_summary, overlap, stock_book, supply
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -358,6 +358,8 @@ _MIGRATIONS = {
     "dismissals": "0016_dismissals.sql",
     "market_summaries": "0024_market_summaries.sql",
     "stock_carryovers": "0025_stock_carryovers.sql",
+    "stock_notes": "0028_stock_notes.sql",
+    "stock_note_lines": "0028_stock_notes.sql",
     "period_month": "0017_period_blocks.sql",
     "payments": "0015_payments.sql",
     "statements_unique_per_agent": "0014_statements_per_day.sql",
@@ -1721,6 +1723,102 @@ async def supply_dispatch_sheet(
         pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{name}"',
                  "Cache-Control": "no-store"})
+
+
+# --- stock: Zaco's own delivery notes ---------------------------------------
+# What went on the truck, entered from the delivery note, held against what
+# the market booked, sold and paid on the same DN. See stock_book.
+
+async def _stock_notes(user: User | None) -> list[dict]:
+    if user is None:
+        return []
+    try:
+        notes = await db_get(user, "stock_notes", {
+            "select": "dn,sent_on,market,agent,remarks,updated_at", "limit": "5000"})
+        lines = await db_get(user, "stock_note_lines", {
+            "select": "dn,line_no,description,unit,written,cartons,consignment_id",
+            "limit": "50000"})
+    except Exception:  # noqa: BLE001 -- before migration 0028 there are none
+        return []
+    by_dn: dict[int, list[dict]] = {}
+    for l in lines:
+        by_dn.setdefault(int(l["dn"]), []).append(l)
+    for n in notes:
+        n["lines"] = by_dn.get(int(n["dn"]), [])
+    return notes
+
+
+@app.get("/api/stock")
+async def get_stock(user: User | None = Depends(require_user)) -> dict:
+    """Every delivery note with where its stock is now, and stock per market."""
+    notes = await _stock_notes(user)
+    sales = await _history_rows(user)
+    payments = await _saved_payments(user)
+    return stock_book.reconcile(notes, sales, payments)
+
+
+@app.post("/api/stock/notes")
+async def save_stock_note(
+    note: str = Form(..., max_length=50000),
+    replaces: int | None = Form(None),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """Record a delivery note, or correct one. `note` is JSON: dn, sent_on,
+    market, agent, remarks, and lines of description, unit, written cartons
+    ("54+13") and, where a person tied it by hand, consignment_id."""
+    import json
+
+    if user is None:
+        raise HTTPException(401, "Sign in to record a delivery note.")
+    try:
+        n = json.loads(note)
+        dn = int(n["dn"])
+        sent_on = date.fromisoformat(str(n["sent_on"])[:10]).isoformat()
+        market = str(n["market"]).strip()
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(400, f"The note needs a DN number, a date and a market: {exc}") from exc
+    if not market:
+        raise HTTPException(400, "Say which market the note went to.")
+    lines = []
+    for i, l in enumerate(n.get("lines") or [], start=1):
+        desc = str(l.get("description") or "").strip()
+        written = str(l.get("written") or l.get("cartons") or "").strip()
+        total, _ = stock_book.parse_count(written)
+        if not desc and not written:
+            continue
+        if not desc or total is None:
+            raise HTTPException(400, f"Line {i} needs what it was and how many cartons.")
+        lines.append({"dn": dn, "line_no": i, "description": desc,
+                      "unit": (str(l.get("unit") or "").strip() or None), "written": written,
+                      "cartons": max(total, 0),
+                      "consignment_id": int(l["consignment_id"]) if l.get("consignment_id") else None})
+    if not lines:
+        raise HTTPException(400, "A delivery note needs at least one line.")
+    try:
+        if replaces is not None and int(replaces) != dn:
+            await db_delete(user, "stock_notes", {"dn": f"eq.{int(replaces)}"})
+        await db_post(user, "stock_notes", [{
+            "dn": dn, "sent_on": sent_on, "market": market,
+            "agent": (str(n.get("agent") or "").strip() or None),
+            "remarks": (str(n.get("remarks") or "").strip() or None),
+            "created_by": user.id, "updated_at": datetime.now(timezone.utc).isoformat()}],
+            upsert=True, on_conflict="dn", resolution="merge-duplicates")
+        await db_delete(user, "stock_note_lines", {"dn": f"eq.{dn}"})
+        await db_post(user, "stock_note_lines", lines)
+    except Exception as exc:  # noqa: BLE001
+        if (migration := _pending_migration(exc)):
+            raise HTTPException(400, f"Delivery notes need the {migration} migration.") from exc
+        raise HTTPException(400, f"Could not save the delivery note: {exc}") from exc
+    return {"dn": dn, "lines": len(lines)}
+
+
+@app.post("/api/stock/notes/{dn}/delete")
+async def delete_stock_note(dn: int, user: User | None = Depends(require_user)) -> dict:
+    """Remove a delivery note entered by mistake."""
+    if user is None:
+        raise HTTPException(401, "Sign in to remove a delivery note.")
+    await db_delete(user, "stock_notes", {"dn": f"eq.{dn}"})
+    return {"dn": dn, "deleted": True}
 
 
 @app.post("/api/assistant/plan")

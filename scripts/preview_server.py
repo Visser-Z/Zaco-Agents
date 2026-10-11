@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app import analytics, forecast, integrity, reports, tracking  # noqa: E402
+from app import analytics, forecast, integrity, reports, stock_book, tracking  # noqa: E402
 
 PAGE = ROOT / "frontend" / "index.html"
 
@@ -113,6 +113,32 @@ def fixtures() -> tuple[list[dict], list[dict]]:
 
 
 SALES, PAYMENTS = fixtures()
+
+
+def stock_notes() -> list[dict]:
+    """Delivery notes for the last few DNs, written the way a driver writes
+    them, and one the market has not reported yet."""
+    notes = []
+    for dn in sorted({r["dn"] for r in SALES})[-6:]:
+        row = next(r for r in SALES if r["dn"] == dn)
+        desc = next(d for p, d, _ in PRODUCTS if p == row["product"])
+        sent = row["qty_received"]
+        written = f"{sent - 20}+20" if dn % 2 else str(sent)
+        notes.append({"dn": dn, "sent_on": row["date_received"], "market": row["market"],
+                      "agent": None, "remarks": None,
+                      "lines": [{"line_no": 1, "description": desc, "unit": "5kg",
+                                 "written": written, "cartons": sent}]})
+    last = notes[-1]
+    notes.append({"dn": last["dn"] + 1, "sent_on": date.today().isoformat(),
+                  "market": last["market"], "agent": None, "remarks": "2 boxes short",
+                  "lines": [{"line_no": 1, "description": "Imp Pink grapes", "unit": "5kg",
+                             "written": "90", "cartons": 90},
+                            {"line_no": 2, "description": "Plums", "unit": "8kg",
+                             "written": "35", "cartons": 35}]})
+    return notes
+
+
+NOTES = stock_notes()
 print(f"fixtures: {len(SALES)} sales rows, {len(PAYMENTS)} payments")
 
 
@@ -176,6 +202,8 @@ def api(path: str, params: dict) -> dict:
                  "message": "TechnoFresh did not accept the username or password."},
             ],
         }
+    if path == "/api/stock":
+        return stock_book.reconcile(NOTES, SALES, PAYMENTS)
     if path == "/api/assistant":
         return {"configured": True, "suggestions": [
             "Which product earned the most last month?",

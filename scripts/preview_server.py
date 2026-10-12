@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app import analytics, forecast, integrity, reports, stock_book, tracking  # noqa: E402
+from app import analytics, forecast, integrity, market_stock, reports, stock_book, tracking  # noqa: E402
 
 PAGE = ROOT / "frontend" / "index.html"
 
@@ -139,6 +139,35 @@ def stock_notes() -> list[dict]:
 
 
 NOTES = stock_notes()
+
+
+def stock_count() -> list[dict]:
+    """A morning's Stock On Hand as the market would print it: every
+    consignment in the fixtures, plus a second line on the newest deliveries
+    that nothing has sold from, which only this report shows."""
+    by: dict[int, list[dict]] = {}
+    for r in SALES:
+        by.setdefault(r["consignment_id"], []).append(r)
+    rows = []
+    newest = sorted(by, reverse=True)[:6]
+    for cid, group in by.items():
+        f = group[0]
+        sold = sum(r["cartons_sold"] for r in group)
+        base = {"market": f["market"], "fms_id": str(cid // 100), "agent": f["market_agent"],
+                "supplier_ref": f"20026*{f['dn']}", "dn": f["dn"], "delivered_on": f["date_received"],
+                "amended": None, "avg_price": round(f["price"], 2)}
+        rows.append({**base, "seq": 1, "product": f["product"], "sent": f["qty_received"],
+                     "sold": sold, "on_hand": f["qty_received"] - sold})
+        if cid in newest:
+            rows.append({**base, "seq": 2, "product": "PEACHES OTHER PEACHES CLASS 1 LARGE (PUNNET 8kg)",
+                         "sent": 35, "sold": 0, "on_hand": 35, "avg_price": 0.0})
+    rows[0] = {**rows[0], "amended": rows[0]["sent"] - 10, "sold": rows[0]["sent"],
+               "on_hand": -10}
+    return rows
+
+
+COUNT = stock_count()
+COUNT_DAY = date.today().isoformat()
 print(f"fixtures: {len(SALES)} sales rows, {len(PAYMENTS)} payments")
 
 
@@ -160,7 +189,8 @@ def api(path: str, params: dict) -> dict:
     if path == "/api/lookup":
         return {"codes": {}}
     if path == "/api/tracking":
-        return tracking.compute(SALES, PAYMENTS, closed=set(),
+        laid, unsold = market_stock.apply(SALES, COUNT, COUNT_DAY)
+        return tracking.compute(laid, PAYMENTS, closed=set(), unsold=unsold,
                                 month=params.get("month"), week=params.get("week"))
     if path == "/api/sales-days":
         return tracking.daily(SALES, PAYMENTS, start=params.get("from"), end=params.get("to"),
@@ -203,7 +233,14 @@ def api(path: str, params: dict) -> dict:
             ],
         }
     if path == "/api/stock":
-        return stock_book.reconcile(NOTES, SALES, PAYMENTS)
+        laid, unsold = market_stock.apply(SALES, COUNT, COUNT_DAY)
+        out = stock_book.reconcile(NOTES, laid, PAYMENTS, unsold=unsold)
+        out["market_count"] = market_stock.summary(COUNT, COUNT_DAY)
+        entered = {int(n["dn"]) for n in NOTES}
+        for m in out["market_count"]["markets"]:
+            for n in m["notes"]:
+                n["entered"] = n["dn"] in entered if n["dn"] else False
+        return out
     if path == "/api/assistant":
         return {"configured": True, "suggestions": [
             "Which product earned the most last month?",

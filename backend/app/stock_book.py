@@ -113,9 +113,14 @@ def fits(line: dict, cons: dict) -> bool:
     return theirs is None or theirs == colour
 
 
-def consignments(sales: list[dict], payments: list[dict]) -> dict[int, list[dict]]:
+def consignments(sales: list[dict], payments: list[dict],
+                 unsold: list[dict] | None = None) -> dict[int, list[dict]]:
     """Every market consignment by its delivery note, with what it sold and
-    what of that is paid, from the same matching the Tracking tab uses."""
+    what of that is paid, from the same matching the Tracking tab uses.
+
+    ``unsold`` is the market's own count of lines nothing has sold from yet
+    (``market_stock.apply``). No sales report shows those, so without the count
+    a note line on one could only read "not reported"."""
     filled = tracking.valued(sales)
     owed, _, _, _, extra = tracking._allocate(filled, payments)
     groups: dict[int, list[dict]] = defaultdict(list)
@@ -126,7 +131,11 @@ def consignments(sales: list[dict], payments: list[dict]) -> dict[int, list[dict
     for cid, rows in groups.items():
         rows.sort(key=lambda r: analytics.selling_day(r) or "")
         first = rows[0]
-        avail = next((r.get("qty_avail") for r in reversed(rows) if r.get("qty_avail") is not None), None)
+        sent_, avail = tracking.on_hand(rows)
+        counted = next((r.get("market_counted") for r in rows
+                        if r.get("market_on_hand") is not None), None)
+        if counted is None and not any(r.get("qty_avail") is not None for r in rows):
+            avail = None
         try:
             dn = int(first["dn"])
         except (TypeError, ValueError):
@@ -134,6 +143,8 @@ def consignments(sales: list[dict], payments: list[dict]) -> dict[int, list[dict
         sent = max((int(r.get("qty_received") or 0) for r in rows), default=0)
         booked = max((int(r["qty_amended"]) for r in rows if r.get("qty_amended") is not None),
                      default=sent)
+        if counted is not None:
+            booked = int(sent_)
         by_dn[dn].append({
             "consignment_id": cid, "dn": dn, "product": first.get("product"),
             "market": first.get("market"), "market_agent": first.get("market_agent"),
@@ -142,9 +153,25 @@ def consignments(sales: list[dict], payments: list[dict]) -> dict[int, list[dict
             "value": round(sum(float(r.get("sales_total") or 0) for r in rows), 2),
             "owed": round(sum(owed[id(r)] for r in rows if owed[id(r)] > 0), 2),
             "paid": round(sum(extra["gross_paid"][id(r)] for r in rows), 2),
-            "avail": avail,
+            "avail": None if avail is None else int(avail), "counted": counted,
             "first_sale": analytics.selling_day(first),
             "last_sale": analytics.selling_day(rows[-1]),
+        })
+    for r in unsold or []:
+        try:
+            dn = int(r["dn"])
+        except (TypeError, ValueError):
+            continue
+        booked = int(r["qty_amended"]) if r.get("qty_amended") is not None else int(r["qty_received"])
+        by_dn[dn].append({
+            # No consignment id until something sells; a stand-in that cannot
+            # collide with a real one, so a person can still tie it by hand.
+            "consignment_id": r.get("consignment_id") or -(int(r["fms_id"]) * 100 + int(r["fms_line"])),
+            "dn": dn, "product": r["product"], "market": r["market"],
+            "market_agent": r.get("market_agent"), "sent": int(r["qty_received"]),
+            "booked": booked, "sold": 0, "value": 0.0, "owed": 0.0, "paid": 0.0,
+            "avail": int(r["market_on_hand"]), "counted": r.get("market_counted"),
+            "first_sale": None, "last_sale": None,
         })
     return by_dn
 
@@ -213,10 +240,10 @@ def _match(note: dict, cons: list[dict]) -> tuple[dict[int, list[dict]], list[di
 
 
 def reconcile(notes: list[dict], sales: list[dict], payments: list[dict],
-              today: date | None = None) -> dict:
+              today: date | None = None, unsold: list[dict] | None = None) -> dict:
     """Every note's lines with where their stock is, and stock per market."""
     today = today or date.today()
-    by_dn = consignments(sales, payments)
+    by_dn = consignments(sales, payments, unsold)
     out_notes = []
     markets: dict[str, dict] = {}
     for note in sorted(notes, key=lambda n: (str(n.get("sent_on") or ""), n["dn"]), reverse=True):
@@ -249,6 +276,16 @@ def reconcile(notes: list[dict], sales: list[dict], payments: list[dict],
                 floor = max(booked - sold, 0)
                 avails = [c["avail"] for c in got if c["avail"] is not None]
                 avail = sum(avails) if len(avails) == len(got) else None
+                counted = [c["counted"] for c in got if c.get("counted")]
+                if avail is not None and len(counted) == len(got):
+                    # The market counted it this morning: its floor is the
+                    # floor. Where the book works it out differently, a sale or
+                    # a return is not on the book yet, and that is said.
+                    if avail < 0:
+                        flags.append(f"the market sold {-avail} more than it booked in")
+                    elif avail != floor:
+                        flags.append(f"the market counts {avail} on the floor, the book works out {floor}")
+                    floor = max(avail, 0)
                 market_sent = sum(c["sent"] for c in got)
                 if market_sent != l["cartons"]:
                     flags.append(f"the market recorded {market_sent} sent, the note says {l['cartons']}")
@@ -268,6 +305,7 @@ def reconcile(notes: list[dict], sales: list[dict], payments: list[dict],
                                                     "sent", "booked", "sold", "avail")}
                                  for c in got],
                 "booked": booked, "sold": sold, "on_floor": floor, "market_avail": avail,
+                "market_counted": max((c["counted"] for c in got if c.get("counted")), default=None),
                 "value": value, "owed": owed, "paid": paid, "status": status, "flags": flags,
                 "linked_by_hand": bool(l.get("consignment_id")),
             })

@@ -1729,6 +1729,19 @@ def on_hand(group: list[dict]) -> tuple[float, float]:
     """
     booked = max((int(r["qty_amended"]) for r in group
                   if r.get("qty_amended") is not None), default=None)
+    # The market's daily Stock On Hand count (see market_stock), where it has
+    # been pulled: it is the newest word on the floor, and it covers days on
+    # which nothing sold, which Qty Avail never does.
+    counted = [r for r in group if r.get("market_on_hand") is not None]
+    newest_sale = max((str(r.get("last_sale") or "") for r in group
+                       if r.get("qty_avail") is not None), default="")
+    # A count is taken in the morning, so a sale on or after its day is newer.
+    if counted and max(str(r.get("market_counted") or "") for r in counted) > newest_sale:
+        c = max(counted, key=lambda r: str(r.get("market_counted") or ""))
+        if c.get("market_booked") is not None:
+            booked = int(c["market_booked"])
+        sent = float(booked) if booked is not None else analytics.cartons_sent(group)
+        return sent, float(c["market_on_hand"])
     sent = float(booked) if booked is not None else analytics.cartons_sent(group)
     said = [r for r in group if r.get("qty_avail") is not None]
     if said:
@@ -1780,6 +1793,13 @@ def stock_on_hand(sales: list[dict], today: date | None = None,
             "arrived_basis": basis,
             "days_on_hand": days,
             "tier": stock_tier(days),
+            # The market's own count, and the day it was taken, where the
+            # daily Stock On Hand pull has one for this line.
+            "market_counted": max((str(r["market_counted"]) for r in group
+                                   if r.get("market_on_hand") is not None
+                                   and r.get("market_counted")), default=None),
+            # On the market's count but on no sales report: nothing sold yet.
+            "not_sold_yet": bool(first.get("stock_only")),
         })
     # Scoped by when the stock arrived, as slow stock always was: "August's
     # stock" is what August put on the floor. Stock carried into the month in
@@ -1953,8 +1973,13 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
             start: str | None = None, end: str | None = None,
             closed: set[str] | frozenset[str] = frozenset(),
             month: str | None = None, week: str | None = None,
-            carried: list[dict] | None = None) -> dict:
+            carried: list[dict] | None = None,
+            unsold: list[dict] | None = None) -> dict:
     """Everything the Tracking tab renders.
+
+    ``unsold`` is the market's count of lines nothing has sold from yet (see
+    ``market_stock.apply``). They are stock and nothing else, so they reach
+    Stock on Hand and no figure about money.
 
     A month answers for its own sales. Every sale on the book is settled
     against its consignment's payments oldest first, and the window then only
@@ -1986,7 +2011,7 @@ def compute(sales: list[dict], payments: list[dict], today: date | None = None,
         "sales_by_day": sales_by_day(filled, d_start, d_end,
                                      settled=(owed_by_row, paid_by_row)),
         "slow_stock": slow_stock(sales, today, closed, lo, hi),
-        "stock_on_hand": stock_on_hand(sales, today, closed, lo, hi, carried),
+        "stock_on_hand": stock_on_hand(sales + list(unsold or []), today, closed, lo, hi, carried),
         # Every payment, by the delivery note it paid, scoped by when it was paid.
         "payments_by_delivery": payments_by_delivery(filled, payments, owed_by_row, lo, hi),
         # Across the whole book: a payment to check does not belong to a month.

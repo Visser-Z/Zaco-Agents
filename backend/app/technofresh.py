@@ -5,6 +5,7 @@ posts, found by recording them in a browser:
 
     Payment Details      POST /reports/view/24/<pdf|csv>   fromDate, toDate
     Daily sales details  POST /reports/view/8/<pdf|csv>    from_date, to_date
+    Stock On Hand        POST /reports/view/28/csv         from_date, to_date (delivery dates)
 
 with market, agent and product left empty for "all". The PDF is what is
 pulled: the app has read those reliably for months, and a PDF sales row is
@@ -31,7 +32,7 @@ from datetime import date, timedelta
 
 import httpx
 
-from . import config, daily_sales, payment_details
+from . import config, daily_sales, market_stock, payment_details
 from .extraction import pdf_to_page_texts
 from .supabase_auth import User
 
@@ -62,6 +63,11 @@ class Report:
 PAYMENTS = Report("payments", "Payment Details", 24, "fromDate", "toDate", ("market", "agent"))
 SALES = Report("sales", "Daily sales details", 8, "from_date", "to_date",
                ("market", "agent", "product"))
+# Pulled as a CSV, one market at a time, over the deliveries of the last
+# STOCK_WINDOW_DAYS: it is a position as of the moment it is run, not a day's
+# trade, so it is one snapshot a day. See ``market_stock``.
+STOCK = Report("stock", "Stock On Hand", 28, "from_date", "to_date", ("market", "agent"))
+STOCK_WINDOW_DAYS = 120
 
 
 class PortalError(Exception):
@@ -149,6 +155,27 @@ class Portal:
             what = "a web page" if "<html" in head or head.lstrip().startswith("<") else "something else"
             raise PortalError(f"{report.title} {day}: TechnoFresh sent {what}, not a PDF.")
         return r.content
+
+
+    def fetch_stock(self, market_code: str, today: date) -> str:
+        """One market's Stock On Hand CSV, for deliveries in the window."""
+        self._pace()
+        data = STOCK.form(today)
+        data["from_date"] = (today - timedelta(days=STOCK_WINDOW_DAYS)).isoformat()
+        data["market"] = market_code
+        try:
+            r = self._client.post(f"{PORTAL}/reports/view/{STOCK.report_id}/csv", data=data)
+        except httpx.HTTPError as exc:
+            raise PortalError(f"Stock On Hand {market_code}: could not reach TechnoFresh ({exc}).") from exc
+        if r.is_redirect:
+            raise PortalError(f"Stock On Hand {market_code}: TechnoFresh ended the session.")
+        if r.status_code != 200:
+            raise PortalError(f"Stock On Hand {market_code}: TechnoFresh answered HTTP {r.status_code}.")
+        text = r.content.decode("utf-8", errors="replace")
+        # A market with nothing in the window comes back empty, which is an answer.
+        if text.strip() and not market_stock.is_stock_csv(text):
+            raise PortalError(f"Stock On Hand {market_code}: TechnoFresh did not send the report.")
+        return text
 
 
 def is_report(report: Report, pages: list[str]) -> bool:

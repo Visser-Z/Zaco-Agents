@@ -320,7 +320,7 @@ def _reasons(line: dict) -> list[str]:
 
 
 def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAULT_MONTHS,
-          today=None, days: int = DEFAULT_DAYS) -> dict:
+          today=None, days: int = DEFAULT_DAYS, unsold: list[dict] | None = None) -> dict:
     """The plan: every product worth taking on, ranked, with its destination.
 
     `months` is how far back the destinations are compared over; `days` is how
@@ -332,7 +332,9 @@ def build(rows: list[dict], payments: list[dict], months: int = scorecard.DEFAUL
     projection = forecast.project(rows, today)
     card = scorecard.build(rows, payments, months)
     velocity = {v["product"]: v for v in forecast.velocity(rows)}
-    floor = on_hand_by_product(rows)
+    # With the market's count of lines nothing has sold from yet: they are on
+    # the floor as surely as anything half sold (see market_stock.apply).
+    floor = on_hand_by_product(rows + list(unsold or []))
 
     where: dict[str, dict] = {}
     for fruit in card.get("fruits", []):

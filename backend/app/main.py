@@ -44,7 +44,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_admin, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from . import dispatch_sheet, market_summary, overlap, stock_book, supply
+from . import dispatch_sheet, market_stock, market_summary, overlap, stock_book, supply
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -1034,6 +1034,33 @@ def _apply_checks(payments: list[dict], checks: list[dict]) -> None:
                 line["check"] = "keep"
 
 
+async def _market_count(user: User | None) -> tuple[str | None, list[dict]]:
+    """The latest daily Stock On Hand snapshot: its day and its lines, or
+    (None, []) before migration 0029 or before the first pull."""
+    if user is None:
+        return None, []
+    try:
+        latest = await db_get(user, "market_stock", {
+            "select": "snapshot", "order": "snapshot.desc", "limit": "1"})
+        if not latest:
+            return None, []
+        day = latest[0]["snapshot"]
+        rows = await db_get(user, "market_stock", {
+            "select": "market,fms_id,seq,agent,supplier_ref,dn,delivered_on,product,"
+                      "sent,amended,sold,on_hand,avg_price,pulled_at",
+            "snapshot": f"eq.{day}", "limit": "20000"})
+    except Exception:  # noqa: BLE001 -- before migration 0029
+        return None, []
+    return day, rows
+
+
+async def _counted(user: User | None, rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """The book with the market's latest count laid over it, and the lines
+    nothing has sold from yet (see market_stock.apply). Stock views only."""
+    day, count = await _market_count(user)
+    return market_stock.apply(rows, count, day)
+
+
 async def _stock_carryovers(user: User | None) -> list[dict]:
     """Stock carried from one month into the next, read as the caller."""
     if user is None:
@@ -1177,7 +1204,8 @@ async def get_tracking(
     payments = await _saved_payments(user)
     closed = await _closed_refs(user)
     carried = await _stock_carryovers(user)
-    out = tracking.compute(sales, payments, start=date_from, end=date_to,
+    sales, unsold = await _counted(user, sales)
+    out = tracking.compute(sales, payments, start=date_from, end=date_to, unsold=unsold,
                            closed=closed, month=month, week=week, carried=carried)
     # Whether this month still has last month's unsold stock to carry in.
     status = tracking.carryover_status(sales, None, closed, carried)
@@ -1585,7 +1613,8 @@ async def get_procurement(
     """
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    return procurement.build(rows, payments, months, days=days)
+    rows, unsold = await _counted(user, rows)
+    return procurement.build(rows, payments, months, days=days, unsold=unsold)
 
 
 @app.get("/api/procurement/sheet.pdf")
@@ -1604,7 +1633,8 @@ async def get_order_sheet(
     """
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    plan = procurement.build(rows, payments, months, days=days)
+    rows, unsold = await _counted(user, rows)
+    plan = procurement.build(rows, payments, months, days=days, unsold=unsold)
     pdf = await run_in_threadpool(order_sheet.build, plan, None, prepared_for)
     return Response(
         pdf, media_type="application/pdf",
@@ -1624,7 +1654,8 @@ async def get_dispatch_sheet(
     loads the trucks. Drawn from the same plan as the screen."""
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    plan = procurement.build(rows, payments, months, days=days)
+    rows, unsold = await _counted(user, rows)
+    plan = procurement.build(rows, payments, months, days=days, unsold=unsold)
     pdf = await run_in_threadpool(dispatch_sheet.build, plan, None, prepared_for)
     return Response(
         pdf, media_type="application/pdf",
@@ -1653,7 +1684,8 @@ def _supply_items(items: str) -> list[dict]:
 async def _supply_plan(user: User | None, items: str, months: int, days: int) -> dict:
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    full = procurement.build(rows, payments, months, days=days)
+    rows, unsold = await _counted(user, rows)
+    full = procurement.build(rows, payments, months, days=days, unsold=unsold)
     return supply.plan(full, _supply_items(items), rows, payments, months)
 
 
@@ -1668,7 +1700,8 @@ async def read_supply(
     person to pick."""
     rows = await _history_rows(user)
     payments = await _saved_payments(user)
-    full = procurement.build(rows, payments, months)
+    rows, unsold = await _counted(user, rows)
+    full = procurement.build(rows, payments, months, unsold=unsold)
     return {"items": supply.read(text, full.get("lines") or []),
             "products": sorted(l["product"] for l in full.get("lines") or [])}
 
@@ -1754,7 +1787,17 @@ async def get_stock(user: User | None = Depends(require_user)) -> dict:
     notes = await _stock_notes(user)
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
-    return stock_book.reconcile(notes, sales, payments)
+    sales, unsold = await _counted(user, sales)
+    out = stock_book.reconcile(notes, sales, payments, unsold=unsold)
+    # The market's own count beside Zaco's notes: every line still on a floor,
+    # and which delivery notes have no Zaco note entered yet.
+    day, count = await _market_count(user)
+    out["market_count"] = market_stock.summary(count, day, _sa_today())
+    entered = {int(n["dn"]) for n in notes}
+    for m in out["market_count"]["markets"]:
+        for n in m["notes"]:
+            n["entered"] = n["dn"] in entered if n["dn"] else False
+    return out
 
 
 @app.post("/api/stock/notes")
@@ -2376,6 +2419,33 @@ async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
             "message": " ".join(notes) or (None if rows else "No sales that day.")}
 
 
+async def _tf_stock(user: User, portal, today: date) -> dict:
+    """This morning's Stock On Hand, every market, saved as one snapshot.
+
+    One request per market, so each line's market is the one asked for rather
+    than read off the agent heading. A market that fails fails the snapshot:
+    a count missing a market would read as that market's floor being empty.
+    """
+    rows: list[dict] = []
+    for code, market in market_stock.MARKETS.items():
+        text = await run_in_threadpool(portal.fetch_stock, code, today)
+        rows += market_stock.parse(text, market)
+    day = today.isoformat()
+    await db_delete(user, "market_stock", {"snapshot": f"eq.{day}"})
+    stamp = datetime.now(timezone.utc).isoformat()
+    for i in range(0, len(rows), 500):
+        await db_post(user, "market_stock", [
+            {**{k: r[k] for k in ("market", "fms_id", "seq", "agent", "supplier_ref", "dn",
+                                  "delivered_on", "product", "sent", "amended", "sold",
+                                  "on_hand", "avg_price")},
+             "snapshot": day, "pulled_at": stamp} for r in rows[i:i + 500]])
+    floor = [r for r in rows if r["on_hand"] > 0]
+    untouched = [r for r in floor if not r["sold"]]
+    return {"status": "done", "found": len(rows), "saved": len(rows),
+            "message": f"{sum(r['on_hand'] for r in floor)} cartons on the floor over "
+                       f"{len(floor)} lines; {len(untouched)} of them nothing has sold from yet."}
+
+
 async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
     """Pull every day that is due, oldest first, within the time the server allows."""
     try:
@@ -2400,7 +2470,17 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
         [(technofresh.PAYMENTS, d) for d in technofresh.days_to_pull("payments", held, today)]
         + [(technofresh.SALES, d) for d in technofresh.days_to_pull("sales", held, today)],
         key=lambda p: (p[1], order[p[0].key]))
-    if not plan:
+    # The market's Stock On Hand is a count taken now, so one a day, first:
+    # it is the freshest thing the pull brings, and a catch-up of old days can
+    # wait for "Pull now". Only once migration 0029 is in.
+    stock_due = not any(h["report"] == "stock" and h["day"] == today.isoformat()
+                        and h["status"] == "done" for h in held)
+    if stock_due:
+        try:
+            await db_get(user, "market_stock", {"select": "snapshot", "limit": "1"})
+        except Exception:  # noqa: BLE001 -- before migration 0029
+            stock_due = False
+    if not plan and not stock_due:
         return {"ran": True, "pulled": [], "left": 0, "message": "Everything is up to date."}
 
     started = time.monotonic()
@@ -2413,10 +2493,22 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
         # again next time and the screen says why they are missing.
         for report, day in plan:
             await _tf_record(user, report.key, day, status="failed", message=str(exc))
+        if stock_due:
+            await _tf_record(user, "stock", today, status="failed", message=str(exc))
         return {"ran": True, "pulled": [], "left": len(plan), "message": str(exc)}
 
     left = 0
     with portal:
+        if stock_due:
+            try:
+                outcome = await _tf_stock(user, portal, today)
+            except technofresh.PortalError as exc:
+                outcome = {"status": "failed", "message": str(exc)}
+            except Exception as exc:  # noqa: BLE001 -- the daily reports still run
+                outcome = {"status": "failed",
+                           "message": f"Could not save the stock count: {getattr(exc, 'detail', exc)}"}
+            await _tf_record(user, "stock", today, **outcome)
+            pulled.append({"report": "stock", "day": today.isoformat(), **outcome})
         for report, day in plan:
             if time.monotonic() - started > technofresh.TIME_BUDGET:
                 left += 1

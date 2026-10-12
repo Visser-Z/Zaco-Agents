@@ -814,6 +814,27 @@
   .stk-lines th.num { text-align: right; }
   .stk-lines td { padding: 3px 6px; white-space: normal; }
   .stk-unit { max-width: 110px; } .stk-n { max-width: 110px; text-align: right; }
+  /* The market's own count on the Stock page. */
+  .stk-count { margin-bottom: 16px; }
+  .cnt-figs { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 4px 0 10px; font-size: 13px; color: var(--ink-soft); }
+  .cnt-figs b { color: var(--ink); font-size: 15px; }
+  .cnt-figs .warn b { color: var(--crit); }
+  .cnt-body { padding: 4px 4px 10px 26px; }
+  .cnt-note { margin-top: 8px; }
+  .cnt-note .sdn-head { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .cnt-tag { display: flex; justify-content: flex-end; }
+  .cnt-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: 12.5px; margin-top: 4px; }
+  .cnt-table th { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint);
+                  font-weight: 650; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+  .cnt-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .cnt-table th.num, .cnt-table td.num { text-align: right; white-space: nowrap; }
+  .cnt-table td:first-child { white-space: normal; min-width: 160px; }
+  .cnt-table tr.untouched td:first-child { font-weight: 600; }
+  .cnt-table .stk-chip { margin-left: 6px; }
+  .cnt-table .amend { color: var(--warn); }
+  @media (max-width: 700px) { .cnt-body { padding-left: 4px; }
+    .cnt-note .sdn-head { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+    .cnt-tag { flex-basis: 100%; justify-content: flex-start; } }
   .stk-markets { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .stk-market { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
   .stk-mhead { display: flex; justify-content: space-between; width: 100%; gap: 8px; }
@@ -1143,6 +1164,7 @@
   .notice-acts { display: flex; gap: 8px; flex: none; }
   .carry-tag { font-size: 10.5px; font-weight: 650; padding: 1px 7px; border-radius: 999px;
                background: var(--accent-tint); color: var(--accent-strong); margin-left: 6px; white-space: nowrap; }
+  .carry-tag.warn { background: var(--warn-tint); color: var(--warn); }
   /* What the market's own summary says about the line. */
   .mkt-says { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-faint);
               white-space: normal; line-height: 1.4; }
@@ -2258,6 +2280,17 @@ function newStockNote() {
              remarks: "", lines: [blankLine(), blankLine(), blankLine()] };
   K.replaces = null; K.formError = null; render(); showStockForm();
 }
+/** A note for a delivery the market holds but nobody has entered: the DN,
+ *  date and market from the market's count, the lines left for the note. */
+function newStockNoteFor(dn, sentOn, market) {
+  newStockNote();
+  Object.assign(S.stock.form, { dn: String(dn), sent_on: sentOn || S.stock.form.sent_on, market });
+  render(); showStockForm();
+}
+function toggleCountMarket(m) {
+  const o = S.stock.countOpen || (S.stock.countOpen = {});
+  o[m] = !o[m]; render();
+}
 function showStockForm() { const f = document.querySelector(".stk-form"); if (f) f.scrollIntoView({ block: "start" }); }
 function editStockNote(dn) {
   const K = S.stock;
@@ -2357,6 +2390,69 @@ function stockForm(K) {
     </div>`;
 }
 
+/** What the market itself says is on its floor, from the Stock On Hand
+ *  report the 8am pull fetches. Every line nothing has sold from is here too,
+ *  which no sales report shows. */
+function marketCountCard(C, K) {
+  if (!C || !C.snapshot) {
+    return `<div class="card ins-card stk-count"><div class="ins-card-head"><h2>The market's own count</h2></div>
+      <p class="ins-empty">Not pulled yet. The 8am TechnoFresh pull fetches each market's Stock On Hand
+        every morning; press Pull now in Settings to fetch today's.</p></div>`;
+  }
+  const open = K.countOpen || {};
+  const age = d => d == null ? "" : `<span class="wsig t-${d > 21 ? "red" : d > 10 ? "orange" : "green"}">${fmtInt(d)}d</span>`;
+  const market = m => {
+    const isOpen = !!open[m.market];
+    const missing = m.notes.filter(n => !n.entered).length;
+    return `<div class="smkt${isOpen ? " open" : ""}">
+      <button class="smkt-head" aria-expanded="${isOpen}" onclick="toggleCountMarket(${q(m.market)})">
+        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
+        <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
+        <span class="smkt-sum num">${fmtInt(m.lines)} line${m.lines === 1 ? "" : "s"} on ${fmtInt(m.notes.length)} delivery note${m.notes.length === 1 ? "" : "s"}${
+          missing ? ` · ${fmtInt(missing)} with no note entered` : ""}</span>
+        <span class="smkt-tiers"><span class="trk-n num">${fmtInt(m.cartons)} ctn</span>${
+          m.oversold.length ? `<span class="wsig t-red">${fmtInt(m.oversold.length)} oversold</span>` : ""}</span>
+      </button>
+      ${isOpen ? `<div class="cnt-body">
+        ${m.notes.map(n => `<div class="cnt-note">
+          <div class="sdn-head">${age(n.days)}<b>${n.dn ? "DN " + esc(n.dn) : esc(n.supplier_ref)}</b>
+            <span class="sdn-sub">delivered ${esc(niceDate(n.delivered_on) || n.delivered_on || "")}</span>
+            <span class="cnt-tag">${n.entered ? `<span class="stk-chip t-ok">note entered</span>`
+              : n.dn ? `<button class="btn ghost sm" onclick="newStockNoteFor(${n.dn}, ${q(n.delivered_on || "")}, ${q(m.market)})">${icon("plus")}Add its note</button>`
+              : `<span class="stk-chip">no DN on the ref</span>`}</span>
+          </div>
+          <div class="rep-scroll"><table class="cnt-table">
+            <thead><tr><th>Product</th><th class="num">Sent</th><th class="num">Booked</th><th class="num">Sold</th><th class="num">On the floor</th><th class="num">Avg price</th></tr></thead>
+            <tbody>${n.lines.map(l => `<tr${l.sold ? "" : ` class="untouched"`}>
+              <td title="${esc(l.product)}">${esc(shortProduct(l.product))}${l.sold ? "" : `<span class="stk-chip t-warn">nothing sold yet</span>`}</td>
+              <td class="num">${fmtInt(l.sent)}</td>
+              <td class="num">${l.amended != null ? `<b class="amend" title="The market rebooked it from ${fmtInt(l.sent)}">${fmtInt(l.amended)}</b>` : fmtInt(l.sent)}</td>
+              <td class="num">${fmtInt(l.sold)}</td>
+              <td class="num"><b>${fmtInt(l.on_hand)}</b></td>
+              <td class="num">${l.avg_price ? "R " + fmt(l.avg_price) : ""}</td></tr>`).join("")}</tbody>
+          </table></div>
+        </div>`).join("")}
+        ${m.oversold.length ? `<p class="trk-note warn">The market says it sold more than it booked on
+          ${m.oversold.map(o => `${o.dn ? "DN " + esc(o.dn) : esc(o.supplier_ref)} ${esc(shortProduct(o.product))} (booked ${fmtInt(o.amended != null ? o.amended : o.sent)}, sold ${fmtInt(o.sold)})`).join("; ")}.
+          A question for the agent.</p>` : ""}
+        ${m.cleared ? `<p class="trk-note">${fmtInt(m.cleared)} other line${m.cleared === 1 ? "" : "s"} delivered in the last four months ${m.cleared === 1 ? "is" : "are"} sold out.</p>` : ""}
+      </div>` : ""}
+    </div>`;
+  };
+  const counted = niceDate(C.snapshot) || C.snapshot;
+  return `<div class="card ins-card stk-count">
+    <div class="ins-card-head"><h2>The market's own count</h2>
+      <span class="rep-c">Stock On Hand from TechnoFresh, ${esc(counted)}</span></div>
+    <div class="cnt-figs">
+      <span><b class="num">${fmtInt(C.cartons)}</b> cartons on the floor</span>
+      <span><b class="num">${fmtInt(C.lines)}</b> lines</span>
+      <span><b class="num">${fmtInt(C.untouched)}</b> nothing sold from yet</span>
+      ${C.oversold ? `<span class="warn"><b class="num">${fmtInt(C.oversold)}</b> sold more than booked</span>` : ""}
+    </div>
+    <div class="smkts">${C.markets.map(market).join("")}</div>
+  </div>`;
+}
+
 function stockNote(n, K) {
   const open = !!K.open[n.dn];
   const unplaced = n.not_on_note || [];
@@ -2374,7 +2470,9 @@ function stockNote(n, K) {
       <td class="num">${fmtInt(l.cartons)}${l.written && l.written !== String(l.cartons) ? `<span class="pl-sub">${esc(l.written)}</span>` : ""}</td>
       <td class="num">${l.consignments.length ? fmtInt(l.booked) : "—"}</td>
       <td class="num">${l.consignments.length ? fmtInt(l.sold) : "—"}</td>
-      <td class="num"><b>${fmtInt(l.on_floor)}</b>${l.market_avail != null && l.market_avail !== l.on_floor
+      <td class="num"><b>${fmtInt(l.on_floor)}</b>${l.market_counted
+        ? `<span class="pl-sub">market's count ${esc(shortDay(l.market_counted))}</span>`
+        : l.market_avail != null && l.market_avail !== l.on_floor
         ? `<span class="pl-sub">market says ${fmtInt(l.market_avail)}</span>` : ""}</td>
       <td><span class="stk-chip t-${st.tone}">${esc(st.label)}</span>${l.owed > 0.005 ? `<span class="pl-sub">R ${fmt(l.owed)} owed</span>` : ""}</td>
     </tr>`;
@@ -2435,8 +2533,8 @@ function renderStock() {
   const head = `<div class="head"><div>
       <h1>Stock</h1>
       <p class="head-sub">What went to each market, from Zaco's own delivery notes, and where it is now:
-        on the floor, sold and waiting for payment, or paid. The market's reports only show a line once
-        something on it has sold, so the note is what shows the rest.</p></div>
+        on the floor, sold and waiting for payment, or paid. Each morning the market's own Stock On Hand
+        count is pulled from TechnoFresh, so what is on the floor is the market's figure, unsold lines included.</p></div>
       <div class="ins-actions">
         ${K.form ? "" : `<button class="btn primary sm" onclick="newStockNote()">${icon("plus")}Add a delivery note</button>`}
         <button class="btn ghost sm refresh" onclick="loadStock()">${icon("refresh")}Refresh</button>
@@ -2475,7 +2573,7 @@ function renderStock() {
     : `<div class="card placeholder"><div class="pi">${icon("box", 22)}</div><h2>No delivery notes yet</h2>
         <p>Add Zaco's delivery notes as they go out, and each one is held against what the market books,
           sells and pays on the same DN.</p></div>`;
-  main.innerHTML = `<section class="screen ins">${head}${K.form ? stockForm(K) : ""}${kpis}${markets}${notes}</section>`;
+  main.innerHTML = `<section class="screen ins">${head}${K.form ? stockForm(K) : ""}${kpis}${markets}${marketCountCard(D.market_count, K)}${notes}</section>`;
 }
 
 /* The start of a month: last month's unsold stock is still on the floor, and
@@ -3396,8 +3494,9 @@ function renderTracking() {
         : "The Daily Sales report prints no arrival date, so this is the first day it sold."}">${
         r.arrived_basis === "received" ? "Received" : "First sold"} ${esc(shortDate(r.arrived))}${
         r.carried_from ? `<span class="carry-tag" title="Carried into this month's stock on hand">from ${esc(monthName(r.carried_from))}</span>` : ""}${
-        r.carried_to ? `<span class="carry-tag" title="Still on the floor, and carried into a later month">moved to ${esc(monthName(r.carried_to))}</span>` : ""}</span>
-      <span class="trk-n num">${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
+        r.carried_to ? `<span class="carry-tag" title="Still on the floor, and carried into a later month">moved to ${esc(monthName(r.carried_to))}</span>` : ""}${
+        r.not_sold_yet ? `<span class="carry-tag warn" title="On the market's Stock On Hand count, on no sales report: nothing has sold from it">nothing sold yet</span>` : ""}</span>
+      <span class="trk-n num"${r.market_counted ? ` title="The market's own count, ${esc(niceDate(r.market_counted) || r.market_counted)}"` : ""}>${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
       <button class="xbtn" title="Close this one off"
         onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></li>`;
 
@@ -6184,6 +6283,7 @@ function renderSettings() {
   const days = st.days || [];
   const sales = days.filter(d => d.report === "sales");
   const pays = days.filter(d => d.report === "payments");
+  const count = days.find(d => d.report === "stock");
   const latest = days.reduce((a, d) => (!a || d.pulled_at > a ? d.pulled_at : a), null);
   const failed = days.filter(d => d.status === "failed");
   const when = !set ? "Not connected yet"
@@ -6217,7 +6317,12 @@ function renderSettings() {
       ${tile("Pull", esc(when), `
         <div class="tf-big">${latest ? esc(tfWhen(latest)) : "Never"}</div><p class="hint">Last pull</p>
         ${failed.length ? `<p class="tf-bad">${fmtInt(failed.length)} day${failed.length === 1 ? "" : "s"} failed; tried again on the next pull.</p>`
-          : latest ? `<p class="hint">Up to date.</p>` : ""}`,
+          : latest ? `<p class="hint">Up to date.</p>` : ""}
+        <p class="hint tf-count"><b>Stock on hand:</b> ${count
+          ? (count.status === "failed" ? `<span class="tf-bad">${esc(tfDay(count.day))} failed: ${esc(count.message || "")}</span>`
+             : `${esc(tfDay(count.day))}, ${esc(count.message || fmtInt(count.found) + " lines")}
+                <a href="#" onclick="event.preventDefault(); setModule('stock')">See it on Stock</a>`)
+          : "counted every morning with the pull; none yet."}</p>`,
         set ? `<span>Fetch what is due now</span><button class="btn primary sm" onclick="pullTechnofresh()">Pull now</button>` : "")}
       ${tile("Sales", "Daily sales details", list(sales),
         `<span>${fmtInt(sales.reduce((t, d) => t + d.saved, 0))} rows saved, last 3 weeks</span>`)}

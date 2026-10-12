@@ -44,7 +44,7 @@ from . import (
 from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_admin, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
-from . import dispatch_sheet, market_stock, market_summary, overlap, stock_book, supply
+from . import dispatch_sheet, market_stock, market_summary, overlap, stock_book, stocktake_sheet, supply
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -1798,6 +1798,32 @@ async def get_stock(user: User | None = Depends(require_user)) -> dict:
         for n in m["notes"]:
             n["entered"] = n["dn"] in entered if n["dn"] else False
     return out
+
+
+@app.post("/api/stock/stocktake.pdf")
+async def stocktake_pdf(
+    groups: str = Form(..., max_length=2_000_000),
+    title: str = Form("all markets", max_length=80),
+    counted: str | None = Form(None, max_length=20),
+    user: User | None = Depends(require_user),
+) -> Response:
+    """The stocktake sheet as a PDF of the lines the Stock page is showing.
+
+    The page sends what it shows rather than the server working it out again,
+    so the tab, market and search on screen are exactly what is printed."""
+    import json
+    import re
+
+    try:
+        parsed = json.loads(groups)
+    except ValueError as exc:
+        raise HTTPException(400, f"Could not read the stock lines: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise HTTPException(400, "The stock lines should be a list of delivery notes.")
+    pdf = await run_in_threadpool(stocktake_sheet.build, parsed, title, counted)
+    name = re.sub(r"[^a-z0-9]+", "-", f"zaco stocktake {title} {_sa_today()}".lower()).strip("-")
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
 
 
 @app.post("/api/stock/notes")

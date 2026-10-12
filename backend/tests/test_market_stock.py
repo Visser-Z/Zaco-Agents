@@ -114,3 +114,15 @@ def test_summary_groups_what_is_on_the_floor():
     assert s["cartons"] == 35 + 44 + 10
     assert m["cleared"] == 3
     assert m["notes"][0]["dn"] == 14391 and m["notes"][0]["days"] == 6
+
+
+def test_stocktake_sheet_is_a_pdf_of_what_is_shown():
+    from app import stocktake_sheet
+
+    s = market_stock.summary(rows(), SNAP, TODAY)
+    groups = [{"dn": n["dn"], "ref": n["supplier_ref"], "market": m["market"],
+               "delivered": n["delivered_on"], "days": n["days"], "lines": n["lines"]}
+              for m in s["markets"] for n in m["notes"]]
+    assert stocktake_sheet.build(groups, "TSHWANE MARKET", SNAP).startswith(b"%PDF")
+    # The packing code the stock report prints after the bracket is dropped.
+    assert all(not l["product"].endswith(" 1") for g in groups for l in g["lines"])

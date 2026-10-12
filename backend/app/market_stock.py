@@ -130,9 +130,10 @@ def summary(rows: list[dict], snapshot: str | None, today: date | None = None) -
         if (r.get("on_hand") or 0) < 0:
             # Sold more than it booked in: the market's own figures disagree
             # with themselves, which is worth a question to the agent.
-            m["oversold"].append({k: r.get(k) for k in ("dn", "supplier_ref", "fms_id", "product",
-                                                        "sent", "amended", "sold", "on_hand",
-                                                        "delivered_on")})
+            m["oversold"].append({**{k: r.get(k) for k in ("dn", "supplier_ref", "fms_id", "sent",
+                                                           "amended", "sold", "on_hand",
+                                                           "delivered_on")},
+                                  "product": clean_product(r["product"])})
         if (r.get("on_hand") or 0) <= 0:
             m["cleared"] += 1
             continue
@@ -143,8 +144,9 @@ def summary(rows: list[dict], snapshot: str | None, today: date | None = None) -
         n["fms_ids"].add(r["fms_id"])
         if r.get("delivered_on") and (not n["delivered_on"] or r["delivered_on"] < n["delivered_on"]):
             n["delivered_on"] = r["delivered_on"]
-        n["lines"].append({k: r.get(k) for k in ("product", "sent", "amended", "sold",
-                                                  "on_hand", "avg_price", "fms_id")})
+        n["lines"].append({**{k: r.get(k) for k in ("sent", "amended", "sold", "on_hand",
+                                                     "avg_price", "fms_id")},
+                           "product": clean_product(r["product"])})
         n["cartons"] += r["on_hand"]
         m["lines"] += 1
         m["cartons"] += r["on_hand"]

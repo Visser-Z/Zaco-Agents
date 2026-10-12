@@ -2519,10 +2519,10 @@ function inventoryGroups(D, inv) {
     });
   });
   const tabOk = {
-    all: g => true,
+    all: g => g.lines.some(l => (l.on_hand || 0) > 0),
     unsold: g => g.lines.some(l => l.status === "unsold"),
-    aged: g => (g.days || 0) > 21,
-    nonote: g => !g.entered && g.dn,
+    aged: g => (g.days || 0) > 21 && g.lines.some(l => (l.on_hand || 0) > 0),
+    nonote: g => !g.entered && g.dn && g.lines.some(l => (l.on_hand || 0) > 0),
     check: g => g.lines.some(l => l.status === "oversold") || g.flags.length,
   };
   const lineOk = {
@@ -2594,7 +2594,8 @@ function inventoryCard(D, K) {
     <div class="inv-top">
       <div><h2>On the floor</h2>
         <span class="inv-sub">The market's own count from TechnoFresh, ${esc(niceDate(V.snapshot) || V.snapshot)}</span></div>
-      <button class="btn ghost sm" onclick="printInventory()">${icon("print")}Stocktake sheet</button>
+      <button class="btn ghost sm" onclick="saveStocktake()" ${K.savingSheet ? "disabled" : ""}>${K.savingSheet
+        ? `<span class="spin"></span>Saving` : `${icon("print")}Save stocktake sheet (PDF)`}</button>
     </div>
     <div class="inv-tabs" role="tablist">${tabs.map(([k, label]) => `<button role="tab" aria-selected="${tab === k}"
       class="${tab === k ? "on" : ""}" onclick="setInv('tab', ${q(k)})">${esc(label)}<span>${fmtInt(V.counts[k])}</span></button>`).join("")}</div>
@@ -2669,32 +2670,39 @@ function notesTable(D, K) {
   </div>`;
 }
 
-/** A stocktake sheet: exactly the lines the inventory is showing, under their
- *  delivery notes, with a column to write the count in. */
-function printInventory() {
-  const V = inventoryGroups(S.stock.data || {}, S.stock.inv || {});
-  if (!V) return;
-  const inv = S.stock.inv || {};
-  const rows = V.groups.map(g => `<tr><td colspan="5" style="background:#eef1f6;font-weight:700">${g.dn ? "DN " + esc(g.dn) : esc(g.ref)}
-      <span style="font-weight:400;color:#555"> · ${esc(g.market)}${g.delivered ? " · delivered " + esc(g.delivered) : ""}</span></td></tr>
-    ${g.lines.map(l => `<tr><td>${esc(l.product)}</td><td style="text-align:right">${l.amended != null ? l.amended : l.sent}</td>
-      <td style="text-align:right">${l.sold}</td><td style="text-align:right"><b>${l.on_hand}</b></td>
-      <td style="border-bottom:1px solid #999;width:80px"></td></tr>`).join("")}`).join("");
-  const w = window.open("", "_blank");
-  if (!w) { toast("Allow pop-ups to print the stocktake sheet", true); return; }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Stocktake ${esc(inv.market || "all markets")}</title>
-    <style>body{font:12.5px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0 0 4px}
-    table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:5px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
-    th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}</style></head><body>
-    <h1>Stocktake: ${esc(inv.market || "all markets")}</h1>
-    <div>Zaco Agents · market's count of ${esc(V.snapshot)} · printed ${esc(new Date().toISOString().slice(0, 10))}</div>
-    <table><thead><tr><th>Product</th><th style="text-align:right">Booked</th><th style="text-align:right">Sold</th>
-      <th style="text-align:right">Market says</th><th>Counted</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="5">Nothing on the floor.</td></tr>`}</tbody></table>
-    <p style="margin-top:30px">Counted by: ____________________ &nbsp; Date: ____________</p></body></html>`);
-  w.document.close();
-  w.focus();
-  setTimeout(() => w.print(), 300);
+/** The stocktake sheet as a PDF: exactly the lines the inventory is showing,
+ *  under their delivery notes, with a column to write the count in. Drawn on
+ *  the server and saved as a file, because the desktop app blocks the new
+ *  window a printed page would need. */
+async function saveStocktake() {
+  const K = S.stock;
+  const V = inventoryGroups(K.data || {}, K.inv || {});
+  if (!V || K.savingSheet) return;
+  K.savingSheet = true; render();
+  let url = null;
+  try {
+    const body = new FormData();
+    body.append("groups", JSON.stringify(V.groups.map(g => ({
+      dn: g.dn, ref: g.ref, market: g.market, delivered: g.delivered, days: g.days,
+      lines: g.lines.map(l => ({ product: l.product, sent: l.sent, amended: l.amended,
+                                 sold: l.sold, on_hand: l.on_hand })) }))));
+    body.append("title", (K.inv || {}).market || "all markets");
+    body.append("counted", V.snapshot || "");
+    const res = await api("/api/stock/stocktake.pdf", { method: "POST", body });
+    const name = ((res.headers.get("Content-Disposition") || "").split("filename=")[1] || "zaco-stocktake.pdf")
+      .replace(/["';]/g, "").trim();
+    url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast("Stocktake sheet saved as a PDF");
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    // Revoked late: the desktop app needs the link to outlive the click.
+    if (url) setTimeout(() => URL.revokeObjectURL(url), 30000);
+    K.savingSheet = false; render();
+  }
 }
 
 function renderStock() {

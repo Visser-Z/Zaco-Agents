@@ -814,6 +814,76 @@
   .stk-lines th.num { text-align: right; }
   .stk-lines td { padding: 3px 6px; white-space: normal; }
   .stk-unit { max-width: 110px; } .stk-n { max-width: 110px; text-align: right; }
+  /* Inventory: one dense table, every line showing, under its delivery note.
+     Tabs with counts, then search and filters, the way stock platforms lay
+     out an inventory list. */
+  .inv-card { padding: 0; margin-bottom: 16px; overflow: hidden; }
+  .inv-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px 6px; }
+  .inv-top h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .inv-sub { display: inline; font-size: 12px; color: var(--ink-faint); font-weight: 400; }
+  .inv-top .inv-sub, .inv-prod .inv-sub, .inv-table td.num .inv-sub, .inv-table td:last-child > .inv-sub { display: block; }
+  .inv-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .inv-tabs button { appearance: none; border: 0; background: none; font-family: var(--sans); font-size: 13px; font-weight: 600;
+                     color: var(--ink-soft); padding: 10px 10px 9px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+  .inv-tabs button span { margin-left: 6px; font-size: 11px; font-weight: 650; padding: 1px 7px; border-radius: 999px;
+                          background: var(--surface-2); color: var(--ink-soft); }
+  .inv-tabs button:hover { color: var(--ink); }
+  .inv-tabs button.on { color: var(--accent-strong); border-bottom-color: var(--accent); }
+  .inv-tabs button.on span { background: var(--accent-tint); color: var(--accent-strong); }
+  .inv-bar-row { display: flex; gap: 8px; padding: 12px 18px 6px; flex-wrap: wrap; }
+  .inv-search { width: auto; flex: 1 1 220px; min-width: 0; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 11px;
+                font: 13px var(--sans); color: var(--ink); background: var(--surface); }
+  .inv-search:focus, .inv-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+  .inv-select { width: auto; flex: 0 0 auto; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; font: 600 13px var(--sans);
+                color: var(--ink); background: var(--surface); }
+  .inv-sum { padding: 4px 18px 10px; font-size: 12.5px; color: var(--ink-soft); }
+  .inv-wrap { overflow-x: auto; }
+  .inv-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: 13px; }
+  .inv-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); text-align: left;
+                        font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint);
+                        font-weight: 650; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .inv-table th.num, .inv-table td.num { text-align: right; white-space: nowrap; }
+  .inv-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .inv-table tbody tr:not(.inv-group):hover td { background: var(--accent-soft); }
+  .inv-table tr.inv-group td { background: color-mix(in srgb, var(--surface-2) 70%, var(--surface)); padding: 9px 12px;
+                               border-top: 1px solid var(--line); }
+  .inv-table tr.inv-group td > * { margin-right: 8px; vertical-align: middle; }
+  .inv-table tr.inv-group b { font-size: 13px; }
+  .inv-gfig { font-size: 12px; font-weight: 650; color: var(--ink-soft); }
+  .inv-prod b { font-weight: 600; }
+  .inv-table td.inv-prod, .inv-table tr.inv-group td { white-space: normal; }
+  .inv-prod .inv-pill { margin-left: 6px; }
+  .inv-table tr.unsold .inv-prod b { color: var(--ink); }
+  .inv-table tr.oversold td { background: color-mix(in srgb, var(--crit-tint) 55%, var(--surface)); }
+  .inv-bar { display: block; width: 64px; height: 4px; border-radius: 3px; background: var(--line); margin: 4px 0 0 auto; overflow: hidden; }
+  .inv-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .inv-pill { display: inline-block; font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+              background: var(--surface-2); color: var(--ink-soft); }
+  .inv-pill.t-ok { background: var(--ok-tint); color: var(--ok); }
+  .inv-pill.t-warn { background: var(--warn-tint); color: var(--warn); }
+  .inv-pill.t-crit { background: var(--crit-tint); color: var(--crit); }
+  .inv-pill.t-accent { background: var(--accent-tint); color: var(--accent-strong); }
+  .inv-age { display: inline-block; min-width: 34px; text-align: center; font: 650 11px var(--mono); padding: 2px 6px; border-radius: 6px; }
+  .inv-age.t-green { background: var(--ok-tint); color: var(--ok); }
+  .inv-age.t-orange { background: var(--warn-tint); color: var(--warn); }
+  .inv-age.t-red { background: var(--crit-tint); color: var(--crit); }
+  .inv-amend { color: var(--warn); font-weight: 650; }
+  .inv-link { appearance: none; border: 0; background: none; padding: 0; font: 650 12px var(--sans); color: var(--accent); cursor: pointer; }
+  .inv-link:hover { text-decoration: underline; }
+  .inv-link.quiet { color: var(--ink-faint); }
+  .inv-note { font-size: 12px; color: var(--warn); }
+  .inv-x { width: 28px; text-align: right; }
+  .inv-compact td { padding: 6px 10px; }
+  .inv-compact thead th { position: static; }
+  @media (max-width: 900px) { .inv-hide-md { display: none; } }
+  @media (max-width: 640px) {
+    .inv-hide-sm { display: none; }
+    .inv-top, .inv-bar-row, .inv-sum { padding-left: 12px; padding-right: 12px; }
+    .inv-table td, .inv-table thead th { padding-left: 8px; padding-right: 8px; }
+    .inv-select { flex: 1 1 140px; }
+    .inv-table td:last-child { white-space: normal; }
+    .inv-table .inv-pill { white-space: normal; }
+  }
   /* The market's own count on the Stock page. */
   .stk-count { margin-bottom: 16px; }
   .cnt-figs { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 4px 0 10px; font-size: 13px; color: var(--ink-soft); }
@@ -2287,9 +2357,30 @@ function newStockNoteFor(dn, sentOn, market) {
   Object.assign(S.stock.form, { dn: String(dn), sent_on: sentOn || S.stock.form.sent_on, market });
   render(); showStockForm();
 }
-function toggleCountMarket(m) {
-  const o = S.stock.countOpen || (S.stock.countOpen = {});
-  o[m] = !o[m]; render();
+/** Sold against still on hand, as one thin bar: how far through a line is. */
+function invBar(sold, left) {
+  const total = Math.max((sold || 0) + Math.max(left || 0, 0), 1);
+  const pct = Math.round((Math.max(left || 0, 0) / total) * 100);
+  return `<span class="inv-bar" title="${fmtInt(Math.max(left || 0, 0))} of ${fmtInt(total)} still on hand"><span style="width:${pct}%"></span></span>`;
+}
+
+/* The Stock page's view: which tab, which market, what is typed in the search,
+   and the order. Kept on S.stock so a refresh keeps the operator's place. */
+function setInv(key, value) {
+  S.stock.inv = { ...(S.stock.inv || {}), [key]: value };
+  render();
+}
+let invTyping = null;
+function setInvQuery(value) {
+  S.stock.inv = { ...(S.stock.inv || {}), q: value };
+  clearTimeout(invTyping);
+  invTyping = setTimeout(() => {
+    const at = document.activeElement && document.activeElement.id === "inv-q"
+      ? document.activeElement.selectionStart : null;
+    render();
+    const box = document.getElementById("inv-q");
+    if (box && at != null) { box.focus(); box.setSelectionRange(at, at); }
+  }, 180);
 }
 function showStockForm() { const f = document.querySelector(".stk-form"); if (f) f.scrollIntoView({ block: "start" }); }
 function editStockNote(dn) {
@@ -2353,7 +2444,6 @@ function tieStockLine(dn, lineNo, cid) {
                   remarks: n.remarks || "", lines });
 }
 
-function toggleStockNote(dn) { S.stock.open[dn] = !S.stock.open[dn]; render(); }
 
 function stockForm(K) {
   const f = K.form;
@@ -2390,137 +2480,217 @@ function stockForm(K) {
     </div>`;
 }
 
-/** What the market itself says is on its floor, from the Stock On Hand
- *  report the 8am pull fetches. Every line nothing has sold from is here too,
- *  which no sales report shows. */
-function marketCountCard(C, K) {
-  if (!C || !C.snapshot) {
-    return `<div class="card ins-card stk-count"><div class="ins-card-head"><h2>The market's own count</h2></div>
-      <p class="ins-empty">Not pulled yet. The 8am TechnoFresh pull fetches each market's Stock On Hand
-        every morning; press Pull now in Settings to fetch today's.</p></div>`;
-  }
-  const open = K.countOpen || {};
-  const age = d => d == null ? "" : `<span class="wsig t-${d > 21 ? "red" : d > 10 ? "orange" : "green"}">${fmtInt(d)}d</span>`;
-  const market = m => {
-    const isOpen = !!open[m.market];
-    const missing = m.notes.filter(n => !n.entered).length;
-    return `<div class="smkt${isOpen ? " open" : ""}">
-      <button class="smkt-head" aria-expanded="${isOpen}" onclick="toggleCountMarket(${q(m.market)})">
-        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
-        <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
-        <span class="smkt-sum num">${fmtInt(m.lines)} line${m.lines === 1 ? "" : "s"} on ${fmtInt(m.notes.length)} delivery note${m.notes.length === 1 ? "" : "s"}${
-          missing ? ` · ${fmtInt(missing)} with no note entered` : ""}</span>
-        <span class="smkt-tiers"><span class="trk-n num">${fmtInt(m.cartons)} ctn</span>${
-          m.oversold.length ? `<span class="wsig t-red">${fmtInt(m.oversold.length)} oversold</span>` : ""}</span>
-      </button>
-      ${isOpen ? `<div class="cnt-body">
-        ${m.notes.map(n => `<div class="cnt-note">
-          <div class="sdn-head">${age(n.days)}<b>${n.dn ? "DN " + esc(n.dn) : esc(n.supplier_ref)}</b>
-            <span class="sdn-sub">delivered ${esc(niceDate(n.delivered_on) || n.delivered_on || "")}</span>
-            <span class="cnt-tag">${n.entered ? `<span class="stk-chip t-ok">note entered</span>`
-              : n.dn ? `<button class="btn ghost sm" onclick="newStockNoteFor(${n.dn}, ${q(n.delivered_on || "")}, ${q(m.market)})">${icon("plus")}Add its note</button>`
-              : `<span class="stk-chip">no DN on the ref</span>`}</span>
-          </div>
-          <div class="rep-scroll"><table class="cnt-table">
-            <thead><tr><th>Product</th><th class="num">Sent</th><th class="num">Booked</th><th class="num">Sold</th><th class="num">On the floor</th><th class="num">Avg price</th></tr></thead>
-            <tbody>${n.lines.map(l => `<tr${l.sold ? "" : ` class="untouched"`}>
-              <td title="${esc(l.product)}">${esc(shortProduct(l.product))}${l.sold ? "" : `<span class="stk-chip t-warn">nothing sold yet</span>`}</td>
-              <td class="num">${fmtInt(l.sent)}</td>
-              <td class="num">${l.amended != null ? `<b class="amend" title="The market rebooked it from ${fmtInt(l.sent)}">${fmtInt(l.amended)}</b>` : fmtInt(l.sent)}</td>
-              <td class="num">${fmtInt(l.sold)}</td>
-              <td class="num"><b>${fmtInt(l.on_hand)}</b></td>
-              <td class="num">${l.avg_price ? "R " + fmt(l.avg_price) : ""}</td></tr>`).join("")}</tbody>
-          </table></div>
-        </div>`).join("")}
-        ${m.oversold.length ? `<p class="trk-note warn">The market says it sold more than it booked on
-          ${m.oversold.map(o => `${o.dn ? "DN " + esc(o.dn) : esc(o.supplier_ref)} ${esc(shortProduct(o.product))} (booked ${fmtInt(o.amended != null ? o.amended : o.sent)}, sold ${fmtInt(o.sold)})`).join("; ")}.
-          A question for the agent.</p>` : ""}
-        ${m.cleared ? `<p class="trk-note">${fmtInt(m.cleared)} other line${m.cleared === 1 ? "" : "s"} delivered in the last four months ${m.cleared === 1 ? "is" : "are"} sold out.</p>` : ""}
-      </div>` : ""}
-    </div>`;
+/** Every line on a market floor by the market's own count, one row each,
+ *  under its delivery note, with what Zaco's own note says beside it. The
+ *  rows the tab, market and search allow, in the order picked. */
+function inventoryGroups(D, inv) {
+  const C = D.market_count;
+  if (!C || !C.snapshot) return null;
+  const notes = {};
+  (D.notes || []).forEach(n => { notes[n.dn] = n; });
+  const q = (inv.q || "").trim().toLowerCase();
+  const groups = [];
+  C.markets.forEach(m => {
+    const over = {};
+    (m.oversold || []).forEach(o => { (over[o.dn || o.supplier_ref] = over[o.dn || o.supplier_ref] || []).push(o); });
+    const seen = new Set();
+    const build = (key, n, extra) => {
+      const note = n.dn ? notes[n.dn] : null;
+      const lines = [
+        ...(n.lines || []).map(l => ({ ...l, status: l.sold ? "selling" : "unsold" })),
+        ...(extra || []).map(o => ({ product: o.product, sent: o.sent, amended: o.amended, sold: o.sold,
+                                    on_hand: o.on_hand, avg_price: null, status: "oversold" })),
+      ];
+      return { key, market: m.market, agent: m.agents, dn: n.dn, ref: n.supplier_ref,
+               delivered: n.delivered_on, days: n.days, entered: !!note || !!n.entered,
+               flags: note ? note.lines.flatMap(x => x.flags) : [], lines };
+    };
+    m.notes.forEach(n => {
+      const key = n.dn || n.supplier_ref;
+      seen.add(key);
+      groups.push(build(key, n, over[key]));
+    });
+    Object.entries(over).forEach(([key, list]) => {
+      if (seen.has(key) || seen.has(Number(key))) return;
+      const o = list[0];
+      groups.push(build(key, { dn: o.dn, supplier_ref: o.supplier_ref, delivered_on: o.delivered_on,
+                               days: o.delivered_on ? Math.round((Date.now() - new Date(o.delivered_on)) / 86400000) : null,
+                               lines: [] }, list));
+    });
+  });
+  const tabOk = {
+    all: g => true,
+    unsold: g => g.lines.some(l => l.status === "unsold"),
+    aged: g => (g.days || 0) > 21,
+    nonote: g => !g.entered && g.dn,
+    check: g => g.lines.some(l => l.status === "oversold") || g.flags.length,
   };
-  const counted = niceDate(C.snapshot) || C.snapshot;
-  return `<div class="card ins-card stk-count">
-    <div class="ins-card-head"><h2>The market's own count</h2>
-      <span class="rep-c">Stock On Hand from TechnoFresh, ${esc(counted)}</span></div>
-    <div class="cnt-figs">
-      <span><b class="num">${fmtInt(C.cartons)}</b> cartons on the floor</span>
-      <span><b class="num">${fmtInt(C.lines)}</b> lines</span>
-      <span><b class="num">${fmtInt(C.untouched)}</b> nothing sold from yet</span>
-      ${C.oversold ? `<span class="warn"><b class="num">${fmtInt(C.oversold)}</b> sold more than booked</span>` : ""}
+  const lineOk = {
+    all: l => true, unsold: l => l.status === "unsold", aged: l => true, nonote: l => true,
+    check: l => true,
+  };
+  const counts = {};
+  Object.keys(tabOk).forEach(t => { counts[t] = groups.filter(g => tabOk[t](g) && (!inv.market || g.market === inv.market)).length; });
+  const tab = inv.tab || "all";
+  let shown = groups
+    .filter(g => !inv.market || g.market === inv.market)
+    .filter(tabOk[tab])
+    .map(g => ({ ...g, lines: g.lines.filter(lineOk[tab]) }))
+    .map(g => !q ? g : ({ ...g, lines: (String(g.dn || "").includes(q) || String(g.ref || "").toLowerCase().includes(q)
+                                        || (g.agent || "").toLowerCase().includes(q))
+                                        ? g.lines : g.lines.filter(l => (l.product || "").toLowerCase().includes(q)) }))
+    .filter(g => g.lines.length);
+  const onHand = g => g.lines.reduce((t, l) => t + Math.max(l.on_hand || 0, 0), 0);
+  const value = g => g.lines.reduce((t, l) => t + Math.max(l.on_hand || 0, 0) * (l.avg_price || 0), 0);
+  const order = {
+    age: (a, b) => (b.days || 0) - (a.days || 0),
+    onhand: (a, b) => onHand(b) - onHand(a),
+    value: (a, b) => value(b) - value(a),
+    dn: (a, b) => String(b.dn || "").localeCompare(String(a.dn || "")),
+  }[inv.sort || "age"];
+  shown.sort(order);
+  return { snapshot: C.snapshot, groups: shown, all: groups, counts, onHand, value };
+}
+
+function inventoryCard(D, K) {
+  const inv = K.inv || {};
+  const V = inventoryGroups(D, inv);
+  if (!V) {
+    return `<div class="card inv-card"><div class="inv-top"><h2>On the floor</h2></div>
+      <p class="ins-empty">The market's count has not been pulled yet. The 8am TechnoFresh pull fetches every
+        market's Stock On Hand each morning; press Pull now in Settings to fetch today's.</p></div>`;
+  }
+  const tabs = [["all", "All on the floor"], ["unsold", "Nothing sold yet"], ["aged", "Older than 3 weeks"],
+                ["nonote", "No note entered"], ["check", "To check"]];
+  const markets = [...new Set(V.all.map(g => g.market))];
+  const tab = inv.tab || "all";
+  const age = d => d == null ? "" : `<span class="inv-age t-${d > 21 ? "red" : d > 10 ? "orange" : "green"}">${fmtInt(d)}d</span>`;
+  const status = { selling: ["Selling", "accent"], unsold: ["Nothing sold yet", "warn"], oversold: ["Sold more than booked", "crit"] };
+  const rows = V.groups.map(g => `<tbody>
+      <tr class="inv-group"><td colspan="8">
+        ${age(g.days)}<b>${g.dn ? "DN " + esc(g.dn) : esc(g.ref)}</b>
+        <span class="inv-sub">${esc(g.market)}${g.agent ? " · " + esc(g.agent) : ""}${g.delivered ? " · delivered " + esc(niceDate(g.delivered) || g.delivered) : ""}</span>
+        <span class="inv-gfig num">${fmtInt(V.onHand(g))} ctn</span>
+        ${g.flags.length ? `<span class="inv-pill t-warn" title="${esc(g.flags.join("\n"))}">${fmtInt(g.flags.length)} to check</span>` : ""}
+        ${g.entered ? `<span class="inv-pill t-ok">note entered</span>`
+          : g.dn ? `<button class="inv-link" onclick="newStockNoteFor(${g.dn}, ${q(g.delivered || "")}, ${q(g.market)})">+ Add its note</button>` : ""}
+      </td></tr>
+      ${g.lines.map(l => {
+        const [label, tone] = status[l.status];
+        const left = Math.max(l.on_hand || 0, 0);
+        return `<tr class="${l.status}">
+          <td class="inv-prod"><b title="${esc(l.product)}">${esc(shortProduct(l.product))}</b></td>
+          <td class="num inv-hide-sm">${fmtInt(l.sent)}</td>
+          <td class="num inv-hide-sm">${l.amended != null ? `<span class="inv-amend" title="The market rebooked it from ${fmtInt(l.sent)}">${fmtInt(l.amended)}</span>` : fmtInt(l.sent)}</td>
+          <td class="num inv-hide-sm">${fmtInt(l.sold)}</td>
+          <td class="num"><b>${fmtInt(l.on_hand)}</b>${invBar(l.sold, left)}</td>
+          <td class="num inv-hide-md">${l.avg_price ? "R " + fmt(l.avg_price) : "—"}</td>
+          <td class="num inv-hide-md">${l.avg_price && left ? "R " + fmt(left * l.avg_price) : "—"}</td>
+          <td><span class="inv-pill t-${tone}">${label}</span></td></tr>`;
+      }).join("")}</tbody>`).join("");
+  const totalLeft = V.groups.reduce((t, g) => t + V.onHand(g), 0);
+  const totalValue = V.groups.reduce((t, g) => t + V.value(g), 0);
+  return `<div class="card inv-card">
+    <div class="inv-top">
+      <div><h2>On the floor</h2>
+        <span class="inv-sub">The market's own count from TechnoFresh, ${esc(niceDate(V.snapshot) || V.snapshot)}</span></div>
+      <button class="btn ghost sm" onclick="printInventory()">${icon("print")}Stocktake sheet</button>
     </div>
-    <div class="smkts">${C.markets.map(market).join("")}</div>
+    <div class="inv-tabs" role="tablist">${tabs.map(([k, label]) => `<button role="tab" aria-selected="${tab === k}"
+      class="${tab === k ? "on" : ""}" onclick="setInv('tab', ${q(k)})">${esc(label)}<span>${fmtInt(V.counts[k])}</span></button>`).join("")}</div>
+    <div class="inv-bar-row">
+      <input id="inv-q" class="inv-search" type="search" placeholder="Search a product, DN or agent" value="${esc(inv.q || "")}"
+        oninput="setInvQuery(this.value)">
+      <select class="inv-select" onchange="setInv('market', this.value)">
+        <option value="">All markets</option>
+        ${markets.map(m => `<option value="${esc(m)}"${inv.market === m ? " selected" : ""}>${esc(m)}</option>`).join("")}
+      </select>
+      <select class="inv-select" onchange="setInv('sort', this.value)">
+        ${[["age", "Oldest first"], ["onhand", "Most on hand"], ["value", "Most value"], ["dn", "Newest DN"]]
+          .map(([k, l]) => `<option value="${k}"${(inv.sort || "age") === k ? " selected" : ""}>${l}</option>`).join("")}
+      </select>
+    </div>
+    <div class="inv-sum"><b class="num">${fmtInt(totalLeft)}</b> cartons on ${fmtInt(V.groups.length)} delivery note${V.groups.length === 1 ? "" : "s"}
+      ${totalValue ? ` · about <b class="num">R ${fmt(totalValue)}</b> at the average each line has fetched so far` : ""}</div>
+    ${V.groups.length ? `<div class="inv-wrap"><table class="inv-table">
+      <thead><tr><th>Product</th><th class="num inv-hide-sm">Sent</th><th class="num inv-hide-sm">Booked</th>
+        <th class="num inv-hide-sm">Sold</th><th class="num">On hand</th><th class="num inv-hide-md">Avg price</th>
+        <th class="num inv-hide-md">Value</th><th>Status</th></tr></thead>
+      ${rows}</table></div>` : `<p class="ins-empty">Nothing matches. Try another tab, market or search.</p>`}
   </div>`;
 }
 
-function stockNote(n, K) {
-  const open = !!K.open[n.dn];
-  const unplaced = n.not_on_note || [];
-  const lines = n.lines.map(l => {
-    const st = STOCK_STATUS[l.status] || { label: l.status, tone: "" };
-    const tie = l.status === "not_reported" && unplaced.length
-      ? `<select class="stk-tie" onchange="tieStockLine(${n.dn}, ${l.line_no}, this.value)">
-          <option value="">Tie to a market line…</option>
-          ${unplaced.map(c => `<option value="${c.consignment_id}">${esc(shortProduct(c.product))} · ${fmtInt(c.sent)} ctn</option>`).join("")}
-        </select>` : "";
-    return `<tr>
-      <td><b>${esc(l.description)}</b>${l.unit ? ` <span class="pl-sub">${esc(l.unit)}</span>` : ""}
-        ${l.consignments.length ? `<span class="pl-sub">market: ${esc(l.consignments.map(c => shortProduct(c.product)).join(" + "))}${l.linked_by_hand ? " (tied by hand)" : ""}</span>` : ""}
-        ${l.flags.map(f => `<span class="stk-flag">${esc(f)}</span>`).join("")}${tie}</td>
-      <td class="num">${fmtInt(l.cartons)}${l.written && l.written !== String(l.cartons) ? `<span class="pl-sub">${esc(l.written)}</span>` : ""}</td>
-      <td class="num">${l.consignments.length ? fmtInt(l.booked) : "—"}</td>
-      <td class="num">${l.consignments.length ? fmtInt(l.sold) : "—"}</td>
-      <td class="num"><b>${fmtInt(l.on_floor)}</b>${l.market_counted
-        ? `<span class="pl-sub">market's count ${esc(shortDay(l.market_counted))}</span>`
-        : l.market_avail != null && l.market_avail !== l.on_floor
-        ? `<span class="pl-sub">market says ${fmtInt(l.market_avail)}</span>` : ""}</td>
-      <td><span class="stk-chip t-${st.tone}">${esc(st.label)}</span>${l.owed > 0.005 ? `<span class="pl-sub">R ${fmt(l.owed)} owed</span>` : ""}</td>
-    </tr>`;
+/** Zaco's own delivery notes, every line showing, each held against what the
+ *  market booked, sold and paid on the same DN. */
+function notesTable(D, K) {
+  if (!(D.notes || []).length) {
+    return `<div class="card placeholder"><div class="pi">${icon("box", 22)}</div><h2>No delivery notes yet</h2>
+      <p>Add Zaco's delivery notes as they go out, and each one is held against what the market books,
+        sells and pays on the same DN.</p></div>`;
+  }
+  const body = D.notes.map(n => {
+    const unplaced = n.not_on_note || [];
+    const st = n.flags ? ["to look at", "warn"] : n.lines.some(l => l.status === "not_reported") ? ["waiting on the market", ""] : ["matches", "ok"];
+    return `<tbody>
+      <tr class="inv-group"><td colspan="6">
+        <b>DN ${esc(n.dn)}</b><span class="inv-sub">${esc(niceDate(n.sent_on) || n.sent_on || "")} · ${esc(n.market || "")}${n.remarks ? " · " + esc(n.remarks) : ""}</span>
+        <span class="inv-gfig num">${fmtInt(n.cartons)} sent · ${fmtInt(n.on_floor)} on the floor</span>
+        <span class="inv-pill t-${st[1]}">${n.flags ? fmtInt(n.flags) + " " : ""}${st[0]}</span>
+        <button class="inv-link" onclick="editStockNote(${n.dn})">Correct</button>
+        <button class="inv-link quiet" onclick="deleteStockNote(${n.dn})">Remove</button>
+      </td></tr>
+      ${n.lines.map(l => {
+        const s2 = STOCK_STATUS[l.status] || { label: l.status, tone: "" };
+        const tie = l.status === "not_reported" && unplaced.length
+          ? `<select class="stk-tie" onchange="tieStockLine(${n.dn}, ${l.line_no}, this.value)">
+              <option value="">Tie to a market line…</option>
+              ${unplaced.map(c => `<option value="${c.consignment_id}">${esc(shortProduct(c.product))} · ${fmtInt(c.sent)} ctn</option>`).join("")}
+            </select>` : "";
+        return `<tr>
+          <td class="inv-prod"><b>${esc(l.description)}</b>${l.unit ? ` <span class="inv-sub">${esc(l.unit)}</span>` : ""}
+            ${l.consignments.length ? `<span class="inv-sub">market: ${esc(l.consignments.map(c => shortProduct(c.product)).join(" + "))}${l.linked_by_hand ? " (tied by hand)" : ""}</span>` : ""}
+            ${l.flags.map(f => `<span class="stk-flag">${esc(f)}</span>`).join("")}${tie}</td>
+          <td class="num">${fmtInt(l.cartons)}${l.written && l.written !== String(l.cartons) ? `<span class="inv-sub">${esc(l.written)}</span>` : ""}</td>
+          <td class="num inv-hide-sm">${l.consignments.length ? fmtInt(l.booked) : "—"}</td>
+          <td class="num inv-hide-sm">${l.consignments.length ? fmtInt(l.sold) : "—"}</td>
+          <td class="num"><b>${fmtInt(l.on_floor)}</b></td>
+          <td><span class="inv-pill t-${s2.tone}">${esc(s2.label)}</span>${l.owed > 0.005 ? `<span class="inv-sub">R ${fmt(l.owed)} owed</span>` : ""}</td></tr>`;
+      }).join("")}
+      ${unplaced.length ? `<tr><td colspan="6" class="inv-note">On the market's reports for DN ${esc(n.dn)} but not on this note:
+        ${unplaced.map(c => `${esc(shortProduct(c.product))} (${fmtInt(c.sent)} ctn)`).join(", ")}.</td></tr>` : ""}
+    </tbody>`;
   }).join("");
-  return `<li class="stk-note${open ? " open" : ""}">
-      <button class="stk-note-head" onclick="toggleStockNote(${n.dn})">
-        <span class="chev">${icon(open ? "up" : "down", 12)}</span>
-        <span class="stk-dn"><b>DN ${esc(n.dn)}</b><em>${esc(niceDate(n.sent_on) || n.sent_on || "")} · ${esc(n.market || "")}</em></span>
-        <span class="stk-fig">${fmtInt(n.cartons)} sent · <b>${fmtInt(n.on_floor)} on the floor</b></span>
-        ${n.flags ? `<span class="stk-chip t-warn">${fmtInt(n.flags)} to look at</span>`
-          : n.lines.some(l => l.status === "not_reported") ? `<span class="stk-chip">waiting on the market</span>`
-          : `<span class="stk-chip t-ok">matches</span>`}
-      </button>
-      ${open ? `<div class="stk-body">
-        <div class="rep-scroll"><table class="stk-table">
-          <thead><tr><th>Line</th><th class="num">Sent</th><th class="num">Booked</th><th class="num">Sold</th><th class="num">On the floor</th><th>Where it is</th></tr></thead>
-          <tbody>${lines}</tbody></table></div>
-        ${unplaced.length ? `<p class="trk-note warn">On the market's reports for DN ${esc(n.dn)} but not on this note:
-          ${unplaced.map(c => `${esc(shortProduct(c.product))} (${fmtInt(c.sent)} ctn at ${esc(c.market)})`).join(", ")}.</p>` : ""}
-        ${n.remarks ? `<p class="trk-note">Remarks: ${esc(n.remarks)}</p>` : ""}
-        <div class="sup-actions">
-          <button class="btn ghost sm" onclick="editStockNote(${n.dn})">Correct it</button>
-          <button class="linklike" onclick="deleteStockNote(${n.dn})">Remove</button>
-        </div>
-      </div>` : ""}
-    </li>`;
+  return `<div class="card inv-card">
+    <div class="inv-top"><div><h2>Zaco's delivery notes</h2>
+      <span class="inv-sub">As written on the truck, held against what the market booked, sold and paid</span></div></div>
+    <div class="inv-wrap"><table class="inv-table">
+      <thead><tr><th>Line</th><th class="num">Sent</th><th class="num inv-hide-sm">Booked</th><th class="num inv-hide-sm">Sold</th>
+        <th class="num">On the floor</th><th>Where it is</th></tr></thead>${body}</table></div>
+  </div>`;
 }
 
-/** A stocktake sheet for one market: every line still on its floor, oldest
- *  first, with a column to write the count in. Opened as its own page so it
- *  prints clean on a phone or a desktop. */
-function printStocktake(market) {
-  const m = ((S.stock.data || {}).markets || []).find(x => x.market === market);
-  if (!m) return;
-  const rows = m.stocktake.map(r => `<tr><td>DN ${esc(r.dn)}</td><td>${esc(r.sent_on || "")}</td>
-      <td>${esc(r.description)}${r.unit ? " · " + esc(r.unit) : ""}${r.products.length ? `<br><small>${esc(r.products.join(" + "))}</small>` : ""}</td>
-      <td style="text-align:right">${r.on_floor}</td><td style="text-align:right">${r.market_avail == null ? "" : r.market_avail}</td>
-      <td style="border-bottom:1px solid #999;width:70px"></td></tr>`).join("");
+/** A stocktake sheet: exactly the lines the inventory is showing, under their
+ *  delivery notes, with a column to write the count in. */
+function printInventory() {
+  const V = inventoryGroups(S.stock.data || {}, S.stock.inv || {});
+  if (!V) return;
+  const inv = S.stock.inv || {};
+  const rows = V.groups.map(g => `<tr><td colspan="5" style="background:#eef1f6;font-weight:700">${g.dn ? "DN " + esc(g.dn) : esc(g.ref)}
+      <span style="font-weight:400;color:#555"> · ${esc(g.market)}${g.delivered ? " · delivered " + esc(g.delivered) : ""}</span></td></tr>
+    ${g.lines.map(l => `<tr><td>${esc(l.product)}</td><td style="text-align:right">${l.amended != null ? l.amended : l.sent}</td>
+      <td style="text-align:right">${l.sold}</td><td style="text-align:right"><b>${l.on_hand}</b></td>
+      <td style="border-bottom:1px solid #999;width:80px"></td></tr>`).join("")}`).join("");
   const w = window.open("", "_blank");
   if (!w) { toast("Allow pop-ups to print the stocktake sheet", true); return; }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Stocktake ${esc(market)}</title>
-    <style>body{font:13px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0 0 4px}
-    table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:6px 5px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
-    th{font-size:11px;text-transform:uppercase;letter-spacing:.05em}small{color:#555}</style></head><body>
-    <h1>Stocktake: ${esc(market)}</h1>
-    <div>Zaco Agents · ${esc(new Date().toISOString().slice(0, 10))} · ${m.on_floor} cartons on the floor by the delivery notes</div>
-    <table><thead><tr><th>DN</th><th>Sent</th><th>Product</th><th style="text-align:right">By the notes</th><th style="text-align:right">Market says</th><th>Counted</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6">Nothing on the floor by the delivery notes.</td></tr>`}</tbody></table>
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Stocktake ${esc(inv.market || "all markets")}</title>
+    <style>body{font:12.5px system-ui,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0 0 4px}
+    table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:5px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+    th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}</style></head><body>
+    <h1>Stocktake: ${esc(inv.market || "all markets")}</h1>
+    <div>Zaco Agents · market's count of ${esc(V.snapshot)} · printed ${esc(new Date().toISOString().slice(0, 10))}</div>
+    <table><thead><tr><th>Product</th><th style="text-align:right">Booked</th><th style="text-align:right">Sold</th>
+      <th style="text-align:right">Market says</th><th>Counted</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5">Nothing on the floor.</td></tr>`}</tbody></table>
     <p style="margin-top:30px">Counted by: ____________________ &nbsp; Date: ____________</p></body></html>`);
   w.document.close();
   w.focus();
@@ -2555,25 +2725,17 @@ function renderStock() {
     return;
   }
   const t = D.totals;
+  const C = D.market_count || {};
+  const lines = (C.markets || []).flatMap(m => m.notes.flatMap(n => n.lines.map(l => ({ ...l, days: n.days }))));
+  const unsold = lines.filter(l => !l.sold);
+  const aged = lines.filter(l => (l.days || 0) > 21);
   const kpis = `<div class="kpis kpis-4">
-      ${kpiCard("On the floor", fmtInt(t.on_floor) + " ctn", `${fmtInt(t.not_reported)} of it not on the market's reports yet`, undefined, { tone: "accent", icon: "box" })}
-      ${kpiCard("Sold, not paid", "R " + fmt(t.owed), "on the notes entered", undefined, { tone: "warn", icon: "clock" })}
-      ${kpiCard("Sold and paid", "R " + fmt(t.paid), "before the agents' cut", undefined, { tone: "ok", icon: "check" })}
-      ${kpiCard("To look at", fmtInt(t.flags), `across ${fmtInt(t.notes)} delivery note${t.notes === 1 ? "" : "s"}`, undefined, { tone: "warn", icon: "alert" })}
+      ${kpiCard("On the floor", fmtInt(C.cartons || 0) + " ctn", C.snapshot ? `${fmtInt(C.lines)} lines, the market's count` : "not counted yet", undefined, { tone: "accent", icon: "box" })}
+      ${kpiCard("Nothing sold yet", fmtInt(unsold.reduce((x, l) => x + l.on_hand, 0)) + " ctn", `${fmtInt(unsold.length)} line${unsold.length === 1 ? "" : "s"} no sales report shows`, undefined, { tone: "warn", icon: "alert" })}
+      ${kpiCard("Older than 3 weeks", fmtInt(aged.reduce((x, l) => x + l.on_hand, 0)) + " ctn", `${fmtInt(aged.length)} line${aged.length === 1 ? "" : "s"} to move`, undefined, { tone: "warn", icon: "clock" })}
+      ${kpiCard("Sold, not paid", "R " + fmt(t.owed), `R ${fmt(t.paid)} paid, on the notes entered`, undefined, { tone: "ok", icon: "rand" })}
     </div>`;
-  const markets = (D.markets || []).length ? `<div class="stk-markets">${D.markets.map(m => `<div class="card stk-market">
-      <div class="stk-mhead"><b>${esc(m.market)}</b><span>${fmtInt(m.notes)} note${m.notes === 1 ? "" : "s"}</span></div>
-      <div class="stk-mfig"><b>${fmtInt(m.on_floor)}</b> ctn on the floor${m.not_reported ? ` · ${fmtInt(m.not_reported)} not reported yet` : ""}</div>
-      <div class="stk-msub">R ${fmt(m.owed)} sold, not paid · R ${fmt(m.paid)} paid</div>
-      <button class="btn ghost sm" onclick="printStocktake(${q(m.market)})">${icon("print")}Stocktake sheet</button>
-    </div>`).join("")}</div>` : "";
-  const notes = (D.notes || []).length
-    ? `<div class="card ins-card"><div class="ins-card-head"><h2>Delivery notes</h2></div>
-        <ul class="stk-notes">${D.notes.map(n => stockNote(n, K)).join("")}</ul></div>`
-    : `<div class="card placeholder"><div class="pi">${icon("box", 22)}</div><h2>No delivery notes yet</h2>
-        <p>Add Zaco's delivery notes as they go out, and each one is held against what the market books,
-          sells and pays on the same DN.</p></div>`;
-  main.innerHTML = `<section class="screen ins">${head}${K.form ? stockForm(K) : ""}${kpis}${markets}${marketCountCard(D.market_count, K)}${notes}</section>`;
+  main.innerHTML = `<section class="screen ins">${head}${K.form ? stockForm(K) : ""}${kpis}${inventoryCard(D, K)}${notesTable(D, K)}</section>`;
 }
 
 /* The start of a month: last month's unsold stock is still on the floor, and
@@ -3484,58 +3646,44 @@ function renderTracking() {
   const soh = T.data.stock_on_hand || { markets: [], items: 0, cartons_left: 0, counts: {}, closed: [] };
   const shortDate = iso => (niceDate(iso) || iso).replace(/ \d{4}$/, "");
 
-  /* One unsold consignment. The badge carries the days on hand in its colour;
-     the market is the group it sits under, so the line names only the agent. */
-  const stockRow = r => `<li>
-      <span class="wsig t-${esc(r.tier)}" title="${fmtInt(r.days_on_hand)} day${r.days_on_hand === 1 ? "" : "s"} on hand">${fmtInt(r.days_on_hand)}d</span>
-      ${nameCell({ ...r, market: null })}
-      <span class="trk-d" title="${r.arrived_basis === "received"
-        ? "The market's delivery date."
-        : "The Daily Sales report prints no arrival date, so this is the first day it sold."}">${
-        r.arrived_basis === "received" ? "Received" : "First sold"} ${esc(shortDate(r.arrived))}${
-        r.carried_from ? `<span class="carry-tag" title="Carried into this month's stock on hand">from ${esc(monthName(r.carried_from))}</span>` : ""}${
-        r.carried_to ? `<span class="carry-tag" title="Still on the floor, and carried into a later month">moved to ${esc(monthName(r.carried_to))}</span>` : ""}${
-        r.not_sold_yet ? `<span class="carry-tag warn" title="On the market's Stock On Hand count, on no sales report: nothing has sold from it">nothing sold yet</span>` : ""}</span>
-      <span class="trk-n num"${r.market_counted ? ` title="The market's own count, ${esc(niceDate(r.market_counted) || r.market_counted)}"` : ""}>${fmtInt(r.cartons_left)} of ${fmtInt(r.cartons_sent)}</span>
-      <button class="xbtn" title="Close this one off"
-        onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></li>`;
+  /* Stock on Hand, the short version of the Stock page's inventory: the same
+     table, every line visible, oldest first. Closed it shows the oldest
+     eight; opened, every line under its delivery note. */
+  const allStock = (soh.markets || []).flatMap(m => (m.dns || []).flatMap(d => d.lines.map(l => ({ ...l, market: m.market }))));
+  allStock.sort((a, b) => b.days_on_hand - a.days_on_hand || b.cartons_left - a.cartons_left);
+  const stockTag = r => `${r.not_sold_yet ? `<span class="inv-pill t-warn">nothing sold yet</span>` : ""}${
+      r.carried_from ? `<span class="inv-pill" title="Carried into this month's stock on hand">from ${esc(monthName(r.carried_from))}</span>` : ""}${
+      r.carried_to ? `<span class="inv-pill" title="Still on the floor, and carried into a later month">moved to ${esc(monthName(r.carried_to))}</span>` : ""}`;
+  const stockLine = (r, withDn) => `<tr>
+      <td class="inv-prod"><b title="${esc(r.product)}">${esc(shortProduct(r.product))}</b>${stockTag(r)}${
+        withDn ? `<span class="inv-sub">${r.dn != null ? "DN " + esc(r.dn) : "no DN"} · ${esc(r.market || "")}</span>` : ""}</td>
+      <td class="num inv-hide-sm">${fmtInt(r.cartons_sent)}</td>
+      <td class="num"${r.market_counted ? ` title="The market's own count, ${esc(niceDate(r.market_counted) || r.market_counted)}"` : ""}><b>${fmtInt(r.cartons_left)}</b>${invBar(r.cartons_sent - r.cartons_left, r.cartons_left)}</td>
+      <td class="num"><span class="inv-age t-${esc(r.tier)}" title="${r.arrived_basis === "received" ? "Since the market's delivery date" : "Since the first day it sold; the Daily Sales report prints no arrival date"}">${fmtInt(r.days_on_hand)}d</span></td>
+      <td class="inv-x"><button class="xbtn" title="Close this one off"
+        onclick="event.stopPropagation(); closeTrackingItem('slow', ${q(r.ref)})">×</button></td></tr>`;
+  const stockHead = `<thead><tr><th>Product</th><th class="num inv-hide-sm">Sent</th><th class="num">On hand</th><th class="num">Age</th><th></th></tr></thead>`;
+  const stockShort = `<div class="inv-wrap"><table class="inv-table inv-compact">${stockHead}
+      <tbody>${allStock.slice(0, 8).map(r => stockLine(r, true)).join("")}</tbody></table></div>
+      ${allStock.length > 8 ? `<p class="trk-note">The ${fmtInt(allStock.length - 8)} newer line${allStock.length - 8 === 1 ? "" : "s"} are under Show all, and on the
+        <a href="#" onclick="event.preventDefault(); event.stopPropagation(); setModule('stock')">Stock page</a>.</p>` : ""}`;
+  const stockGroups = (soh.markets || []).flatMap(m => (m.dns || []).map(d => ({ ...d, market: m.market })))
+    .sort((a, b) => b.days_on_hand - a.days_on_hand);
+  const stockMarkets = `<div class="inv-wrap"><table class="inv-table inv-compact">${stockHead}
+      ${stockGroups.map(g => `<tbody>
+        <tr class="inv-group"><td colspan="5"><span class="inv-age t-${esc(g.tier)}">${fmtInt(g.days_on_hand)}d</span>
+          <b>${g.dn != null ? "DN " + esc(g.dn) : "No delivery note"}</b>
+          <span class="inv-sub">${esc(g.market)} · ${g.arrived_basis === "received" ? "received" : "first sold"} ${esc(shortDate(g.arrived))}</span>
+          <span class="inv-gfig num">${fmtInt(g.cartons_left)} of ${fmtInt(g.cartons_sent)} ctn</span></td></tr>
+        ${g.lines.map(r => stockLine(r, false)).join("")}</tbody>`).join("")}
+    </table></div>`;
 
-  /* One market, collapsed to its totals until opened. */
-  const marketGroup = m => {
-    const isOpen = !!openMarkets["stock|" + m.market];
-    return `<div class="smkt${isOpen ? " open" : ""}">
-      <button class="smkt-head" aria-expanded="${isOpen}"
-        onclick="event.stopPropagation(); toggleTrackingMarket('stock', ${q(m.market)})">
-        <span class="chev">${icon(isOpen ? "up" : "down", 12)}</span>
-        <span class="smkt-name"><b>${esc(m.market)}</b>${m.agents ? `<em>${esc(m.agents)}</em>` : ""}</span>
-        <span class="smkt-sum num">${fmtInt(m.items)} line${m.items === 1 ? "" : "s"} · ${fmtInt(m.cartons_left)} ctn</span>
-        <span class="smkt-tiers">${m.red ? `<span class="wsig t-red">${fmtInt(m.red)} red</span>` : ""}${
-          m.orange ? `<span class="wsig t-orange">${fmtInt(m.orange)} orange</span>` : ""}</span>
-      </button>
-      ${isOpen ? (m.dns || []).map(deliveryNote).join("") : ""}
-    </div>`;
-  };
-
-  /* One delivery note inside a market: the load, then the products on it. The
-     note takes the colour and age of its oldest product. */
-  const deliveryNote = g => `<div class="sdn">
-      <div class="sdn-head">
-        <span class="wsig t-${esc(g.tier)}">${fmtInt(g.days_on_hand)}d</span>
-        <b>${g.dn != null ? "DN " + esc(g.dn) : "No delivery note"}</b>
-        <span class="sdn-sub">${fmtInt(g.items)} product${g.items === 1 ? "" : "s"} · ${
-          g.arrived_basis === "received" ? "received" : "first sold"} ${esc(shortDate(g.arrived))}</span>
-        <span class="trk-n num">${fmtInt(g.cartons_left)} of ${fmtInt(g.cartons_sent)}</span>
-      </div>
-      <ul class="trk-list trk-sig trk-stock">${g.lines.map(stockRow).join("")}</ul>
-    </div>`;
-
-  const stockMarkets = `<div class="smkts">${(soh.markets || []).map(marketGroup).join("")}</div>`;
   const stockBlock = soh.items
     ? block("stock", "Stock on Hand", soh.items,
         `${fmtInt(soh.cartons_left)} cartons over ${fmtInt(soh.items)} line${soh.items === 1 ? "" : "s"} at ${
           fmtInt(soh.markets.length)} market${soh.markets.length === 1 ? "" : "s"}${
           soh.counts.red ? ` · ${fmtInt(soh.counts.red)} red` : ""}`,
-        stockMarkets,
+        stockShort,
         `${stockMarkets}
          <p class="trk-note">Green up to ${fmtInt(soh.bands.orange - 1)} days on hand, orange from ${
            fmtInt(soh.bands.orange)}, red from ${fmtInt(soh.bands.red)}.${soh.dated_by_first_sale

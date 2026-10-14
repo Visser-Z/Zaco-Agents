@@ -278,7 +278,7 @@ def reconcile(notes: list[dict], sales: list[dict], payments: list[dict],
                 avail = sum(avails) if len(avails) == len(got) else None
                 counted = [c["counted"] for c in got if c.get("counted")]
                 if avail is not None and len(counted) == len(got):
-                    # The market counted it this evening: its floor is the
+                    # The market counted it this morning: its floor is the
                     # floor. Where the book works it out differently, a sale or
                     # a return is not on the book yet, and that is said.
                     if avail < 0:

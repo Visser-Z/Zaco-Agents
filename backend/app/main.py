@@ -471,7 +471,7 @@ async def extract(
 
 async def read_sales_files(user: User | None, files: list[tuple[str, bytes]],
                            known_dns: str | None = None) -> ExtractResponse:
-    """Everything /api/extract does, for files already in memory. The 18:00
+    """Everything /api/extract does, for files already in memory. The 8am
     TechnoFresh pull reads its PDFs through here too, so a pulled day is
     placed exactly as an uploaded one."""
     known = await codes_map(user)
@@ -2360,7 +2360,7 @@ async def reconcile_payments(
 
 
 # --- TechnoFresh auto-pull ------------------------------------------------
-# Every evening the app signs in to the TechnoFresh portal, pulls the day's
+# Every morning the app signs in to the TechnoFresh portal, pulls yesterday's
 # Payment Details and Daily Sales one day at a time, and puts them through the
 # same reading, placing and saving as an upload. See ``technofresh``.
 
@@ -2446,7 +2446,7 @@ async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
 
 
 async def _tf_stock(user: User, portal, today: date) -> dict:
-    """Today's Stock On Hand, every market, saved as one snapshot.
+    """This morning's Stock On Hand, every market, saved as one snapshot.
 
     One request per market, so each line's market is the one asked for rather
     than read off the agent heading. A market that fails fails the snapshot:
@@ -2492,7 +2492,7 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
     held = await db_get(user, "technofresh_days", {
         "select": "report,day,status,pulled_at", "day": f"gte.{since}", "limit": "1000"})
     # The South African day each was pulled on, so a day read on its own
-    # evening is read once more the next (see technofresh.days_to_pull).
+    # date is read once more the next day (see technofresh.days_to_pull).
     for h in held:
         try:
             h["pulled_on"] = datetime.fromisoformat(str(h["pulled_at"]).replace("Z", "+00:00"))                 .astimezone(_SAST).date().isoformat()
@@ -2500,8 +2500,8 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
             h["pulled_on"] = None
     order = {"payments": 0, "sales": 1}
     plan = sorted(
-        [(technofresh.PAYMENTS, d) for d in technofresh.days_to_pull("payments", held, today, today)]
-        + [(technofresh.SALES, d) for d in technofresh.days_to_pull("sales", held, today, today)],
+        [(technofresh.PAYMENTS, d) for d in technofresh.days_to_pull("payments", held, today)]
+        + [(technofresh.SALES, d) for d in technofresh.days_to_pull("sales", held, today)],
         key=lambda p: (p[1], order[p[0].key]))
     # The market's Stock On Hand is a count taken now, so one a day, first:
     # it is the freshest thing the pull brings, and a catch-up of old days can
@@ -2631,7 +2631,7 @@ async def pull_technofresh_now(user: User | None = Depends(require_user)) -> dic
 
 @app.get("/api/technofresh/cron")
 async def technofresh_cron(authorization: str = Header(default="")) -> dict:
-    """Vercel Cron calls this at 18:00 SAST with the CRON_SECRET it was given."""
+    """Vercel Cron calls this at 08:00 SAST with the CRON_SECRET it was given."""
     secret = os.getenv("CRON_SECRET", "")
     if not secret or not hmac.compare_digest(authorization, f"Bearer {secret}"):
         raise HTTPException(401, "Not the scheduler.")

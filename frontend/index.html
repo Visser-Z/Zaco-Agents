@@ -2557,8 +2557,8 @@ function inventoryCard(D, K) {
   const V = inventoryGroups(D, inv);
   if (!V) {
     return `<div class="card inv-card"><div class="inv-top"><h2>On the floor</h2></div>
-      <p class="ins-empty">The market's count has not been pulled yet. The 18:00 TechnoFresh pull fetches every
-        market's Stock On Hand each evening; press Pull now in Settings to fetch today's.</p></div>`;
+      <p class="ins-empty">The market's count has not been pulled yet. The 8am TechnoFresh pull fetches every
+        market's Stock On Hand each morning; press Pull now in Settings to fetch today's.</p></div>`;
   }
   const tabs = [["all", "All on the floor"], ["unsold", "Nothing sold yet"], ["aged", "Older than 3 weeks"],
                 ["nonote", "No note entered"], ["check", "To check"]];
@@ -2711,7 +2711,7 @@ function renderStock() {
   const head = `<div class="head"><div>
       <h1>Stock</h1>
       <p class="head-sub">What went to each market, from Zaco's own delivery notes, and where it is now:
-        on the floor, sold and waiting for payment, or paid. Each evening the market's own Stock On Hand
+        on the floor, sold and waiting for payment, or paid. Each morning the market's own Stock On Hand
         count is pulled from TechnoFresh, so what is on the floor is the market's figure, unsold lines included.</p></div>
       <div class="ins-actions">
         ${K.form ? "" : `<button class="btn primary sm" onclick="newStockNote()">${icon("plus")}Add a delivery note</button>`}
@@ -6345,7 +6345,7 @@ function renderHub() {
 }
 
 // --------------------------------------------------- TechnoFresh auto-pull
-/** Every evening the server pulls the day's sales and payments from the
+/** Every morning the server pulls yesterday's sales and payments from the
  *  TechnoFresh portal and saves what reads cleanly. This panel shows how the
  *  last days went, holds the login (admins only), and opens any day with rows
  *  that need a person in the normal review screen. See /api/technofresh/*. */
@@ -6391,8 +6391,8 @@ function tfForm(set) {
         placeholder="${set?.has_password ? "Leave empty to keep the saved one" : ""}" ${set?.has_password ? "" : "required"}></div>
     <div class="field"><label>Pull</label>
       <select name="schedule">
-        <option value="daily" ${set?.schedule !== "weekly" ? "selected" : ""}>Every day at 18:00, that day's reports</option>
-        <option value="weekly" ${set?.schedule === "weekly" ? "selected" : ""}>Mondays at 18:00, the past week day by day</option>
+        <option value="daily" ${set?.schedule !== "weekly" ? "selected" : ""}>Every day at 08:00, yesterday's reports</option>
+        <option value="weekly" ${set?.schedule === "weekly" ? "selected" : ""}>Mondays at 08:00, the past week day by day</option>
       </select></div>
     <label class="tf-check"><input type="checkbox" name="enabled" ${set?.enabled === false ? "" : "checked"}> Pull automatically</label>
     <div class="tf-actions">
@@ -6444,7 +6444,7 @@ function renderSettings() {
   const failed = days.filter(d => d.status === "failed");
   const when = !set ? "Not connected yet"
     : set.enabled === false ? "Automatic pulls are off"
-    : set.schedule === "weekly" ? "Mondays at 18:00" : "Every day at 18:00";
+    : set.schedule === "weekly" ? "Mondays at 08:00" : "Every day at 08:00";
 
   const account = `<div class="card tf-account">
     <div class="tile-head"><h2>TechnoFresh account</h2>
@@ -6459,7 +6459,7 @@ function renderSettings() {
             <div><dt>Last changed</dt><dd>${set.updated_at ? esc(tfWhen(set.updated_at)) : ""}</dd></div>
           </dl>`}
       ${admin && missing.length ? `<p class="hint tf-bad">Not set on the server yet: ${missing.map(esc).join(", ")}.
-        Pull now still works; the 18:00 pull needs these.</p>` : ""}
+        Pull now still works; the 08:00 pull needs these.</p>` : ""}
     </div></div>`;
 
   const tile = (title, sub, body, foot) => `<section class="card ins-tile tf-tile">
@@ -6478,7 +6478,7 @@ function renderSettings() {
           ? (count.status === "failed" ? `<span class="tf-bad">${esc(tfDay(count.day))} failed: ${esc(count.message || "")}</span>`
              : `${esc(tfDay(count.day))}, ${esc(count.message || fmtInt(count.found) + " lines")}
                 <a href="#" onclick="event.preventDefault(); setModule('stock')">See it on Stock</a>`)
-          : "counted every evening with the pull; none yet."}</p>`,
+          : "counted every morning with the pull; none yet."}</p>`,
         set ? `<span>Fetch what is due now</span><button class="btn primary sm" onclick="pullTechnofresh()">Pull now</button>` : "")}
       ${tile("Sales", "Daily sales details", list(sales),
         `<span>${fmtInt(sales.reduce((t, d) => t + d.saved, 0))} rows saved, last 3 weeks</span>`)}

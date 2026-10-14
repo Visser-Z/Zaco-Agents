@@ -64,19 +64,17 @@ def test_a_long_gap_is_capped():
     assert len(days) == technofresh.CATCH_UP_LIMIT and days[-1] == date(2026, 10, 7)
 
 
-def test_the_evening_run_pulls_today_too():
-    assert technofresh.days_to_pull("payments", [], TODAY, TODAY) == [TODAY]
-    held = [_held("sales", "2026-10-06", "done")]
-    assert technofresh.days_to_pull("sales", held, TODAY, TODAY) == [date(2026, 10, 7), TODAY]
+def test_today_is_never_pulled_by_default():
+    # The market posts into the evening, so a day is only read once it is over.
+    assert technofresh.days_to_pull("sales", [_held("sales", "2026-10-07", "done")], TODAY) == []
 
 
-def test_a_day_pulled_on_its_own_evening_is_pulled_once_more():
+def test_a_day_pulled_on_its_own_date_is_pulled_once_more():
+    # 14 October was read at 18:00 on the 14th, before the market had finished.
     same = {**_held("sales", "2026-10-07", "done"), "pulled_on": "2026-10-07"}
-    assert technofresh.days_to_pull("sales", [same], TODAY, TODAY) == [date(2026, 10, 7), TODAY]
+    assert technofresh.days_to_pull("sales", [same], TODAY) == [date(2026, 10, 7)]
     later = {**_held("sales", "2026-10-07", "done"), "pulled_on": "2026-10-08"}
-    today = {**_held("sales", "2026-10-08", "done"), "pulled_on": "2026-10-08"}
-    # Pulled the day after already, and today's own evening read is not repeated tonight.
-    assert technofresh.days_to_pull("sales", [later, today], TODAY, TODAY) == []
+    assert technofresh.days_to_pull("sales", [later], TODAY) == []
 
 
 def test_weekly_runs_on_mondays_only():

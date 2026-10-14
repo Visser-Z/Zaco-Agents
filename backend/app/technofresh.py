@@ -17,7 +17,7 @@ hours idle, so every pull signs in afresh rather than keeping a session.
 The portal password is stored encrypted (Fernet, key in TECHNOFRESH_KEY). The
 key lives only in the environment, so the database alone never yields it.
 
-The 8am job runs with nobody signed in. It signs in to Supabase as a dedicated
+The 18:00 job runs with nobody signed in. It signs in to Supabase as a dedicated
 "robot" account (ZACON_ROBOT_EMAIL / ZACON_ROBOT_PASSWORD) so every write goes
 through row-level security exactly like a person's would. The service_role key
 is still never used.
@@ -193,7 +193,7 @@ async def robot_user() -> User:
     password = os.getenv("ZACON_ROBOT_PASSWORD", "")
     if not (email and password and config.auth_configured()):
         raise PortalError("ZACON_ROBOT_EMAIL and ZACON_ROBOT_PASSWORD are not set, so the "
-                          "8am pull has no account to save with.")
+                          "18:00 pull has no account to save with.")
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
             f"{config.SUPABASE_URL}/auth/v1/token",
@@ -209,15 +209,22 @@ async def robot_user() -> User:
 
 # --- which days to pull ----------------------------------------------------
 
-def days_to_pull(report: str, held: list[dict], today: date) -> list[date]:
+def days_to_pull(report: str, held: list[dict], today: date,
+                 last: date | None = None) -> list[date]:
     """The days this run should pull, oldest first, one request each.
 
-    Yesterday, every day missed since the last one pulled (the job did not
-    run, or failed), and for sales any recent day that still had sales with no
-    account sale number: the market assigns those a few days late, and the
-    app cannot record a sale without one.
+    Up to ``last`` (yesterday unless told otherwise; the 18:00 run passes
+    today, because the market has finished trading by then), every day missed
+    since the last one pulled (the job did not run, or failed), and for sales
+    any recent day that still had sales with no account sale number: the
+    market assigns those a few days late, and the app cannot record a sale
+    without one.
+
+    A day pulled on its own evening is pulled once more the evening after, so
+    anything the market posted after 18:00 still arrives. A day already on the
+    book is left as saved, so the second read only adds what is new.
     """
-    yesterday = today - timedelta(days=1)
+    yesterday = last or today - timedelta(days=1)
     mine = {date.fromisoformat(h["day"]): h for h in held if h["report"] == report}
     good = [d for d, h in mine.items() if h["status"] != "failed"]
     start = max(good) + timedelta(days=1) if good else yesterday
@@ -229,6 +236,9 @@ def days_to_pull(report: str, held: list[dict], today: date) -> list[date]:
     if report == "sales":
         want |= {d for d, h in mine.items()
                  if h["status"] == "waiting" and d >= today - timedelta(days=RECHECK_DAYS)}
+    # Pulled on its own day, before the day was over: once more, the day after.
+    want |= {d for d, h in mine.items()
+             if d < today and str(h.get("pulled_on") or "") == d.isoformat()}
     return sorted(d for d in want if d <= yesterday)
 
 

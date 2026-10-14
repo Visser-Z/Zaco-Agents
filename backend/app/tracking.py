@@ -1735,8 +1735,9 @@ def on_hand(group: list[dict]) -> tuple[float, float]:
     counted = [r for r in group if r.get("market_on_hand") is not None]
     newest_sale = max((str(r.get("last_sale") or "") for r in group
                        if r.get("qty_avail") is not None), default="")
-    # A count is taken in the morning, so a sale on or after its day is newer.
-    if counted and max(str(r.get("market_counted") or "") for r in counted) > newest_sale:
+    # The count is taken at 18:00, after the day's trading, so it is the latest
+    # word on its own day; only a sale on a later day is newer than it.
+    if counted and max(str(r.get("market_counted") or "") for r in counted) >= newest_sale:
         c = max(counted, key=lambda r: str(r.get("market_counted") or ""))
         if c.get("market_booked") is not None:
             booked = int(c["market_booked"])

@@ -64,6 +64,21 @@ def test_a_long_gap_is_capped():
     assert len(days) == technofresh.CATCH_UP_LIMIT and days[-1] == date(2026, 10, 7)
 
 
+def test_the_evening_run_pulls_today_too():
+    assert technofresh.days_to_pull("payments", [], TODAY, TODAY) == [TODAY]
+    held = [_held("sales", "2026-10-06", "done")]
+    assert technofresh.days_to_pull("sales", held, TODAY, TODAY) == [date(2026, 10, 7), TODAY]
+
+
+def test_a_day_pulled_on_its_own_evening_is_pulled_once_more():
+    same = {**_held("sales", "2026-10-07", "done"), "pulled_on": "2026-10-07"}
+    assert technofresh.days_to_pull("sales", [same], TODAY, TODAY) == [date(2026, 10, 7), TODAY]
+    later = {**_held("sales", "2026-10-07", "done"), "pulled_on": "2026-10-08"}
+    today = {**_held("sales", "2026-10-08", "done"), "pulled_on": "2026-10-08"}
+    # Pulled the day after already, and today's own evening read is not repeated tonight.
+    assert technofresh.days_to_pull("sales", [later, today], TODAY, TODAY) == []
+
+
 def test_weekly_runs_on_mondays_only():
     assert technofresh.due_today("daily", TODAY)
     assert not technofresh.due_today("weekly", TODAY)

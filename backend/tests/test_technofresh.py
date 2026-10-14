@@ -198,6 +198,54 @@ def test_sales_day_saves_clean_rows_holds_the_rest(monkeypatch):
     assert (out["found"], out["saved"], out["held"], out["unpaid"]) == (4, 1, 1, 1)
 
 
+def test_a_row_saved_before_its_day_was_over_is_replaced(monkeypatch):
+    """14 October 2026 was saved at 18:36 that day at R 94 630; the market's
+    final report said R 141 320. The next pull replaces such a row, and only
+    such a row: one saved after its day was over is kept as saved."""
+    from datetime import date as d
+    differs = lambda: [Flag(field="stm_no", severity="warning", code="duplicate_differs",
+                            message="differs")]
+    early_row = _row(7, last_sale=d(2026, 10, 14), cartons_sold=166, sales_total=73040.0,
+                     flags=differs())
+    late_row = _row(8, last_sale=d(2026, 10, 14), cartons_sold=10, sales_total=900.0,
+                    flags=differs())
+
+    async def fake_read(user, files, known_dns=None):
+        return main.ExtractResponse(rows=[early_row, late_row])
+
+    async def fake_get(user, path, params=None):
+        return [
+            # Saved at 18:36 South African time on the 14th: before the day was over.
+            {"id": 101, "consignment_id": 7, "sale_day": "2026-10-14", "created_at": "2026-10-14T16:36:00+00:00"},
+            # Saved on the morning of the 15th: the final word.
+            {"id": 102, "consignment_id": 8, "sale_day": "2026-10-14", "created_at": "2026-10-15T06:54:00+00:00"},
+        ]
+
+    deleted, saved = [], []
+
+    async def fake_delete(user, path, params):
+        deleted.append(params)
+        return []
+
+    async def fake_persist(user, payload):
+        saved.extend(payload)
+
+    async def nothing(*a, **k):
+        return []
+
+    monkeypatch.setattr(main, "_tf_pages", nothing)
+    monkeypatch.setattr(main, "read_sales_files", fake_read)
+    monkeypatch.setattr(main, "db_get", fake_get)
+    monkeypatch.setattr(main, "db_delete", fake_delete)
+    monkeypatch.setattr(main, "persist_statements", fake_persist)
+    monkeypatch.setattr(main, "remember_delivery_notes", nothing)
+    out = asyncio.run(main._tf_sales_day(USER, d(2026, 10, 14), PDF))
+    assert deleted == [{"id": "in.(101)"}]
+    assert [r.stm_no for r in saved] == [7]
+    assert "1 row saved before the day was over replaced" in out["message"]
+    assert "1 already on the book" in out["message"]
+
+
 def test_a_pdf_of_the_wrong_report_is_refused(monkeypatch):
     monkeypatch.setattr(main, "pdf_to_page_texts", lambda data: ["Some other report entirely"])
     with pytest.raises(technofresh.PortalError, match="not that report"):

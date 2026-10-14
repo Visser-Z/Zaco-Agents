@@ -2409,6 +2409,36 @@ async def _tf_payments_day(user: User, day: date, data: bytes) -> dict:
 _OVERLAP_CODES = {overlap.ALREADY, overlap.DIFFERS, overlap.REPEAT}
 
 
+async def _saved_too_early(user: User, rows: list) -> tuple[list[int], set[tuple]]:
+    """The book's ids for these rows' days that were saved before the day was
+    over: on or before the day they sold, South African time.
+
+    A day is still being posted to into the evening (14 October 2026 stood at
+    R 94 630 at 18:00 and closed at R 141 320), so a row saved on its own day
+    may be short. One saved after its day was over is the final word and is
+    never touched."""
+    wanted = {(int(r.consignment_id), overlap.day_of(r)) for r in rows if r.consignment_id}
+    if not wanted:
+        return [], set()
+    cons = sorted({c for c, _ in wanted})
+    saved = await db_get(user, "statements", {
+        "select": "id,consignment_id,sale_day,last_sale,created_at",
+        "consignment_id": f"in.({','.join(map(str, cons))})", "limit": "10000"})
+    early, keys = [], set()
+    for rec in saved:
+        sold = str(rec.get("sale_day") or rec.get("last_sale") or "")[:10]
+        if (int(rec["consignment_id"]), sold) not in wanted or not rec.get("created_at"):
+            continue
+        try:
+            at = datetime.fromisoformat(str(rec["created_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if at.astimezone(_SAST).date().isoformat() <= sold:
+            early.append(rec["id"])
+            keys.add((int(rec["consignment_id"]), sold))
+    return early, keys
+
+
 async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
     """Read a day like an upload, then save what needs nobody to look at it.
 
@@ -2421,6 +2451,18 @@ async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
     await _tf_pages(technofresh.SALES, data)
     result = await read_sales_files(user, [(name, data)])
     rows = result.rows
+    # A row the book has for this day, saved before the day was over, and
+    # which the market's final report now puts differently: the final report
+    # replaces it. Everything else already on the book is left as saved.
+    differs = [r for r in rows if any(f.code == overlap.DIFFERS for f in r.flags)]
+    early, keys = await _saved_too_early(user, differs) if differs else ([], set())
+    replaced = 0
+    if early:
+        await db_delete(user, "statements", {"id": f"in.({','.join(map(str, early))})"})
+        replaced = len(keys)
+        for r in differs:
+            if r.consignment_id and (int(r.consignment_id), overlap.day_of(r)) in keys:
+                r.flags = [f for f in r.flags if f.code != overlap.DIFFERS]
     on_book = [r for r in rows if any(f.code in _OVERLAP_CODES for f in r.flags)]
     fresh = [r for r in rows if not any(f.code in _OVERLAP_CODES for f in r.flags)]
     unpaid = [r for r in fresh if r.stm_no is None]
@@ -2430,6 +2472,9 @@ async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
     if not warning and ready:
         await remember_delivery_notes(user, ready)
     notes = [warning] if warning else []
+    if replaced:
+        notes.append(f"{replaced} row{'' if replaced == 1 else 's'} saved before the day was over "
+                     f"replaced with the market's final figures.")
     if on_book:
         notes.append(f"{len(on_book)} already on the book.")
     if unpaid:

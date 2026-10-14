@@ -119,17 +119,76 @@ def _headers(user: User) -> dict[str, str]:
     }
 
 
+# Supabase answers at most this many rows per request, whatever ``limit`` asks
+# for, and says nothing when it cuts a result short. On 14 October 2026 the
+# book reached 1 014 rows and the newest 14, read oldest first, silently fell
+# off every screen: 14 October showed R 94 630 of R 141 320. So any read that
+# may be longer is fetched in pages until the count the database reports.
+PAGE = 1000
+
+# Each table's primary key, appended to a paged read's order so that rows
+# sharing a sort value (one group_date has dozens) keep one fixed order and no
+# page repeats or skips a row at its edge.
+_KEYS = {
+    "statements": "id", "payments": "accsale", "chat_messages": "id", "chat_threads": "id",
+    "consignment_deals": "id", "delivery_notes": "delivery_id", "dismissals": "kind,ref",
+    "market_stock": "snapshot,market,fms_id,seq", "market_summaries": "delivery_id,product",
+    "payment_checks": "accsale,product", "product_codes": "product", "profiles": "id",
+    "purchase_costs": "id", "stock_carryovers": "month,ref", "stock_note_lines": "dn,line_no",
+    "stock_notes": "dn", "suppliers": "id", "technofresh_days": "report,day",
+    "technofresh_settings": "id",
+}
+
+
+def _ordered(path: str, order: str | None) -> str | None:
+    """The read's own order with the table's key after it, as a tiebreak."""
+    key = _KEYS.get(path)
+    if not key:
+        return order
+    have = {part.split(".")[0] for part in (order or "").split(",") if part}
+    extra = ",".join(f"{k}.asc" for k in key.split(",") if k not in have)
+    return ",".join(x for x in (order, extra) if x) or None
+
+
 async def db_get(user: User, path: str, params: dict | None = None) -> list[dict]:
-    """Read from PostgREST as the caller, so RLS applies."""
+    """Read from PostgREST as the caller, so RLS applies.
+
+    Every row the read asks for, however many: a ``limit`` above ``PAGE``, or
+    none at all, is fetched page by page (see ``PAGE``)."""
+    params = dict(params or {})
+    want = int(params.pop("limit")) if params.get("limit") else None
+    url = f"{config.SUPABASE_URL}/rest/v1/{path}"
+
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{config.SUPABASE_URL}/rest/v1/{path}",
-            headers=_headers(user),
-            params=params or {},
-        )
-    if r.status_code >= 400:
-        raise HTTPException(r.status_code, f"Database read failed: {r.text}")
-    return r.json()
+        async def page(offset: int, size: int, count: bool) -> httpx.Response:
+            headers = _headers(user)
+            if count:
+                headers["Prefer"] = "count=exact"
+            r = await client.get(url, headers=headers,
+                                 params={**params, "limit": str(size), "offset": str(offset)})
+            if r.status_code >= 400:
+                raise HTTPException(r.status_code, f"Database read failed: {r.text}")
+            return r
+
+        if want is not None and want <= PAGE:
+            return (await page(0, want, False)).json()
+
+        params["order"] = _ordered(path, params.get("order"))
+        if params["order"] is None:
+            params.pop("order")
+        first = await page(0, PAGE, True)
+        rows = first.json()
+        # "0-999/1014": the total after the slash, "*" when it is not known.
+        total_text = (first.headers.get("content-range") or "").rpartition("/")[2]
+        total = int(total_text) if total_text.isdigit() else None
+        goal = min(x for x in (total, want) if x is not None) if (total or want) else None
+        while rows and (goal is None or len(rows) < goal):
+            size = PAGE if goal is None else min(PAGE, goal - len(rows))
+            more = (await page(len(rows), size, False)).json()
+            if not more:
+                break
+            rows += more
+        return rows
 
 
 async def db_post(

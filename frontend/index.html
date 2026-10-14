@@ -2832,19 +2832,21 @@ function settleCharts() {
 
 async function loadTracking() {
   const T = S.tracking;
+  const t = ticket("tracking");
   T.loading = true; T.error = null; render();
+  let data = null, error = null;
   try {
     const qs = new URLSearchParams();
     if (T.month) qs.set("month", T.month);
     if (T.week) qs.set("week", T.week);
     const q = qs.toString();
-    T.data = S.live ? await (await api(`/api/tracking${q ? "?" + q : ""}`)).json() : null;
-    if (!S.live) T.error = "This reads your saved history, so it needs the live app.";
+    data = S.live ? await (await api(`/api/tracking${q ? "?" + q : ""}`)).json() : null;
+    if (!S.live) error = "This reads your saved history, so it needs the live app.";
   } catch (e) {
-    T.error = e.message || String(e);
-  } finally {
-    T.loading = false; render();
+    error = e.message || String(e);
   }
+  if (!current("tracking", t)) return;
+  T.data = data; T.error = error; T.loading = false; render();
 }
 
 /** Open one block full width, or close it. Only one is open at a time: two
@@ -3148,9 +3150,19 @@ function setTrackingWeek(w) {
 
 /* Sales per day lives on Insights. Its own data, so a day picker never
    reloads the rest of the page. */
+/* Every load takes a ticket, and only the latest ticket's answer is kept.
+   Picking a month while all time is still loading used to let the slower
+   all-time answer land under the month, so the chart drew a whole year of
+   days with the month picked. */
+var loadTickets = {};
+function ticket(name) { return (loadTickets[name] = (loadTickets[name] || 0) + 1); }
+function current(name, t) { return loadTickets[name] === t; }
+
 async function loadSalesDays() {
   const I = S.insights, D = I.days;
+  const t = ticket("days");
   D.loading = true; D.error = null; S.chartReset = true; render();
+  let data = null, error = null;
   try {
     const qs = new URLSearchParams();
     if (D.from) qs.set("from", D.from);
@@ -3158,13 +3170,13 @@ async function loadSalesDays() {
     if (I.month) qs.set("month", I.month);
     if (I.week) qs.set("week", I.week);
     const q = qs.toString();
-    D.data = S.live ? await (await api(`/api/sales-days${q ? "?" + q : ""}`)).json() : null;
-    if (!S.live) D.error = "This reads your saved history, so it needs the live app.";
+    data = S.live ? await (await api(`/api/sales-days${q ? "?" + q : ""}`)).json() : null;
+    if (!S.live) error = "This reads your saved history, so it needs the live app.";
   } catch (e) {
-    D.error = e.message || String(e);
-  } finally {
-    D.loading = false; render();
+    error = e.message || String(e);
   }
+  if (!current("days", t)) return;          // a newer period was asked for meanwhile
+  D.data = data; D.error = error; D.loading = false; render();
 }
 
 function setDaysChart(metric) {
@@ -5509,20 +5521,22 @@ const fmtInt = n => (typeof n === "number" ? n : 0).toLocaleString("en-ZA", { ma
 
 async function loadInsights() {
   const I = S.insights;
+  const t = ticket("insights");
   I.loading = true; I.error = null; render();
+  let data = null, error = null;
   try {
     const qs = new URLSearchParams();
     if (I.month) qs.set("month", I.month);
     if (I.week) qs.set("week", I.week);
     const q = qs.toString();
-    I.data = S.live
+    data = S.live
       ? await (await api(`/api/analytics${q ? "?" + q : ""}`)).json()
       : demoAnalytics(I.month, I.week);
   } catch (e) {
-    I.error = e.message || String(e);
-  } finally {
-    I.loading = false; render();
+    error = e.message || String(e);
   }
+  if (!current("insights", t)) return;
+  I.data = data; I.error = error; I.loading = false; render();
 }
 
 function setInsightMonth(m) {
@@ -5548,7 +5562,8 @@ function setInsightWeek(w) {
 /** A new period: the days reload for it, and the pickers inside the old one go. */
 function resetDays() {
   const D = S.insights.days;
-  D.data = null; D.error = null; D.from = ""; D.to = ""; D.day = null;
+  ticket("days");                           // whatever is in flight is for the old period
+  D.data = null; D.error = null; D.loading = false; D.from = ""; D.to = ""; D.day = null;
 }
 
 function askDeleteHistory() { S.insights.confirmDelete = true; render(); }

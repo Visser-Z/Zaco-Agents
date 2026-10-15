@@ -212,7 +212,10 @@ If the database ever feels slow, Burstable B2s (2 vCores, 4 GiB) at R 1,41 an ho
    * Create the database with Supabase's text sort order (ICU `en-US`) instead of Azure's default `en_US.utf8`: `create database zacon template template0 locale_provider icu icu_locale 'en-US' ...`, and point the apps at it. Data is identical either way; only the order of some text lists differs.
    * Users keep their passwords (checked). Existing sessions do not carry over, because the token signing secret is new, so everyone signs in once after cutover.
    * Add the remaining secrets to Key Vault (Anthropic keys, `TECHNOFRESH_KEY`, robot login, `CRON_SECRET`) and the 06:00 UTC scheduled job.
-   * Password reset emails need an SMTP sender for the login service (not set in the practice run).
+   * ~~Password reset emails need an SMTP sender.~~ Done 15 October 2026: Azure Communication Services (`email-zacon`, `acs-zacon`, data in Africa) sends from `DoNotReply@zacodasboard.co.za`; SPF, DKIM and ownership records added in Vercel DNS and verified. Resets are sent with `infra/send-reset.sh <email>`. When the DNS zone moves to Azure, copy these four records across.
+   * ~~Sort order~~ Done: the apps run on database `zacon`, created by `infra/db/restore.sh` with ICU `en-US`. The old practice copy in database `postgres` can be dropped.
+   * ~~Scheduled pull~~ Done: job `zacon-pull` (`infra/pull-job.sh`), manual until cutover, then `bash infra/pull-job.sh schedule`.
+   * **Certificate rule (CAA)**: the domain only allows `pki.goog`, `sectigo.com` and `letsencrypt.org` to issue certificates. Azure Container Apps managed certificates come from DigiCert, so add `0 issue "digicert.com"` in Vercel DNS before adding the custom domain in Azure, or the certificate will not be issued.
 
 5. **Cutover**, in an evening after the 08:00 pull and with Zaco told in advance: set the Supabase project to read only for the app (or simply stop the Vercel deployment), take a final `pg_dump`, restore it to Azure, run the checks again (row counts per table, totals per month), switch the domain record to Azure. Expected downtime: 15 to 30 minutes. The data is small (tens of thousands of rows).
 6. **Next morning**: confirm the 08:00 Techno Fresh pull ran on Azure and saved.

@@ -19,6 +19,7 @@ API_TAG=${1:?usage: deploy-apps.sh <api-image-tag>}
 RG=rg-zacon
 KV=kv-zacon-za1
 PG_HOST=pg-zacon-za1.postgres.database.azure.com
+DB_NAME=${DB_NAME:-zacon}
 ACR=acrzaconza1
 CAE=cae-zacon
 ID=id-zacon
@@ -37,14 +38,17 @@ kvset() { az keyvault secret set --vault-name "$KV" -n "$1" --value "$2" -o none
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 say "Derived secrets in Key Vault"
-kvset auth-database-url "postgres://supabase_auth_admin:$(kv pg-auth-admin-password)@$PG_HOST:5432/postgres?sslmode=require"
-kvset rest-db-uri "postgres://authenticator:$(kv pg-authenticator-password)@$PG_HOST:5432/postgres?sslmode=require"
+kvset auth-database-url "postgres://supabase_auth_admin:$(kv pg-auth-admin-password)@$PG_HOST:5432/$DB_NAME?sslmode=require"
+kvset rest-db-uri "postgres://authenticator:$(kv pg-authenticator-password)@$PG_HOST:5432/$DB_NAME?sslmode=require"
 if ! az keyvault secret show --vault-name "$KV" -n anon-key -o none 2>/dev/null; then
   now=$(date +%s)
   h=$(printf '{"alg":"HS256","typ":"JWT"}' | b64url)
   p=$(printf '{"role":"anon","iss":"zacon","iat":%s,"exp":%s}' "$now" "$((now + 10*365*86400))" | b64url)
   s=$(printf '%s.%s' "$h" "$p" | openssl dgst -sha256 -hmac "$(kv jwt-secret)" -binary | b64url)
   kvset anon-key "$h.$p.$s"
+fi
+if ! az keyvault secret show --vault-name "$KV" -n cron-secret -o none 2>/dev/null; then
+  kvset cron-secret "$(openssl rand -base64 36 | tr -dc 'A-Za-z0-9' | head -c 40)"
 fi
 
 say "Identity $ID (reads Key Vault secrets, pulls images)"
@@ -81,9 +85,19 @@ deploy() {
 }
 
 say "zacon-auth ($AUTH_IMAGE)"
-deploy zacon-auth "$AUTH_IMAGE" internal 9999 0.25 0.5Gi \
-  "$(ref db-url auth-database-url) $(ref jwt-secret jwt-secret)" \
-  "GOTRUE_API_HOST=0.0.0.0 PORT=9999 GOTRUE_DB_DRIVER=postgres DATABASE_URL=secretref:db-url \
+# Invite and password reset emails go through Azure Communication Services
+# (acs-zacon, data in Africa) from DoNotReply@zacodasboard.co.za.
+AUTH_SECRETS="$(ref db-url auth-database-url) $(ref jwt-secret jwt-secret)"
+AUTH_SMTP=""
+if az keyvault secret show --vault-name "$KV" -n smtp-password -o none 2>/dev/null; then
+  AUTH_SECRETS="$AUTH_SECRETS $(ref smtp-user smtp-username) $(ref smtp-pass smtp-password)"
+  AUTH_SMTP="GOTRUE_SMTP_HOST=smtp.azurecomm.net GOTRUE_SMTP_PORT=587 GOTRUE_SMTP_USER=secretref:smtp-user \
+   GOTRUE_SMTP_PASS=secretref:smtp-pass GOTRUE_SMTP_ADMIN_EMAIL=DoNotReply@zacodasboard.co.za \
+   GOTRUE_SMTP_SENDER_NAME=ZacoAgents GOTRUE_SMTP_MAX_FREQUENCY=60s"
+  echo "  email through Azure Communication Services"
+fi
+deploy zacon-auth "$AUTH_IMAGE" internal 9999 0.25 0.5Gi "$AUTH_SECRETS" \
+  "$AUTH_SMTP GOTRUE_API_HOST=0.0.0.0 PORT=9999 GOTRUE_DB_DRIVER=postgres DATABASE_URL=secretref:db-url \
    API_EXTERNAL_URL=$PUBLIC_URL/auth/v1 GOTRUE_SITE_URL=$PUBLIC_URL \
    GOTRUE_JWT_SECRET=secretref:jwt-secret GOTRUE_JWT_EXP=3600 GOTRUE_JWT_AUD=authenticated \
    GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated GOTRUE_JWT_ADMIN_ROLES=service_role \
@@ -98,10 +112,25 @@ deploy zacon-rest "$REST_IMAGE" internal 3000 0.25 0.5Gi \
    PGRST_DB_CHANNEL_ENABLED=true PGRST_LOG_LEVEL=warn"
 
 say "zacon-api ($API_IMAGE)"
-deploy zacon-api "$API_IMAGE" internal 8000 0.5 1Gi \
-  "$(ref anon-key anon-key) $(ref jwt-secret jwt-secret)" \
-  "SUPABASE_URL=$PUBLIC_URL SUPABASE_ANON_KEY=secretref:anon-key SUPABASE_JWT_SECRET=secretref:jwt-secret \
-   ZACON_AUTH_REQUIRED=true ZACON_BUILD_SHA=$API_TAG"
+# The app's own keys (infra/set-secrets.ps1) are passed only once they are in
+# Key Vault: a reference to a missing secret would stop the app starting.
+API_SECRETS="$(ref anon-key anon-key) $(ref jwt-secret jwt-secret) $(ref cron-secret cron-secret)"
+API_ENV="SUPABASE_URL=$PUBLIC_URL SUPABASE_ANON_KEY=secretref:anon-key SUPABASE_JWT_SECRET=secretref:jwt-secret \
+  CRON_SECRET=secretref:cron-secret ZACON_AUTH_REQUIRED=true ZACON_BUILD_SHA=$API_TAG"
+HAVE=$(az keyvault secret list --vault-name "$KV" --query "[].name" -o tsv | tr -d '\r')
+for pair in anthropic-key-intel:ANTHROPIC_API_KEY_INTEL anthropic-key-docs:ANTHROPIC_API_KEY_DOCS \
+            anthropic-key:ANTHROPIC_API_KEY technofresh-key:TECHNOFRESH_KEY \
+            robot-email:ZACON_ROBOT_EMAIL robot-password:ZACON_ROBOT_PASSWORD; do
+  name=${pair%%:*}; var=${pair##*:}
+  if grep -qx "$name" <<<"$HAVE"; then
+    API_SECRETS="$API_SECRETS $(ref "$name" "$name")"
+    API_ENV="$API_ENV $var=secretref:$name"
+    echo "  $var from Key Vault"
+  else
+    echo "  $var not in Key Vault yet, left out"
+  fi
+done
+deploy zacon-api "$API_IMAGE" internal 8000 0.5 1Gi "$API_SECRETS" "$API_ENV"
 
 say "zacon-gw ($GW_IMAGE)"
 deploy zacon-gw "$GW_IMAGE" external 8080 0.25 0.5Gi "" "GATEWAY=caddy"

@@ -42,7 +42,9 @@ grant anon, authenticated, service_role, supabase_auth_admin to current_user;
 create schema if not exists auth authorization supabase_auth_admin;
 alter role supabase_auth_admin set search_path = auth;
 grant usage on schema auth to anon, authenticated, service_role;
-grant create on database postgres to supabase_auth_admin;
+do $$ begin
+  execute format('grant create on database %I to supabase_auth_admin', current_database());
+end $$;
 
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;

@@ -1,0 +1,36 @@
+# One public address for the whole app, the way Supabase's gateway works:
+#   /auth/v1/*  -> the login service (supabase/auth)
+#   /rest/v1/*  -> the data service (PostgREST)
+#   anything else -> the FastAPI app and its frontend
+# The upstreams are internal Container Apps, reached by app name. Their
+# ingress routes on the Host header, so it is set to the upstream's name.
+
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	encode gzip
+
+	handle_path /auth/v1/* {
+		reverse_proxy http://zacon-auth {
+			header_up Host {upstream_hostport}
+		}
+	}
+
+	handle_path /rest/v1/* {
+		reverse_proxy http://zacon-rest {
+			header_up Host {upstream_hostport}
+		}
+	}
+
+	handle {
+		reverse_proxy http://zacon-api {
+			header_up Host {upstream_hostport}
+			transport http {
+				response_header_timeout 300s
+			}
+		}
+	}
+}

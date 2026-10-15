@@ -1,0 +1,26 @@
+# Only requirements.txt, backend/app and frontend are copied, but the whole
+# folder is sent to the builder, so keep secrets and client data out of it.
+.env
+.env.*
+**/.env
+**/.env.*
+*.pdf
+*.xlsx
+*.xlsm
+*.dump
+
+.git/
+.claude/
+.vercel/
+.venv/
+**/__pycache__/
+**/.pytest_cache/
+*.py[cod]
+
+backend/tests/
+desktop/
+docs/
+scripts/
+supabase/
+api/
+*.md

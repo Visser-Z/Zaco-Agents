@@ -19,7 +19,7 @@ API_TAG=${1:?usage: deploy-apps.sh <api-image-tag>}
 RG=rg-zacon
 KV=kv-zacon-za1
 PG_HOST=pg-zacon-za1.postgres.database.azure.com
-DB_NAME=${DB_NAME:-zacon}
+DB_NAME=${DB_NAME:-zacon_live}
 ACR=acrzaconza1
 CAE=cae-zacon
 ID=id-zacon
@@ -29,7 +29,7 @@ GW_IMAGE=$ACR.azurecr.io/zacon-gateway:1
 API_IMAGE=$ACR.azurecr.io/zacon-api:$API_TAG
 
 DOMAIN=$(az containerapp env show -n "$CAE" -g "$RG" --query properties.defaultDomain -o tsv)
-PUBLIC_URL=${PUBLIC_URL:-https://zacon-gw.$DOMAIN}
+PUBLIC_URL=${PUBLIC_URL:-https://zacodasboard.co.za}
 KV_URI=$(az keyvault show -n "$KV" -g "$RG" --query properties.vaultUri -o tsv)
 
 say() { printf '\n== %s\n' "$*"; }

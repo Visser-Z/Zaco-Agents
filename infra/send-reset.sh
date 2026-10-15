@@ -10,7 +10,7 @@
 set -euo pipefail
 
 EMAIL=${1:?usage: send-reset.sh <email>}
-URL=${PUBLIC_URL:-https://zacon-gw.happyground-50582879.southafricanorth.azurecontainerapps.io}
+URL=${PUBLIC_URL:-https://zacodasboard.co.za}
 KEY=$(curl -s "$URL/api/health" | grep -oE '"supabase_anon_key":"[^"]*"' | cut -d'"' -f4)
 
 code=$(curl -s -o /tmp/send-reset.out -w '%{http_code}' "$URL/auth/v1/recover" \

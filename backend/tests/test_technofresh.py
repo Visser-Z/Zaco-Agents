@@ -77,6 +77,24 @@ def test_a_day_pulled_on_its_own_date_is_pulled_once_more():
     assert technofresh.days_to_pull("sales", [later], TODAY) == []
 
 
+def test_recent_days_already_pulled_are_read_again():
+    # Durban's R 461 640 was posted under 15 October after that day was read.
+    held = [_held("payments", f"2026-10-0{d}", "done") for d in range(1, 8)]
+    assert technofresh.days_to_recheck("payments", held, TODAY) == [
+        date(2026, 10, d) for d in range(1, 8)]
+    sales = [_held("sales", f"2026-10-0{d}", "done") for d in range(1, 8)]
+    assert technofresh.days_to_recheck("sales", sales, TODAY) == [
+        date(2026, 10, 4), date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7)]
+
+
+def test_a_recheck_never_repeats_a_day_already_due():
+    held = [_held("payments", "2026-10-05", "failed"), _held("payments", "2026-10-06", "done")]
+    due = technofresh.days_to_pull("payments", held, TODAY)
+    again = technofresh.days_to_recheck("payments", held, TODAY)
+    assert date(2026, 10, 5) in due and date(2026, 10, 7) in due
+    assert again == [date(2026, 10, 6)]
+
+
 def test_weekly_runs_on_mondays_only():
     assert technofresh.due_today("daily", TODAY)
     assert not technofresh.due_today("weekly", TODAY)
@@ -244,6 +262,102 @@ def test_a_row_saved_before_its_day_was_over_is_replaced(monkeypatch):
     assert [r.stm_no for r in saved] == [7]
     assert "1 row saved before the day was over replaced" in out["message"]
     assert "1 already on the book" in out["message"]
+
+
+def _run_with(monkeypatch, held, outcomes):
+    """One morning's run with the portal and database faked. ``outcomes`` maps
+    (report, day) to what reading that day gives; returns what was recorded."""
+    monkeypatch.setenv("TECHNOFRESH_KEY", Fernet.generate_key().decode())
+    settings = {"username": "zaco", "password_enc": technofresh.encrypt("pw"),
+                "schedule": "daily", "enabled": True}
+
+    async def fake_get(user, path, params=None):
+        if path == "technofresh_days":
+            return [dict(h) for h in held]
+        if path == "market_stock":
+            raise RuntimeError("before 0029")
+        return []
+
+    async def fake_settings(user):
+        return settings
+
+    class FakePortal:
+        def __init__(self, *a):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            pass
+
+        def fetch(self, report, day):
+            return f"{report.key}|{day}".encode()
+
+    async def handle(user, day, data):
+        report = data.decode().split("|")[0]
+        return dict(outcomes[(report, day.isoformat())])
+
+    recorded = []
+
+    async def fake_record(user, report, day, **fields):
+        recorded.append((report, day.isoformat(), fields))
+
+    monkeypatch.setattr(main, "_sa_today", lambda: TODAY)
+    monkeypatch.setattr(main, "db_get", fake_get)
+    monkeypatch.setattr(main, "_tf_settings", fake_settings)
+    monkeypatch.setattr(main, "_tf_record", fake_record)
+    monkeypatch.setattr(main, "_tf_payments_day", handle)
+    monkeypatch.setattr(main, "_tf_sales_day", handle)
+    monkeypatch.setattr(technofresh, "Portal", FakePortal)
+    monkeypatch.setattr(technofresh, "PACE_SECONDS", 0)
+    out = asyncio.run(main.run_technofresh_pull(USER, scheduled=True))
+    return out, recorded
+
+
+def test_a_payment_posted_late_is_picked_up_next_morning(monkeypatch):
+    held = [{**_held("payments", "2026-10-06", "done"), "found": 4, "pulled_at": "2026-10-07T06:00:00+00:00"},
+            {**_held("payments", "2026-10-05", "done"), "found": 2, "pulled_at": "2026-10-06T06:00:00+00:00"}]
+    outcomes = {
+        ("payments", "2026-10-07"): {"status": "done", "found": 3, "saved": 3, "message": None},
+        # The 6th now has the late Durban payment: five where four were read.
+        ("payments", "2026-10-06"): {"status": "done", "found": 5, "saved": 5, "message": None},
+        # The 5th reads the same as before: its record is left alone.
+        ("payments", "2026-10-05"): {"status": "done", "found": 2, "saved": 2, "message": None},
+        ("sales", "2026-10-07"): {"status": "done", "found": 1, "saved": 1, "held": 0, "differs": 0},
+    }
+    out, recorded = _run_with(monkeypatch, held, outcomes)
+    days = [(r, d) for r, d, _ in recorded]
+    assert days[:2] == [("payments", "2026-10-07"), ("sales", "2026-10-07")]   # due days first
+    assert ("payments", "2026-10-06") in days and ("payments", "2026-10-05") not in days
+    again = dict(((r, d), f) for r, d, f in recorded)[("payments", "2026-10-06")]
+    assert again["found"] == 5 and "Read again" in again["message"]
+    assert out["left"] == 0
+
+
+def test_a_failed_recheck_leaves_a_good_day_alone(monkeypatch):
+    held = [{**_held("payments", "2026-10-07", "done"), "found": 3, "pulled_at": "2026-10-08T06:00:00+00:00"},
+            {**_held("sales", "2026-10-07", "done"), "found": 4, "pulled_at": "2026-10-08T06:00:00+00:00"}]
+    outcomes = {
+        ("payments", "2026-10-07"): {"status": "failed", "message": "TechnoFresh ended the session."},
+        ("sales", "2026-10-07"): {"status": "done", "found": 4, "saved": 0, "held": 0, "differs": 0,
+                                  "message": "4 already on the book."},
+    }
+    _, recorded = _run_with(monkeypatch, held, outcomes)
+    assert recorded == []
+
+
+def test_a_recheck_that_finds_a_different_sale_says_so(monkeypatch):
+    held = [{**_held("sales", "2026-10-07", "done"), "found": 4, "pulled_at": "2026-10-08T06:00:00+00:00"},
+            {**_held("payments", "2026-10-07", "done"), "found": 1, "pulled_at": "2026-10-08T06:00:00+00:00"}]
+    outcomes = {
+        ("payments", "2026-10-07"): {"status": "done", "found": 1, "saved": 1},
+        ("sales", "2026-10-07"): {"status": "done", "found": 4, "saved": 0, "held": 0, "differs": 1,
+                                  "message": "4 already on the book. 1 of them differ"},
+    }
+    _, recorded = _run_with(monkeypatch, held, outcomes)
+    assert [(r, d) for r, d, _ in recorded] == [("sales", "2026-10-07")]
+    assert "differs" not in recorded[0][2]          # not a database column
 
 
 def test_a_pdf_of_the_wrong_report_is_refused(monkeypatch):

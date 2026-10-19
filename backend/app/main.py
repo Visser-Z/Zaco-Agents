@@ -2477,6 +2477,12 @@ async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
                      f"replaced with the market's final figures.")
     if on_book:
         notes.append(f"{len(on_book)} already on the book.")
+    # Saved after its day was over, so left as saved, but the market now says
+    # otherwise: say so, so the day gets looked at rather than trusted.
+    differs_left = [r for r in on_book if any(f.code == overlap.DIFFERS for f in r.flags)]
+    if differs_left:
+        notes.append(f"{len(differs_left)} of them differ from what the market now reports; "
+                     f"drop this day's report to see where.")
     if unpaid:
         notes.append(f"{len(unpaid)} not paid yet, so they have no account sale number; "
                      f"this day is pulled again until they do.")
@@ -2486,7 +2492,7 @@ async def _tf_sales_day(user: User, day: date, data: bytes) -> dict:
     status = ("failed" if warning else "waiting" if unpaid
               else "review" if held else "done")
     return {"status": status, "found": len(rows), "saved": 0 if warning else len(ready),
-            "held": len(held), "unpaid": len(unpaid),
+            "held": len(held), "unpaid": len(unpaid), "differs": len(differs_left),
             "message": " ".join(notes) or (None if rows else "No sales that day.")}
 
 
@@ -2517,6 +2523,15 @@ async def _tf_stock(user: User, portal, today: date) -> dict:
                        f"{len(floor)} lines; {len(untouched)} of them nothing has sold from yet."}
 
 
+def _recheck_changed(report: str, outcome: dict, differs: int, found_before) -> bool:
+    """Whether reading a day again turned up something the first read did not."""
+    if outcome.get("status") == "failed":
+        return False
+    if report == "payments":
+        return found_before is None or outcome.get("found", 0) != found_before
+    return bool(outcome.get("saved") or outcome.get("held") or differs)
+
+
 async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
     """Pull every day that is due, oldest first, within the time the server allows."""
     try:
@@ -2535,7 +2550,7 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
 
     since = (today - timedelta(days=technofresh.CATCH_UP_LIMIT + 14)).isoformat()
     held = await db_get(user, "technofresh_days", {
-        "select": "report,day,status,pulled_at", "day": f"gte.{since}", "limit": "1000"})
+        "select": "report,day,status,found,pulled_at", "day": f"gte.{since}", "limit": "1000"})
     # The South African day each was pulled on, so a day read on its own
     # date is read once more the next day (see technofresh.days_to_pull).
     for h in held:
@@ -2544,10 +2559,16 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
         except (TypeError, ValueError):
             h["pulled_on"] = None
     order = {"payments": 0, "sales": 1}
+    reports = (technofresh.PAYMENTS, technofresh.SALES)
     plan = sorted(
-        [(technofresh.PAYMENTS, d) for d in technofresh.days_to_pull("payments", held, today)]
-        + [(technofresh.SALES, d) for d in technofresh.days_to_pull("sales", held, today)],
+        [(r, d) for r in reports for d in technofresh.days_to_pull(r.key, held, today)],
         key=lambda p: (p[1], order[p[0].key]))
+    # Then recent days already pulled, read again for anything the market
+    # posted to them late. After the due days, so they never crowd one out.
+    recheck = sorted(
+        [(r, d) for r in reports for d in technofresh.days_to_recheck(r.key, held, today)],
+        key=lambda p: (p[1], order[p[0].key]))
+    found_before = {(h["report"], h["day"]): h.get("found") for h in held}
     # The market's Stock On Hand is a count taken now, so one a day, first:
     # it is the freshest thing the pull brings, and a catch-up of old days can
     # wait for "Pull now". Only once migration 0029 is in.
@@ -2558,7 +2579,7 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
             await db_get(user, "market_stock", {"select": "snapshot", "limit": "1"})
         except Exception:  # noqa: BLE001 -- before migration 0029
             stock_due = False
-    if not plan and not stock_due:
+    if not plan and not recheck and not stock_due:
         return {"ran": True, "pulled": [], "left": 0, "message": "Everything is up to date."}
 
     started = time.monotonic()
@@ -2587,9 +2608,9 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
                            "message": f"Could not save the stock count: {getattr(exc, 'detail', exc)}"}
             await _tf_record(user, "stock", today, **outcome)
             pulled.append({"report": "stock", "day": today.isoformat(), **outcome})
-        for report, day in plan:
+        for report, day, again in [(r, d, False) for r, d in plan] + [(r, d, True) for r, d in recheck]:
             if time.monotonic() - started > technofresh.TIME_BUDGET:
-                left += 1
+                left += not again
                 continue
             try:
                 data = await run_in_threadpool(portal.fetch, report, day)
@@ -2602,8 +2623,17 @@ async def run_technofresh_pull(user: User, *, scheduled: bool) -> dict:
             except Exception as exc:  # noqa: BLE001 -- one bad day must not stop the rest
                 outcome = {"status": "failed",
                            "message": f"Could not place this day: {getattr(exc, 'detail', exc)}"}
+            differs = outcome.pop("differs", 0)
+            if again and not _recheck_changed(report.key, outcome, differs,
+                                              found_before.get((report.key, day.isoformat()))):
+                # Read again and nothing new: the day's record stays as it was,
+                # and a portal hiccup never turns a good day into a failed one.
+                continue
+            if again:
+                note = "Read again: the market had posted to this day since it was first pulled."
+                outcome["message"] = " ".join(filter(None, [note, outcome.get("message")]))
             await _tf_record(user, report.key, day, **outcome)
-            pulled.append({"report": report.key, "day": day.isoformat(),
+            pulled.append({"report": report.key, "day": day.isoformat(), "recheck": again,
                            **{k: v for k, v in outcome.items() if k != "pdf"}})
     message = (f"{left} more day(s) still to pull; press Pull now to carry on."
                if left else None)

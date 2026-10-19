@@ -39,9 +39,16 @@ from .supabase_auth import User
 PORTAL = "https://crm.technofresh.co.za"
 REPORTS_PAGE = PORTAL + "/reports/"
 PACE_SECONDS = 2.0          # between requests to the portal; it is a shared server
-TIME_BUDGET = 45.0          # stop starting new days after this, the function has 60s
+# Stop starting new days after this. Vercel gives a function 60s; on Azure the
+# job's request may run four minutes, which leaves room for the rechecks.
+TIME_BUDGET = 45.0 if os.getenv("VERCEL") else 180.0
 RECHECK_DAYS = 14           # how long a day's unpaid sales are pulled again
 CATCH_UP_LIMIT = 31         # never reach further back than this in one go
+# How many days back a day already pulled is read again, every morning. The
+# market posts some payments days late under an earlier date: Durban's
+# DUR*13*205847 (R 461 640) is dated 15 October 2026 but was not in that day's
+# report when it was read at 08:00 on the 16th, so it was missed for four days.
+LATE_POSTING_DAYS = {"payments": 7, "sales": 3}
 
 
 @dataclass(frozen=True)
@@ -242,6 +249,24 @@ def days_to_pull(report: str, held: list[dict], today: date,
     want |= {d for d, h in mine.items()
              if d < today and str(h.get("pulled_on") or "") == d.isoformat()}
     return sorted(d for d in want if d <= yesterday)
+
+
+def days_to_recheck(report: str, held: list[dict], today: date,
+                    last: date | None = None) -> list[date]:
+    """Recent days already pulled, read again in case the market posted to
+    them late. Oldest first; never a day ``days_to_pull`` already has.
+
+    Reading a day twice is safe: a payment is saved once per account sale and
+    refreshed when it comes again, and a sales day already on the book is
+    left as saved, so the second read only adds what is new.
+    """
+    yesterday = last or today - timedelta(days=1)
+    reach = LATE_POSTING_DAYS.get(report, 0)
+    due = set(days_to_pull(report, held, today, last))
+    done = {date.fromisoformat(h["day"]) for h in held
+            if h["report"] == report and h["status"] != "failed"}
+    return sorted(d for d in done
+                  if yesterday - timedelta(days=reach) <= d <= yesterday and d not in due)
 
 
 def due_today(schedule: str, today: date) -> bool:

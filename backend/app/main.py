@@ -45,6 +45,7 @@ from .supabase_auth import (User, current_profile, db_delete, db_get, db_patch,
                             db_post, require_admin, require_user)
 from .extraction import apply_group_dates, pdf_to_page_texts, statements_from_pages
 from . import dispatch_sheet, market_stock, market_summary, overlap, stock_book, stocktake_sheet, supply
+from . import price_check
 from .schemas import ExtractResponse, Flag, LookupEntry, NettMatch, StatementRow
 
 app = FastAPI(title="ZacoAgents", version="0.1.0")
@@ -354,6 +355,7 @@ async def _sold_before(user: User | None, rows: list[StatementRow]) -> dict[int,
 # ("column statements.consignment_id does not exist") or a bare 404, which reads
 # like a broken app rather than one pending setup step.
 _MIGRATIONS = {
+    "app_settings": "0030_app_settings.sql",
     "sale_day": "0020_unique_per_sale_day.sql",
     "dismissals": "0016_dismissals.sql",
     "market_summaries": "0024_market_summaries.sql",
@@ -1232,8 +1234,12 @@ async def get_sales_days(
     """Sales per day for Insights, with what each day has been paid and owes."""
     sales = await _history_rows(user)
     payments = await _saved_payments(user)
-    return tracking.daily(sales, payments, start=date_from, end=date_to,
-                          month=month, week=week)
+    out = tracking.daily(sales, payments, start=date_from, end=date_to,
+                         month=month, week=week)
+    # What sold under the market average in a consignment's first days, laid
+    # on each product line, day and month (see price_check.py).
+    days = (await _app_settings(user))["price_check_days"]
+    return price_check.lay_on_days(out, price_check.by_day(sales, days))
 
 
 @app.post("/api/tracking/flags/decide")
@@ -1378,6 +1384,61 @@ async def get_analytics(
     # going rate rather than a figure of ours.
     result["integrity"] = integrity.summary(scoped)
     return result
+
+
+_APP_SETTINGS_MIGRATION = "0030_app_settings.sql"
+
+
+async def _app_settings(user: User | None) -> dict:
+    """The business wide settings, with the defaults when none are saved.
+
+    Before migration 0030 there is no table, and the defaults stand in rather
+    than taking Insights down: the price check still works at five days.
+    """
+    out = {"price_check_days": price_check.DEFAULT_FRESH_DAYS, "updated_at": None,
+           "migration": None}
+    if user is None:
+        return out
+    try:
+        rows = await db_get(user, "app_settings", {
+            "select": "price_check_days,updated_at", "id": "eq.1"})
+    except Exception as exc:  # noqa: BLE001 -- before the migration
+        out["migration"] = _pending_migration(exc) or _APP_SETTINGS_MIGRATION
+        return out
+    if rows:
+        out["price_check_days"] = price_check.fresh_days_from(rows[0].get("price_check_days"))
+        out["updated_at"] = rows[0].get("updated_at")
+    return out
+
+
+@app.get("/api/settings/app")
+async def get_app_settings(user: User | None = Depends(require_user)) -> dict:
+    """The business wide settings, for the Settings page."""
+    return {**await _app_settings(user),
+            "price_check_range": [price_check.MIN_FRESH_DAYS, price_check.MAX_FRESH_DAYS]}
+
+
+@app.post("/api/settings/app")
+async def save_app_settings(
+    price_check_days: int = Form(...),
+    profile: dict = Depends(require_admin),
+) -> dict:
+    """Admins only. Days outside the range are refused, not quietly clamped."""
+    if not price_check.MIN_FRESH_DAYS <= price_check_days <= price_check.MAX_FRESH_DAYS:
+        raise HTTPException(400, f"Pick between {price_check.MIN_FRESH_DAYS} and "
+                                 f"{price_check.MAX_FRESH_DAYS} days.")
+    user = User(id=profile["id"], email=profile.get("email"), token=profile["token"])
+    record = {"id": 1, "price_check_days": price_check_days, "updated_by": user.id,
+              "updated_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        await db_post(user, "app_settings", [record], upsert=True,
+                      on_conflict="id", resolution="merge-duplicates")
+    except Exception as exc:  # noqa: BLE001
+        if (migration := _pending_migration(exc)) or "app_settings" in str(getattr(exc, "detail", exc)):
+            raise HTTPException(409, f"Settings cannot be saved until the "
+                                     f"{migration or _APP_SETTINGS_MIGRATION} migration is run.") from exc
+        raise
+    return {"saved": True, "price_check_days": price_check_days}
 
 
 @app.post("/api/history/delete")

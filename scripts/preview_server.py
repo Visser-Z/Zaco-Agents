@@ -28,7 +28,10 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app import analytics, forecast, integrity, market_stock, reports, stock_book, tracking  # noqa: E402
+from app import analytics, forecast, integrity, market_stock, price_check, reports, stock_book, tracking  # noqa: E402
+
+# The business settings, kept in memory so saving one on the Settings page shows.
+APP_SETTINGS = {"price_check_days": price_check.DEFAULT_FRESH_DAYS}
 
 PAGE = ROOT / "frontend" / "index.html"
 
@@ -193,8 +196,9 @@ def api(path: str, params: dict) -> dict:
         return tracking.compute(laid, PAYMENTS, closed=set(), unsold=unsold,
                                 month=params.get("month"), week=params.get("week"))
     if path == "/api/sales-days":
-        return tracking.daily(SALES, PAYMENTS, start=params.get("from"), end=params.get("to"),
-                              month=params.get("month"), week=params.get("week"))
+        out = tracking.daily(SALES, PAYMENTS, start=params.get("from"), end=params.get("to"),
+                             month=params.get("month"), week=params.get("week"))
+        return price_check.lay_on_days(out, price_check.by_day(SALES, APP_SETTINGS["price_check_days"]))
     if path == "/api/analytics":
         month, week = params.get("month"), params.get("week")
         scoped = analytics.filter_rows(SALES, month, week)
@@ -203,6 +207,9 @@ def api(path: str, params: dict) -> dict:
         result["filter"] = {"month": month, "week": week}
         result["integrity"] = integrity.summary(scoped)
         return result
+    if path == "/api/settings/app":
+        return {**APP_SETTINGS, "updated_at": None, "migration": None,
+                "price_check_range": [price_check.MIN_FRESH_DAYS, price_check.MAX_FRESH_DAYS]}
     if path == "/api/reports/periods":
         months = sorted({(analytics.selling_day(r) or "")[:7] for r in SALES if r}, reverse=True)
         return {"periods": [{"period_month": m,
@@ -282,6 +289,14 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
     def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if urlparse(self.path).path == "/api/settings/app":
+            import re
+            found = re.search(rb'name="price_check_days"\r\n\r\n(\d+)', body)
+            if found:
+                APP_SETTINGS["price_check_days"] = price_check.fresh_days_from(found.group(1).decode())
+            self._send(200, json.dumps({"saved": True, **APP_SETTINGS}).encode(), "application/json")
+            return
         self._send(200, b"{}", "application/json")
 
 

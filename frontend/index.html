@@ -553,6 +553,30 @@
   .sm-figs { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
   .sm-paid { color: var(--ok); cursor: help; }
   .sm-owed { color: var(--warn); cursor: help; }
+  /* Sold under the market average in a consignment's first days (price_check.py). */
+  .sm-under { color: var(--crit); cursor: help; }
+  .sday-mkt.under { color: var(--crit); }
+  /* Against the market: a small button under each value, opening a block. */
+  .mk-pill { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid transparent; background: var(--accent-tint); color: var(--accent);
+    font-family: var(--sans); font-size: 10.5px; font-weight: 600; line-height: 1.5;
+    cursor: pointer; white-space: nowrap; }
+  table.sday-items .mk-pill { padding: 1px 7px; width: auto; height: auto; }
+  .mk-pill:hover, .mk-pill.on { border-color: var(--accent); }
+  .mk-pill.flag { background: var(--crit-tint); color: var(--crit); }
+  .mk-pill.flag:hover, .mk-pill.flag.on { border-color: var(--crit); }
+  .mk-pill.clear { background: var(--surface-2); color: var(--ink-faint); }
+  .mk-pill.clear:hover, .mk-pill.clear.on { border-color: var(--ink-faint); }
+  table.sday-items tr.mk-row td { padding: 0 0 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  .mk-pop { position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--accent-soft);
+    padding: 10px 34px 10px 12px; font-size: 12px; color: var(--ink-soft); white-space: normal; }
+  .mk-pop.flag { background: var(--crit-tint); border-color: color-mix(in srgb, var(--crit) 30%, var(--line)); }
+  .mk-pop .mk-big { display: block; font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+  .mk-pop .mk-big.over { color: var(--accent); }
+  .mk-pop .mk-big.under { color: var(--crit); }
+  .mk-pop p { margin: 2px 0; }
+  .mk-pop .mk-x { position: absolute; top: 6px; right: 6px; border: 0; background: none; cursor: pointer;
+    color: var(--ink-faint); font-size: 16px; line-height: 1; padding: 2px 6px; }
   table.sday-items { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
   table.sday-items col.c-n { width: 18%; }
   table.sday-items th { text-align: right; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
@@ -2289,7 +2313,7 @@ function setModule(m) {
              : m === "reports" ? S.reports : m === "procure" ? S.procure
              : m === "stock" ? S.stock : null;
   if (view) { view.data = null; view.error = null; view.loading = false; }
-  if (m === "settings") { TF.status = null; TF.editing = false; }
+  if (m === "settings") { TF.status = null; TF.editing = false; APPSET.data = null; }
   // Insights opens on its overview, with the days read fresh like the rest.
   if (m === "insights") {
     S.insights.page = null;
@@ -5225,30 +5249,9 @@ function watchStrip(w) {
         + `<span class="wq"> of ${fmtInt(w.totals.cartons_sent)} sent`
         + `${w.totals.share_unsold != null ? `, ${Math.round(w.totals.share_unsold * 100)}%` : ""}</span></div>`
       : ""}
-    ${priceBlock(w.price)}
     ${list ? `<ul class="watch-list">${list}</ul>` : ""}
     ${w.price_unverifiable ? `<div class="wnote">${esc(w.price_unverifiable)}</div>` : ""}
   </div>`;
-}
-
-/** What the produce fetched against what the market was paying for it.
- *
- *  Blank until the agent fills in the Market Avg column; every export up to
- *  July 2026 left it at zero, and the caveat above covers those periods. */
-function priceBlock(p) {
-  if (!p || !p.known) return "";
-  const share = p.share_of_market == null ? null : Math.round(p.share_of_market * 100);
-  const over = p.short_by < 0;
-  const worst = (p.concerns || []).slice(0, 5).map(c => `
-    <li><span class="wsig ${c.severity}">${Math.round(c.ratio * 100)}%</span>
-      <span><b>${fmtInt(c.cartons)} ctn</b> ${esc(c.product || "")}
-      <span class="wq">R ${fmt(c.realised)} a carton against the market's R ${fmt(c.market_avg)}
-      — R ${fmt(c.short_by)} below it</span></span></li>`).join("");
-  return `<div><span class="wl">${over ? "Above the market" : "Against the market"}</span>
-      <b>${share == null ? "—" : share + "%"}</b>
-      <span class="wq"> of the market average, over ${fmtInt(p.covered)} of ${fmtInt(p.of)} sales`
-    + `${p.flagged ? ` · ${p.flagged} line${p.flagged === 1 ? "" : "s"} R ${fmt(p.short_on_flagged)} below` : ""}</span></div>
-    ${worst ? `<ul class="watch-list">${worst}</ul>` : ""}`;
 }
 
 /** Fetch the analytics payload quietly so watch flags work off the Insights page.
@@ -5718,9 +5721,71 @@ function dayMoney(x) {
     (x.owed || 0) > 0.005 ? ` · <span class="sm-owed" title="${OWED_TIP}">R ${fmt(x.owed)} owed</span>` : ""}`;
 }
 
+/** What sold under the market average in a consignment's first days, at nett
+ *  (after the agent's cut): the money Zaco and the grower would have shared.
+ *  Empty when nothing was. The window is the Settings price check. */
+function underMarket(u, pc) {
+  if (!u || !(u.flagged > 0)) return "";
+  const share = pc && pc.assumptions ? Math.round(pc.assumptions.zaco_share * 100) : 40;
+  const tip = `Sold under the market average in the first ${pc ? pc.fresh_days : 5} days on the floor: `
+    + `R ${fmt(u.short)} before the agent's cut, R ${fmt(u.nett)} after it. Zaco's ${share}% of that is R ${fmt(u.zaco)}.`;
+  return ` · <span class="sm-under" title="${esc(tip)}">R ${fmt(u.nett)} under market</span>`;
+}
+
+/** How far over or under the market a line sold, as the button reads it. */
+function mkPct(p) {
+  if (p == null) return "";
+  if (Math.abs(p) < 0.0005) return "at market";
+  return `${Math.abs(p * 100).toFixed(1).replace(".", ",")}% ${p > 0 ? "over" : "under"}`;
+}
+
+/** The small button under a product's value: its percentage against the
+ *  market average. Blue, red when the line was flagged in its first days,
+ *  grey when it was clearance. Opens the block below the line. */
+function marketPill(x, key) {
+  const c = x.market_check;
+  if (!c || c.pct == null) return "";
+  const open = !!S.insights.days.mk?.[key];
+  const kind = c.status === "flagged" ? " flag" : c.status === "clearance" ? " clear" : "";
+  return `<button class="mk-pill${kind}${open ? " on" : ""}" onclick="toggleMarket(${q(key)})"
+    title="Against the market average. Click for the detail.">${esc(mkPct(c.pct))}</button>`;
+}
+
+/** The block a pill opens: the line against the market in full. */
+function marketBlock(x, key, pc) {
+  const c = x.market_check;
+  if (!c || c.pct == null || !S.insights.days.mk?.[key]) return "";
+  const n = pc ? pc.fresh_days : 5;
+  const share = pc && pc.assumptions ? Math.round(pc.assumptions.zaco_share * 100) : 40;
+  const over = c.diff >= 0;
+  const who = (c.agents || []).length ? `Sold by ${c.agents.join(", ")}.` : "";
+  const lines = [
+    `<p>Sold at R ${fmt(c.sold / c.priced_cartons)} a carton against the market's average of R ${fmt(c.market_avg)}, over ${fmtInt(c.priced_cartons)} cartons.</p>`,
+    `<p>That is R ${fmt(Math.abs(c.diff))} ${over ? "more" : "less"} than at the market average, R ${fmt(Math.abs(c.diff_nett))} after the agent's cut.</p>`,
+    c.status === "flagged"
+      ? `<p><b>Flagged:</b> ${fmtInt(c.cartons)} carton${c.cartons === 1 ? "" : "s"} sold under the average on day ${c.flag_day} on the floor, inside the first ${n} days.
+         R ${fmt(c.nett)} short after the agent's cut; Zaco's ${share}% of that is R ${fmt(c.zaco)}.</p>`
+      : c.status === "clearance"
+        ? `<p>Day ${c.day} on the floor: past the first ${n} days, so the agent is clearing stock and a price under the market is not flagged.</p>`
+        : "",
+    who ? `<p>${esc(who)}</p>` : "",
+  ].join("");
+  return `<tr class="mk-row"><td colspan="4"><div class="mk-pop${c.status === "flagged" ? " flag" : ""}">
+    <button class="mk-x" onclick="toggleMarket(${q(key)})" title="Close" aria-label="Close">×</button>
+    <span class="mk-big ${over ? "over" : "under"}">${esc(mkPct(c.pct))} the market average</span>${lines}</div></td></tr>`;
+}
+
+function toggleMarket(key) {
+  const D = S.insights.days;
+  D.mk = D.mk || {};
+  D.mk[key] = !D.mk[key];
+  render();
+}
+
 function salesDaysView(D) {
   if (D.loading && !D.data) return `<div class="busy"><span class="spin"></span> Loading…</div>`;
   if (!D.data) return `<p class="ins-empty">${esc(D.error || "Nothing loaded yet.")}</p>`;
+  const pc = D.data.price_check;
   const days = (D.data.sales_by_day || {}).days || [];
   const span = D.data.span || {};
   const bounds = `${span.first ? `min="${span.first}"` : ""} ${span.last ? `max="${span.last}"` : ""}`;
@@ -5733,7 +5798,7 @@ function salesDaysView(D) {
     const m = monthOf[key];
     if (!m) return "";
     return `<span class="sm-name">${esc(monthLabel(key))}</span>
-      <span class="sm-figs">R ${fmt(m.value)} sold · ${fmtInt(m.cartons)} ctn · ${dayMoney(m)} · ${
+      <span class="sm-figs">R ${fmt(m.value)} sold · ${fmtInt(m.cartons)} ctn · ${dayMoney(m)}${underMarket(m.under_market, pc)} · ${
         fmtInt(m.days)} trading day${m.days === 1 ? "" : "s"}</span>`;
   };
   const byMonth = (list, month, day) => list.map((d, i) =>
@@ -5744,7 +5809,7 @@ function salesDaysView(D) {
   const dayBlock = d => `<div class="sday">
       <div class="sday-head">
         <span class="sday-date">${esc(niceDate(d.date) || d.date)}</span>
-        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)} · ${dayMoney(d)}</span>
+        <span class="sday-tot num">${fmtInt(d.cartons)} ctn${d.returned ? ` · ${fmtInt(d.returned)} back` : ""} · R ${fmt(d.value)} · ${dayMoney(d)}${underMarket(d.under_market, pc)}</span>
       </div>
       ${(d.dated && d.dated.delivered) ? `<div class="sday-src"><span class="src warn"
           title="${fmtInt(d.dated.delivered)} of ${fmtInt(d.dated.delivered + d.dated.sold)} rows carry no sale date, so they are placed on the day their load was sent. That is an inference, not a reading.">
@@ -5758,12 +5823,17 @@ function salesDaysView(D) {
           <th title="The average the day fetched: the value divided by the cartons. Cartons on one day can go at different prices, so this will not always multiply back to the value exactly.">Avg / carton</th>
           <th>Value</th></tr></thead>
         <tbody>${d.products.map(x => {
-          const off = x.market_avg && x.price < x.market_avg * 0.7;
+          // Red when the line itself averaged under the market. A line can average
+          // above it and still hold one consignment that sold under: its block
+          // names that one, with its cartons.
+          const off = x.market_check && x.market_check.status === "flagged" && x.price < x.market_avg;
+          const key = `${d.date}|${x.product}`;
           return `<tr>
             <td class="sday-p" title="${esc(x.product)}">${esc(shortProduct(x.product))}${x.returned ? `<span class="sday-back">${fmtInt(x.returned)} back</span>` : ""}</td>
             <td class="num">${fmtInt(x.cartons)}</td>
-            <td class="num${off ? " under" : ""}">R ${fmt(x.price)}${x.market_avg ? `<span class="sday-mkt">mkt R ${fmt(x.market_avg)}</span>` : ""}</td>
-            <td class="num">R ${fmt(x.value)}</td></tr>`;
+            <td class="num${off ? " under" : ""}">R ${fmt(x.price)}</td>
+            <td class="num">R ${fmt(x.value)}${marketPill(x, key) ? `<br>${marketPill(x, key)}` : ""}</td></tr>
+            ${marketBlock(x, key, pc)}`;
         }).join("")}</tbody>
       </table>
     </div>`;
@@ -5782,7 +5852,9 @@ function salesDaysView(D) {
     : `${dayChart(days, D.chart, D.day)}
       <div class="sday-list">${byMonth(days, k => `<div class="smonth">${monthLine(k)}</div>`, dayBlock)}</div>`;
   return `<div class="days-tools">
-      <span class="trk-sum">${monthly ? `${fmtInt(Object.keys(monthOf).length)} month${Object.keys(monthOf).length === 1 ? "" : "s"} · ` : ""}${fmtInt(days.length)} trading day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons · R ${fmt(totalValue)}${ranged ? " · filtered" : ""}</span>
+      <span class="trk-sum">${monthly ? `${fmtInt(Object.keys(monthOf).length)} month${Object.keys(monthOf).length === 1 ? "" : "s"} · ` : ""}${fmtInt(days.length)} trading day${days.length === 1 ? "" : "s"} · ${fmtInt(totalCartons)} cartons · R ${fmt(totalValue)}${
+        underMarket(((D.data.sales_by_day || {}).totals || {}).under_market, pc)}${ranged ? " · filtered" : ""}${
+        pc ? ` · <a href="#" onclick="event.preventDefault(); setModule('settings')" title="Sales under the market average are flagged for this many days after a consignment first sells">flags first ${fmtInt(pc.fresh_days)} days</a>` : ""}</span>
       <span class="days-pick">
         <label class="ctl inline"><span>From</span><input type="date" value="${esc(D.from)}" ${bounds}
           onchange="setDaysRange('from', this.value)"></label>
@@ -6483,7 +6555,7 @@ function renderSettings() {
   const list = items => items.length ? `<ul class="tile-days tf-days">${items.slice(0, 7).map(tfDayLine).join("")}</ul>`
     : `<p class="ins-empty">Nothing pulled yet.</p>`;
 
-  main.innerHTML = `<section class="screen">${head}${account}
+  main.innerHTML = `<section class="screen">${head}${account}${priceCheckSettings(admin)}
     <div class="ins-tiles">
       ${tile("Pull", esc(when), `
         <div class="tf-big">${latest ? esc(tfWhen(latest)) : "Never"}</div><p class="hint">Last pull</p>
@@ -6500,6 +6572,59 @@ function renderSettings() {
       ${tile("Payments", "Payment Details", list(pays),
         `<span>${fmtInt(pays.reduce((t, d) => t + d.found, 0))} payments, last 3 weeks</span>`)}
     </div></section>`;
+}
+
+// ------------------------------------------------------- business settings
+/** Settings for the whole business (/api/settings/app). For now one: how many
+ *  days after a consignment first sells a sale under the market average is
+ *  flagged on Insights. After that the agent is clearing old stock. */
+const APPSET = { data: null, loading: false };
+
+async function loadAppSettings(force) {
+  if (!S.live || APPSET.loading || (APPSET.data && !force)) return;
+  APPSET.loading = true;
+  try { APPSET.data = await (await api("/api/settings/app")).json(); }
+  catch { APPSET.data = { failed: true }; }
+  APPSET.loading = false;
+  if (!S.busy && S.module === "settings") render();
+}
+
+function priceCheckSettings(admin) {
+  if (!APPSET.data) { loadAppSettings(); return ""; }
+  const s = APPSET.data;
+  if (s.failed) return "";
+  const [lo, hi] = s.price_check_range || [1, 30];
+  const n = s.price_check_days;
+  const body = admin && !s.migration
+    ? `<form class="tf-form" onsubmit="event.preventDefault(); saveAppSettings(this)">
+        <div class="field"><label>Flag sales under the market average for the first</label>
+          <div style="display:flex; align-items:center; gap:8px">
+            <input class="input" name="price_check_days" type="number" min="${lo}" max="${hi}" step="1"
+              value="${esc(String(n))}" required style="width:90px"> <span>days on the floor</span></div></div>
+        <div class="tf-actions"><button class="btn primary" type="submit">Save</button></div>
+      </form>`
+    : `<dl class="tf-facts"><div><dt>Flags under the market for</dt><dd>the first ${fmtInt(n)} day${n === 1 ? "" : "s"}</dd></div></dl>`;
+  return `<div class="card tf-account">
+    <div class="tile-head"><h2>Price check</h2></div>
+    <div class="tile-body">${body}
+      <p class="hint">Sales per day on Insights compares every sale with the market's own average for that product that day. A sale under it
+        in a consignment's first days is flagged, with the money it fell short by. After that the agent is clearing old stock,
+        which normally goes under the average, so it is not flagged.</p>
+      ${s.migration ? `<p class="hint tf-bad">Using ${fmtInt(n)} days. To change it, run the ${esc(s.migration)} migration first.</p>` : ""}
+    </div></div>`;
+}
+
+async function saveAppSettings(form) {
+  const fd = new FormData(form);
+  try {
+    await withBusy("Saving…", async () => {
+      await api("/api/settings/app", { method: "POST", body: fd });
+      toast(`Price check now flags the first ${fd.get("price_check_days")} days`);
+    });
+  } catch { return; }  // withBusy has already said why
+  // Sales per day computed its flags with the old window; read them again on next visit.
+  if (S.insights && S.insights.days) S.insights.days.data = null;
+  await loadAppSettings(true);
 }
 
 async function saveTechnofresh(form) {
